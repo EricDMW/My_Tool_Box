@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="plotkit",
+    name="toolkit",
     version="0.1.0",
     description="A simple, extensible plotting toolkit for RL and research.",
     author="Dongming Wang",
