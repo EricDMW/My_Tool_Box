@@ -6,7 +6,8 @@ Tests all plotting functions with various input formats and research-quality sty
 
 import numpy as np
 import matplotlib.pyplot as plt
-import plotkit
+import toolkit
+import toolkit.plotkit as plotkit
 
 def test_shadow_curves():
     """Test shadow curve functionality with various input formats."""
@@ -348,7 +349,7 @@ def test_error_handling():
 def main():
     """Run all tests."""
     print("=" * 60)
-    print("PLOTKIT COMPREHENSIVE TEST SUITE")
+    print("plotkit COMPREHENSIVE TEST SUITE")
     print("=" * 60)
     
     # Run all tests
