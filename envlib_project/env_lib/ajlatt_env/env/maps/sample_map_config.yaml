@@ -1,0 +1,123 @@
+# Comprehensive Map Configuration for AJLATT Environment
+# This file contains all map information including boundaries, shapes, sizes, and locations
+datatype: t
+mapdim: [181, 181]
+mapmax: [36.2, 36.2]
+mapmin: [0.0, 0.0]
+mappath: sample_map_config.cfg
+mapres: [0.2, 0.2]
+origin: [18.1, 18.1] #Location SE2
+origincells: [90, 90]
+storage: colmajor
+
+map_info:
+  name: "sample_map_config"
+  width: 72.4          # Map width in meters
+  height: 72.4         # Map height in meters
+  resolution: 0.4      # Grid resolution in meters (0.4m per cell)
+  
+  # Boundary configuration
+  boundary:
+    enabled: true      # Whether to add boundary walls
+    thickness: 0.4     # Boundary wall thickness in meters
+    style: "rectangle" # Boundary style: "rectangle", "circle", "polygon"
+    
+    # For rectangular boundary (default)
+    rectangle:
+      margin: 0.0      # Margin from map edges in meters
+    
+    # For circular boundary
+    circle:
+      center: [36.2, 36.2]  # Center of circular boundary
+      radius: 35.0          # Radius of circular boundary
+    
+    # For polygon boundary
+    polygon:
+      points: [[0, 0], [72.4, 0], [72.4, 72.4], [0, 72.4]]  # Polygon vertices
+
+obstacles:
+  # Rectangular obstacles
+  - type: "rectangle"
+    center: [20.0, 20.0]     # Center coordinates [x, y] in meters
+    width: 12.0              # Width in meters
+    height: 6.0              # Height in meters
+    angle: 0.0               # Rotation angle in radians (0 = no rotation)
+    filled: true             # Whether the rectangle is filled
+    
+  - type: "rectangle"
+    center: [50.0, 40.0]
+    width: 8.0
+    height: 12.0
+    angle: 0.785             # 45 degrees (π/4)
+    filled: true
+  
+  # Circular obstacles
+  - type: "circle"
+    center: [10.0, 10.0]     # Center coordinates [x, y] in meters
+    radius: 3.0              # Radius in meters
+    filled: true             # Whether the circle is filled
+  
+  - type: "circle"
+    center: [60.0, 60.0]
+    radius: 5.0
+    filled: true
+  
+  # Triangular obstacles
+  - type: "triangle"
+    vertices: [[15.0, 50.0], [25.0, 50.0], [20.0, 60.0]]  # Three vertices [x, y]
+    filled: true
+  
+  - type: "triangle"
+    vertices: [[45.0, 15.0], [55.0, 15.0], [50.0, 25.0]]
+    filled: true
+  
+  # Hexagonal obstacles
+  - type: "hexagon"
+    center: [30.0, 30.0]     # Center coordinates [x, y] in meters
+    radius: 4.0              # Radius (distance from center to vertices)
+    angle: 0.0               # Rotation angle in radians
+    filled: true
+  
+  - type: "hexagon"
+    center: [55.0, 25.0]
+    radius: 3.0
+    angle: 0.523             # 30 degrees (π/6)
+    filled: true
+  
+  # # Line obstacles
+  # - type: "line"
+  #   start: [0.0, 30.0]       # Start point [x, y] in meters
+  #   end: [50.0, 30.0]        # End point [x, y] in meters
+  #   width: 0.5               # Line width in meters
+  
+  # - type: "line"
+  #   start: [40.0, 0.0]
+  #   end: [40.0, 40.0]
+  #   width: 0.8
+  
+  # Polygon obstacles (custom shapes)
+  - type: "polygon"
+    points: [[5.0, 5.0], [15.0, 5.0], [15.0, 15.0], [10.0, 20.0], [5.0, 15.0]]
+    filled: true
+  
+  - type: "polygon"
+    points: [[65.0, 65.0], [70.0, 65.0], [70.0, 70.0], [65.0, 70.0]]
+    filled: true
+  
+  # # Maze pattern
+  # - type: "maze"
+  #   cell_size: 8.0           # Size of each maze cell in meters
+  #   wall_thickness: 0.5      # Wall thickness in meters
+  #   start_position: [2.0, 2.0]  # Start position for maze generation
+  #   gaps:                    # Gaps in the maze walls
+  #     - type: "horizontal"
+  #       position: 20         # Grid position of the gap
+  #     - type: "vertical"
+  #       position: 25
+  
+  # # Random obstacles
+  # - type: "random"
+  #   num_obstacles: 3         # Number of random obstacles
+  #   min_size: 1.0           # Minimum obstacle size in meters
+  #   max_size: 3.0           # Maximum obstacle size in meters
+  #   seed: 42                # Random seed for reproducibility

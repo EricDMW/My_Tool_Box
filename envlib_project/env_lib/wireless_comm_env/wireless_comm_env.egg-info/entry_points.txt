@@ -1,0 +1,2 @@
+[gymnasium.envs]
+wireless_comm_env = wireless_comm_env.__init__:register

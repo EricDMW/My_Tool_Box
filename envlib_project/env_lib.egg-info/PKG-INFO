@@ -1,0 +1,24 @@
+Metadata-Version: 2.4
+Name: env_lib
+Version: 0.1.0
+Summary: A collection of multi-agent RL environments: kos_env, linemsg_env, pistonball_env, wireless_comm_env.
+Author: Dongming Wang
+Author-email: wdong025@ucr.edu
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.7
+Requires-Dist: gymnasium
+Requires-Dist: numpy
+Requires-Dist: matplotlib
+Requires-Dist: torch
+Requires-Dist: torchvision
+Requires-Dist: torchaudio
+Requires-Dist: gymnasium
+Requires-Dist: gymnasium-robotics
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary

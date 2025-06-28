@@ -1,0 +1,9 @@
+gymnasium>=0.28.0
+pygame>=2.0.0
+pymunk>=6.0.0
+numpy>=1.20.0
+
+[dev]
+pytest>=6.0.0
+black>=21.0.0
+flake8>=3.8.0
