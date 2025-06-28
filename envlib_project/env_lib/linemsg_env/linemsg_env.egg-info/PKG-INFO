@@ -1,0 +1,31 @@
+Metadata-Version: 2.4
+Name: linemsg_env
+Version: 0.1.0
+Summary: A standard gym environment for multi-agent line message passing
+Author: DSDP Team
+Project-URL: Source, https://github.com/your-repo/linemsg_env
+Project-URL: Documentation, https://github.com/your-repo/linemsg_env#readme
+Keywords: reinforcement-learning multi-agent gymnasium environment
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Requires-Python: >=3.7
+Requires-Dist: numpy>=1.19.0
+Requires-Dist: gymnasium>=0.28.0
+Provides-Extra: dev
+Requires-Dist: pytest>=6.0; extra == "dev"
+Requires-Dist: pytest-cov>=2.0; extra == "dev"
+Dynamic: author
+Dynamic: classifier
+Dynamic: keywords
+Dynamic: project-url
+Dynamic: provides-extra
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary

@@ -1,0 +1,12 @@
+MANIFEST.in
+README.md
+README_KURAMOTO_IMPLEMENTATION.md
+requirements.txt
+setup.py
+kos_env.egg-info/PKG-INFO
+kos_env.egg-info/SOURCES.txt
+kos_env.egg-info/dependency_links.txt
+kos_env.egg-info/entry_points.txt
+kos_env.egg-info/not-zip-safe
+kos_env.egg-info/requires.txt
+kos_env.egg-info/top_level.txt

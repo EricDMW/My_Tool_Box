@@ -1,0 +1,9 @@
+datatype: t                    # Data type (usually 't' for text)
+mapdim: [181, 181]            # Map dimensions [rows, columns]
+mapmax: [72.4, 72.4]          # Maximum coordinates [x_max, y_max]
+mapmin: [0.0, 0.0]            # Minimum coordinates [x_min, y_min]
+mappath: my_static_map.cfg     # Path to the CFG file (without extension)
+mapres: [0.4, 0.4]            # Map resolution [x_res, y_res]
+origin: [36.2, 36.2]          # Origin coordinates [x, y]
+origincells: [90, 90]         # Origin in cell coordinates [row, col]
+storage: colmajor             # Storage format

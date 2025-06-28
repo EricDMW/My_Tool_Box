@@ -1,0 +1,9 @@
+setup.py
+plotkit/__init__.py
+plotkit/__main__.py
+plotkit/core.py
+toolkit.egg-info/PKG-INFO
+toolkit.egg-info/SOURCES.txt
+toolkit.egg-info/dependency_links.txt
+toolkit.egg-info/requires.txt
+toolkit.egg-info/top_level.txt

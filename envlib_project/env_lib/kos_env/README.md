@@ -1,0 +1,929 @@
+# Kuramoto Oscillator Synchronization Environment
+
+A comprehensive Gymnasium environment for simulating and controlling Kuramoto oscillator synchronization dynamics, featuring both NumPy and PyTorch implementations with support for fixed and dynamic coupling matrices, multiple network topologies, and advanced control strategies.
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Mathematical Foundation](#mathematical-foundation)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Coupling Matrix Modes](#coupling-matrix-modes)
+- [Network Topologies](#network-topologies)
+- [Environment Variants](#environment-variants)
+- [Detailed Usage Examples](#detailed-usage-examples)
+- [Advanced Features](#advanced-features)
+- [Performance Optimization](#performance-optimization)
+- [Research Applications](#research-applications)
+- [API Reference](#api-reference)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+
+## Overview
+
+The Kuramoto model is a fundamental mathematical framework for understanding synchronization phenomena in coupled oscillator systems. This environment provides a comprehensive implementation for reinforcement learning research, control theory applications, and complex systems studies.
+
+### What is the Kuramoto Model?
+
+The Kuramoto model describes the collective behavior of a population of coupled oscillators, where each oscillator has its own natural frequency and interacts with others through coupling strengths. The model captures essential features of synchronization phenomena observed in:
+
+- **Neural Networks**: Brain rhythms and neural synchronization
+- **Power Grids**: Frequency synchronization in electrical networks
+- **Chemical Oscillators**: Belousov-Zhabotinsky reactions
+- **Social Systems**: Collective behavior and opinion dynamics
+- **Biological Systems**: Circadian rhythms and cardiac pacemakers
+
+### Environment Implementations
+
+1. **NumPy-based Environment** (`KuramotoOscillatorEnv`): 
+   - Single-agent scenarios
+   - CPU-optimized for research and prototyping
+   - Full support for both coupling modes
+
+2. **PyTorch-based Environment** (`KuramotoOscillatorEnvTorch`):
+   - Multi-agent support with batch processing
+   - GPU acceleration capabilities
+   - Advanced integration methods
+   - Real-time tensor operations
+
+## Key Features
+
+### 🔧 Core Capabilities
+- **Dual Coupling Modes**: Dynamic (action-controlled) and Constant (fixed matrix)
+- **Multiple Network Topologies**: Fully connected, ring, star, random, and custom
+- **Advanced Integration**: Euler and 4th-order Runge-Kutta methods
+- **Flexible Reward Functions**: Order parameter, phase coherence, combined, and frequency synchronization
+- **Noise Support**: Configurable stochastic dynamics
+- **Real-time Visualization**: Live phase evolution and synchronization metrics
+
+### 🚀 PyTorch Environment Features
+- **Multi-agent Support**: Simulate multiple oscillator systems simultaneously
+- **Device Control**: Seamless CPU/GPU switching
+- **Batch Processing**: Efficient parallel computation
+- **Memory Optimization**: Tensor operations throughout
+- **Scalable Architecture**: Handle hundreds of agents efficiently
+
+### 🎯 Control and Learning
+- **Action Space Flexibility**: Control coupling strengths and/or external inputs
+- **Observation Richness**: Complete system state information
+- **Reward Shaping**: Multiple synchronization measures
+- **Episode Control**: Configurable termination conditions
+
+## Mathematical Foundation
+
+### Basic Kuramoto Model
+
+The fundamental Kuramoto equation for oscillator \(i\) is:
+
+```
+dθᵢ/dt = ωᵢ + (1/N) * Σⱼ Kᵢⱼ sin(θⱼ - θᵢ)
+```
+
+where:
+- \(θᵢ\) is the phase of oscillator \(i\)
+- \(ωᵢ\) is the natural frequency of oscillator \(i\)
+- \(Kᵢⱼ\) is the coupling strength between oscillators \(i\) and \(j\)
+- \(N\) is the number of oscillators
+
+### Extended Model with Control
+
+Our implementation extends the basic model to include external control:
+
+```
+dθᵢ/dt = ωᵢ + aᵢ(t) + (1/N) * Σⱼ Kᵢⱼ(t) sin(θⱼ - θᵢ) + εᵢ(t)
+```
+
+where:
+- \(aᵢ(t)\) is the external control input
+- \(Kᵢⱼ(t)\) is the time-varying coupling strength
+- \(εᵢ(t)\) is the noise term
+
+### Synchronization Measures
+
+#### Order Parameter
+The most common measure of synchronization:
+
+```
+r = |(1/N) * Σⱼ exp(iθⱼ)|
+```
+
+- \(r = 0\): Complete desynchronization
+- \(r = 1\): Perfect synchronization
+
+#### Phase Coherence
+Alternative measure based on phase variance:
+
+```
+C = 1 - (1/π²) * Var(θ)
+```
+
+#### Frequency Synchronization
+Measures synchronization to a target frequency:
+
+```
+F = -|ω_avg - ω_target|
+```
+
+## Installation
+
+### Prerequisites
+- Python 3.8 or higher
+- Gymnasium 0.29.0 or higher
+- NumPy 1.21.0 or higher
+- Matplotlib 3.5.0 or higher
+- PyTorch 1.12.0 or higher (for PyTorch environment)
+
+### Quick Installation
+
+```bash
+# Navigate to the kos_env directory
+cd env_lib/kos_env
+
+# Install in development mode
+pip install -e .
+
+# Or use the installation script
+./install.sh
+```
+
+### Verify Installation
+
+```bash
+# Run the test script
+python test_setup.py
+```
+
+## Quick Start
+
+### Basic Usage
+
+```python
+import gymnasium as gym
+
+# Create a basic environment
+env = gym.make('KuramotoOscillator-v0')
+
+# Reset and run
+obs, info = env.reset(seed=42)
+for step in range(100):
+    action = env.action_space.sample()
+    obs, reward, done, truncated, info = env.step(action)
+    if done:
+        break
+env.close()
+```
+
+### PyTorch Environment
+
+```python
+import gymnasium as gym
+import torch
+
+# Create multi-agent environment
+env = gym.make('KuramotoOscillatorTorch-v1')  # 4 agents, 8 oscillators
+
+# Get batch observations
+batch_obs = env.get_batch_observations()  # Shape: (4, obs_dim)
+print(f"Batch shape: {batch_obs.shape}, Device: {batch_obs.device}")
+```
+
+## Coupling Matrix Modes
+
+The environment supports two distinct coupling modes, each with different action spaces and control strategies.
+
+### 1. Dynamic Coupling Mode
+
+In dynamic mode, the coupling strengths between oscillators are controlled by the agent's actions, allowing for adaptive network topology optimization.
+
+#### Action Space
+```
+Action = [control_inputs, coupling_strengths]
+Shape: (n_oscillators + n_couplings,)
+```
+
+- **Control Inputs**: External forces applied to each oscillator
+- **Coupling Strengths**: Connection weights between oscillator pairs
+
+#### Example Usage
+
+```python
+import gymnasium as gym
+import numpy as np
+
+# Create environment with dynamic coupling
+env = gym.make('KuramotoOscillator-v0')  # Default: dynamic mode
+
+print(f"Action space: {env.action_space.shape}")
+# Output: (55,) for 10 oscillators (10 control + 45 couplings)
+
+# Take action
+action = env.action_space.sample()
+obs, reward, done, truncated, info = env.step(action)
+
+print(f"Order parameter: {info['order_parameter']:.3f}")
+print(f"Coupling matrix shape: {info['coupling_matrix'].shape}")
+```
+
+#### Advantages
+- **Adaptive Control**: Optimize network topology in real-time
+- **Learning Opportunities**: Discover optimal coupling patterns
+- **Flexible Strategies**: Different coupling for different scenarios
+
+### 2. Constant Coupling Mode
+
+In constant mode, the coupling matrix is fixed throughout the episode, and the agent only controls external inputs to the oscillators.
+
+#### Action Space
+```
+Action = [control_inputs]
+Shape: (n_oscillators,)
+```
+
+#### Example Usage
+
+```python
+import gymnasium as gym
+import numpy as np
+
+# Create constant coupling matrix
+n_oscillators = 6
+constant_matrix = np.array([
+    [0, 2, 1, 0, 0, 1],
+    [2, 0, 2, 1, 0, 0],
+    [1, 2, 0, 2, 1, 0],
+    [0, 1, 2, 0, 2, 1],
+    [0, 0, 1, 2, 0, 2],
+    [1, 0, 0, 1, 2, 0]
+])
+
+# Create environment with constant coupling
+env = gym.make('KuramotoOscillator-Constant-v0', 
+               constant_coupling_matrix=constant_matrix)
+
+print(f"Action space: {env.action_space.shape}")
+# Output: (6,) - only control inputs
+
+# Take action
+action = env.action_space.sample()
+obs, reward, done, truncated, info = env.step(action)
+```
+
+#### Advantages
+- **Simplified Control**: Focus on oscillator control, not topology
+- **Fixed Topology**: Study specific network structures
+- **Reduced Complexity**: Smaller action space for easier learning
+
+### Mode Comparison
+
+| Feature | Dynamic Mode | Constant Mode |
+|---------|-------------|---------------|
+| Action Space | Control + Coupling | Control Only |
+| Complexity | High | Low |
+| Flexibility | Maximum | Limited |
+| Learning Focus | Topology + Control | Control Only |
+| Use Cases | Research, Optimization | Education, Specific Studies |
+
+## Network Topologies
+
+The environment supports multiple network topologies, each with different synchronization characteristics.
+
+### 1. Fully Connected (Default)
+All oscillators are connected to each other with equal coupling strength.
+
+```python
+# Default topology
+env = gym.make('KuramotoOscillator-v0')
+```
+
+**Characteristics:**
+- Maximum connectivity
+- Fastest synchronization
+- Highest coupling complexity
+
+### 2. Ring Topology
+Each oscillator is connected to its immediate neighbors in a ring structure.
+
+```python
+env = KuramotoOscillatorEnvTorch(
+    n_oscillators=8,
+    topology="ring",
+    coupling_mode="dynamic"
+)
+```
+
+**Characteristics:**
+- Minimal connectivity
+- Slower synchronization
+- Wave-like phase propagation
+
+### 3. Star Topology
+One central oscillator is connected to all others, which are not connected to each other.
+
+```python
+env = KuramotoOscillatorEnvTorch(
+    n_oscillators=8,
+    topology="star",
+    coupling_mode="dynamic"
+)
+```
+
+**Characteristics:**
+- Centralized control
+- Hub-and-spoke structure
+- Central oscillator dominance
+
+### 4. Random Topology
+Random connections with 50% probability, ensuring symmetry.
+
+```python
+env = KuramotoOscillatorEnvTorch(
+    n_oscillators=8,
+    topology="random",
+    coupling_mode="dynamic"
+)
+```
+
+**Characteristics:**
+- Unpredictable connectivity
+- Variable synchronization
+- Realistic network modeling
+
+### 5. Custom Topology
+Define your own adjacency matrix for specialized studies.
+
+```python
+# Create custom adjacency matrix
+custom_matrix = np.array([
+    [0, 1, 1, 0],
+    [1, 0, 0, 1],
+    [1, 0, 0, 1],
+    [0, 1, 1, 0]
+])
+
+env = KuramotoOscillatorEnvTorch(
+    n_oscillators=4,
+    adj_matrix=custom_matrix,
+    coupling_mode="dynamic"
+)
+```
+
+## Environment Variants
+
+The package provides multiple pre-configured environments for different use cases.
+
+### NumPy-based Environments
+
+```python
+# Standard environment
+env = gym.make('KuramotoOscillator-v0')  # 10 oscillators, dynamic coupling
+
+# Simplified environment
+env = gym.make('KuramotoOscillator-v1')  # 5 oscillators, dynamic coupling
+
+# Constant coupling environment
+env = gym.make('KuramotoOscillator-Constant-v0')  # 6 oscillators, constant coupling
+
+# Frequency synchronization with constant coupling
+env = gym.make('KuramotoOscillator-FreqSync-Constant-v0')  # Target frequency 2.0
+```
+
+### PyTorch-based Environments
+
+```python
+# Standard PyTorch environment
+env = gym.make('KuramotoOscillatorTorch-v0')  # 10 oscillators, 1 agent
+
+# Multi-agent environment
+env = gym.make('KuramotoOscillatorTorch-v1')  # 8 oscillators, 4 agents
+
+# GPU-optimized environment
+env = gym.make('KuramotoOscillatorTorch-v2')  # 10 oscillators, GPU, RK4 integration
+
+# Constant coupling PyTorch environment
+env = gym.make('KuramotoOscillatorTorch-Constant-v0')
+
+# Frequency synchronization PyTorch environment
+env = gym.make('KuramotoOscillatorTorch-FreqSync-Constant-v0')
+```
+
+## Detailed Usage Examples
+
+### Example 1: Dynamic Coupling Control
+
+```python
+import gymnasium as gym
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Create environment
+env = gym.make('KuramotoOscillator-v0', render_mode="human")
+
+# Initialize
+obs, info = env.reset(seed=42)
+order_params = []
+rewards = []
+
+# Run episode with intelligent coupling control
+for step in range(200):
+    # Simple heuristic: increase coupling for desynchronized oscillators
+    current_phases = obs[:env.n_oscillators]
+    phase_diffs = np.abs(np.diff(current_phases))
+    
+    # Create action: control inputs + coupling strengths
+    control_inputs = np.zeros(env.n_oscillators)
+    coupling_strengths = np.ones(env.n_couplings) * 2.0
+    
+    # Adjust coupling based on phase differences
+    coupling_idx = 0
+    for i in range(env.n_oscillators):
+        for j in range(i+1, env.n_oscillators):
+            phase_diff = abs(current_phases[i] - current_phases[j])
+            if phase_diff > np.pi/2:  # Large phase difference
+                coupling_strengths[coupling_idx] = 4.0  # Stronger coupling
+            coupling_idx += 1
+    
+    action = np.concatenate([control_inputs, coupling_strengths])
+    
+    # Take step
+    obs, reward, done, truncated, info = env.step(action)
+    order_params.append(info['order_parameter'])
+    rewards.append(reward)
+    
+    if done:
+        break
+
+env.close()
+
+# Plot results
+plt.figure(figsize=(12, 4))
+plt.subplot(1, 2, 1)
+plt.plot(order_params)
+plt.title('Order Parameter Evolution')
+plt.xlabel('Step')
+plt.ylabel('Order Parameter')
+
+plt.subplot(1, 2, 2)
+plt.plot(rewards)
+plt.title('Reward Evolution')
+plt.xlabel('Step')
+plt.ylabel('Reward')
+plt.tight_layout()
+plt.show()
+```
+
+### Example 2: Constant Coupling with External Control
+
+```python
+import gymnasium as gym
+import numpy as np
+
+# Create constant coupling matrix (ring topology)
+n_oscillators = 6
+constant_matrix = np.zeros((n_oscillators, n_oscillators))
+for i in range(n_oscillators):
+    constant_matrix[i, (i-1) % n_oscillators] = 2.0
+    constant_matrix[i, (i+1) % n_oscillators] = 2.0
+
+# Create environment
+env = gym.make('KuramotoOscillator-Constant-v0',
+               constant_coupling_matrix=constant_matrix)
+
+obs, info = env.reset(seed=42)
+total_reward = 0
+
+# Run episode with external control only
+for step in range(100):
+    # Simple control strategy: push oscillators toward average phase
+    phases = obs[:n_oscillators]
+    avg_phase = np.mean(phases)
+    
+    # Control inputs: push toward average
+    control_inputs = 0.5 * np.sin(avg_phase - phases)
+    
+    # Take action (only control inputs in constant mode)
+    obs, reward, done, truncated, info = env.step(control_inputs)
+    total_reward += reward
+    
+    if step % 20 == 0:
+        print(f"Step {step}: Order Param = {info['order_parameter']:.3f}, "
+              f"Reward = {reward:.3f}")
+    
+    if done:
+        break
+
+print(f"Total reward: {total_reward:.3f}")
+env.close()
+```
+
+### Example 3: Multi-Agent PyTorch Environment
+
+```python
+import gymnasium as gym
+import torch
+import numpy as np
+
+# Create multi-agent environment
+env = gym.make('KuramotoOscillatorTorch-v1')  # 4 agents, 8 oscillators
+
+obs, info = env.reset(seed=42)
+
+# Get batch information
+batch_obs = env.get_batch_observations()  # Shape: (4, obs_dim)
+print(f"Batch observations shape: {batch_obs.shape}")
+print(f"Device: {batch_obs.device}")
+
+# Run episode
+for step in range(100):
+    # Take random actions for all agents
+    action = env.action_space.sample()
+    obs, reward, done, truncated, info = env.step(action)
+    
+    # Get batch rewards
+    batch_rewards = env.get_batch_rewards()
+    print(f"Step {step}: Mean reward = {batch_rewards.mean().item():.3f}, "
+          f"Std reward = {batch_rewards.std().item():.3f}")
+    
+    if done:
+        break
+
+env.close()
+```
+
+### Example 4: Frequency Synchronization
+
+```python
+import gymnasium as gym
+import numpy as np
+
+# Create frequency synchronization environment
+env = gym.make('KuramotoOscillator-FreqSync-Constant-v0')
+
+obs, info = env.reset(seed=42)
+target_freq = 2.0
+
+print(f"Target frequency: {target_freq}")
+print(f"Initial natural frequencies: {obs[env.n_oscillators:2*env.n_oscillators]}")
+
+# Run episode
+for step in range(100):
+    # Control strategy: push oscillators toward target frequency
+    natural_freqs = obs[env.n_oscillators:2*env.n_oscillators]
+    freq_errors = target_freq - natural_freqs
+    
+    # Control inputs based on frequency error
+    control_inputs = 0.1 * freq_errors
+    
+    obs, reward, done, truncated, info = env.step(control_inputs)
+    
+    if step % 20 == 0:
+        print(f"Step {step}: Reward = {reward:.3f}, "
+              f"Avg freq = {np.mean(natural_freqs):.3f}")
+    
+    if done:
+        break
+
+env.close()
+```
+
+## Advanced Features
+
+### Integration Methods
+
+The PyTorch environment supports multiple integration methods:
+
+```python
+# Euler integration (fast, less accurate)
+env = KuramotoOscillatorEnvTorch(
+    n_oscillators=10,
+    integration_method="euler",
+    dt=0.01
+)
+
+# 4th-order Runge-Kutta (accurate, slower)
+env = KuramotoOscillatorEnvTorch(
+    n_oscillators=10,
+    integration_method="rk4",
+    dt=0.01
+)
+```
+
+### Noise and Stochasticity
+
+Add noise to the dynamics for more realistic modeling:
+
+```python
+env = KuramotoOscillatorEnvTorch(
+    n_oscillators=10,
+    noise_std=0.01,  # Standard deviation of noise
+    coupling_mode="dynamic"
+)
+```
+
+### Reward Function Types
+
+Choose from multiple reward functions:
+
+```python
+# Order parameter reward
+env = KuramotoOscillatorEnvTorch(reward_type="order_parameter")
+
+# Phase coherence reward
+env = KuramotoOscillatorEnvTorch(reward_type="phase_coherence")
+
+# Combined reward
+env = KuramotoOscillatorEnvTorch(reward_type="combined")
+
+# Frequency synchronization reward
+env = KuramotoOscillatorEnvTorch(
+    reward_type="frequency_synchronization",
+    target_frequency=2.0
+)
+```
+
+### Custom Coupling Matrices
+
+Create specialized coupling patterns:
+
+```python
+# Two-cluster coupling
+n_oscillators = 8
+coupling_matrix = np.zeros((n_oscillators, n_oscillators))
+
+# Strong coupling within clusters
+coupling_matrix[:4, :4] = 3.0  # First cluster
+coupling_matrix[4:, 4:] = 3.0  # Second cluster
+
+# Weak coupling between clusters
+coupling_matrix[:4, 4:] = 0.5
+coupling_matrix[4:, :4] = 0.5
+
+# No self-coupling
+np.fill_diagonal(coupling_matrix, 0)
+
+env = KuramotoOscillatorEnvTorch(
+    n_oscillators=n_oscillators,
+    coupling_mode="constant",
+    constant_coupling_matrix=coupling_matrix
+)
+```
+
+## Performance Optimization
+
+### GPU Acceleration
+
+```python
+import torch
+
+# Check GPU availability
+device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"Using device: {device}")
+
+# Create GPU-optimized environment
+env = KuramotoOscillatorEnvTorch(
+    n_oscillators=20,
+    n_agents=16,
+    device=device,
+    integration_method="rk4"
+)
+
+# All tensors are automatically on GPU
+batch_obs = env.get_batch_observations()
+print(f"Observations device: {batch_obs.device}")
+```
+
+### Multi-Agent Scaling
+
+```python
+# Scale to many agents for efficient training
+env = KuramotoOscillatorEnvTorch(
+    n_oscillators=10,
+    n_agents=32,  # 32 parallel systems
+    device="cuda"
+)
+
+# Efficient batch processing
+batch_obs = env.get_batch_observations()  # Shape: (32, obs_dim)
+batch_rewards = env.get_batch_rewards()   # Shape: (32,)
+```
+
+### Memory Management
+
+```python
+# For large-scale simulations
+env = KuramotoOscillatorEnvTorch(
+    n_oscillators=50,
+    n_agents=64,
+    device="cuda",
+    integration_method="euler"  # Faster for large systems
+)
+
+# Monitor memory usage
+if torch.cuda.is_available():
+    print(f"GPU memory allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+```
+
+## Research Applications
+
+This environment is designed for various research applications:
+
+### 1. Reinforcement Learning
+- **Multi-Agent Learning**: Study collective behavior emergence
+- **Hierarchical Control**: Learn coordination strategies
+- **Transfer Learning**: Apply learned policies across topologies
+
+### 2. Control Theory
+- **Optimal Control**: Find minimum energy synchronization strategies
+- **Robust Control**: Handle noise and parameter uncertainties
+- **Adaptive Control**: Adjust to changing network topologies
+
+### 3. Complex Systems
+- **Phase Transitions**: Study synchronization onset
+- **Critical Phenomena**: Analyze coupling strength thresholds
+- **Emergent Behavior**: Understand collective dynamics
+
+### 4. Neuroscience
+- **Neural Synchronization**: Model brain rhythms
+- **Network Plasticity**: Study learning in neural networks
+- **Pathological States**: Investigate synchronization disorders
+
+### 5. Physics
+- **Statistical Mechanics**: Study order-disorder transitions
+- **Nonlinear Dynamics**: Analyze chaotic behavior
+- **Collective Phenomena**: Understand emergent properties
+
+## API Reference
+
+### Environment Classes
+
+#### KuramotoOscillatorEnv (NumPy)
+
+```python
+class KuramotoOscillatorEnv(gym.Env):
+    def __init__(self,
+                 n_oscillators: int = 10,
+                 dt: float = 0.01,
+                 max_steps: int = 1000,
+                 coupling_range: Tuple[float, float] = (0.0, 5.0),
+                 control_input_range: Tuple[float, float] = (-1.0, 1.0),
+                 natural_freq_range: Tuple[float, float] = (0.5, 2.0),
+                 noise_std: float = 0.0,
+                 reward_type: str = "order_parameter",
+                 target_frequency: float = 1.0,
+                 adj_matrix: Optional[np.ndarray] = None,
+                 render_mode: Optional[str] = None,
+                 coupling_mode: str = "dynamic",
+                 constant_coupling_matrix: Optional[np.ndarray] = None):
+```
+
+#### KuramotoOscillatorEnvTorch (PyTorch)
+
+```python
+class KuramotoOscillatorEnvTorch(gym.Env):
+    def __init__(self,
+                 n_oscillators: int = 10,
+                 n_agents: int = 1,
+                 dt: float = 0.01,
+                 max_steps: int = 1000,
+                 coupling_range: Tuple[float, float] = (0.0, 5.0),
+                 control_input_range: Tuple[float, float] = (-1.0, 1.0),
+                 natural_freq_range: Tuple[float, float] = (0.5, 2.0),
+                 device: str = "cpu",
+                 render_mode: Optional[str] = None,
+                 integration_method: str = "euler",
+                 reward_type: str = "order_parameter",
+                 noise_std: float = 0.0,
+                 topology: str = "fully_connected",
+                 adj_matrix: Optional[Union[np.ndarray, torch.Tensor]] = None,
+                 target_frequency: float = 1.0,
+                 coupling_mode: str = "dynamic",
+                 constant_coupling_matrix: Optional[Union[np.ndarray, torch.Tensor]] = None):
+```
+
+### Key Methods
+
+#### Standard Gymnasium Methods
+- `reset(seed=None, options=None)`: Reset environment
+- `step(action)`: Take action and return (obs, reward, done, truncated, info)
+- `render()`: Render current state
+- `close()`: Clean up resources
+
+#### PyTorch-Specific Methods
+- `get_batch_observations()`: Get observations for all agents
+- `get_batch_rewards()`: Get rewards for all agents
+
+### Action and Observation Spaces
+
+#### Dynamic Coupling Mode
+- **Action Space**: `Box(low=[control_low, coupling_low], high=[control_high, coupling_high])`
+- **Observation Space**: `Box(low=-inf, high=inf, shape=(3*N + N*(N-1)/2,))`
+
+#### Constant Coupling Mode
+- **Action Space**: `Box(low=control_low, high=control_high, shape=(N,))`
+- **Observation Space**: `Box(low=-inf, high=inf, shape=(3*N,))`
+
+### Info Dictionary
+
+The `info` dictionary contains:
+- `order_parameter`: Current synchronization measure
+- `phase_coherence`: Alternative synchronization measure
+- `coupling_matrix`: Current coupling matrix (dynamic mode)
+- `natural_frequencies`: Oscillator natural frequencies
+- `step_count`: Current step number
+
+## Troubleshooting
+
+### Common Issues
+
+#### 1. Import Errors
+```bash
+# Solution: Install in development mode
+cd env_lib/kos_env
+pip install -e .
+```
+
+#### 2. Environment Not Found
+```python
+# Solution: Verify registration
+import gymnasium as gym
+from gymnasium.envs.registration import registry
+print('KuramotoOscillator-v0' in registry)
+```
+
+#### 3. CUDA Out of Memory
+```python
+# Solution: Reduce batch size or use CPU
+env = KuramotoOscillatorEnvTorch(
+    n_agents=8,  # Reduce from 32
+    device="cpu"  # Use CPU instead
+)
+```
+
+#### 4. Slow Performance
+```python
+# Solution: Optimize parameters
+env = KuramotoOscillatorEnvTorch(
+    integration_method="euler",  # Faster than RK4
+    n_agents=16,  # Optimal batch size
+    device="cuda"  # Use GPU
+)
+```
+
+### Performance Tips
+
+1. **Use GPU for large batches**: `device="cuda"` for n_agents > 8
+2. **Choose integration method wisely**: Euler for speed, RK4 for accuracy
+3. **Optimize batch size**: 16-32 agents often optimal
+4. **Monitor memory**: Use `torch.cuda.memory_allocated()` for GPU monitoring
+
+## Contributing
+
+We welcome contributions! Here are some areas for extension:
+
+### Potential Enhancements
+- **Additional Topologies**: Scale-free, small-world networks
+- **Advanced Integration**: Adaptive step-size methods
+- **Custom Reward Functions**: Domain-specific objectives
+- **Distributed Training**: Multi-GPU support
+- **Visualization Tools**: Advanced plotting capabilities
+
+### Development Setup
+```bash
+# Clone and setup
+git clone <repository>
+cd kos_env
+pip install -e .
+
+# Run tests
+python test_setup.py
+
+# Make changes and test
+python example_usage.py
+```
+
+### Code Style
+- Follow PEP 8 guidelines
+- Add type hints
+- Include docstrings
+- Write unit tests
+
+## License
+
+This project is open source and available under the MIT License.
+
+## Citation
+
+If you use this environment in your research, please cite:
+
+```bibtex
+@software{kuramoto_env,
+  title={Kuramoto Oscillator Synchronization Environment},
+  author={Your Name},
+  year={2024},
+  url={https://github.com/yourusername/kos-env}
+}
+```
+
+---
+
+For more detailed information, examples, and advanced usage, see the `example_usage.py` file and the implementation documentation in `README_KURAMOTO_IMPLEMENTATION.md`. 
