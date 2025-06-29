@@ -16,6 +16,9 @@ Parameters:
 - ball_elasticity: Elasticity of the ball (default: 1.5)
 - max_cycles: Maximum number of steps per episode (default: 125)
 - render_mode: Rendering mode ('human', 'rgb_array', None)
+- movement_penalty: Penalty for piston movement (default: 0.0)
+- movement_penalty_threshold: Minimum movement to trigger penalty (default: 0.01)
+- kappa: Number of hops for observation range (default: 1)
 """
 
 import math
@@ -113,6 +116,9 @@ class PistonballEnv(Env, EzPickle):
         ball_elasticity=1.5,
         max_cycles=125,
         render_mode=None,
+        movement_penalty=0.0,
+        movement_penalty_threshold=0.01,
+        kappa=1,
     ):
         """
         Initialize the Pistonball environment.
@@ -128,6 +134,9 @@ class PistonballEnv(Env, EzPickle):
             ball_elasticity: Elasticity of the ball
             max_cycles: Maximum number of steps per episode
             render_mode: Rendering mode ('human', 'rgb_array', None)
+            movement_penalty: Penalty for piston movement (negative value)
+            movement_penalty_threshold: Minimum movement to trigger penalty
+            kappa: Number of hops for observation range (default: 1)
         """
         EzPickle.__init__(
             self,
@@ -141,6 +150,9 @@ class PistonballEnv(Env, EzPickle):
             ball_elasticity,
             max_cycles,
             render_mode,
+            movement_penalty,
+            movement_penalty_threshold,
+            kappa,
         )
         
         # Environment parameters
@@ -154,6 +166,9 @@ class PistonballEnv(Env, EzPickle):
         self.ball_elasticity = ball_elasticity
         self.max_cycles = max_cycles
         self.render_mode = render_mode
+        self.movement_penalty = movement_penalty
+        self.movement_penalty_threshold = movement_penalty_threshold
+        self.kappa = kappa
         
         # Physics parameters
         self.dt = 1.0 / FPS
@@ -184,9 +199,13 @@ class PistonballEnv(Env, EzPickle):
         
         # Action and observation spaces
         if self.continuous:
+            # Action space: sequence of actions for all pistons
+            # Each action value controls one piston (-1: down, 0: stay, 1: up)
             self.action_space = Box(low=-1, high=1, shape=(self.n_pistons,), dtype=np.float32)
         else:
-            self.action_space = Discrete(3 ** self.n_pistons)  # Each piston has 3 actions
+            # Discrete mode: sequence of discrete actions for each piston
+            # Each piston has 3 actions: 0 (down), 1 (stay), 2 (up)
+            self.action_space = Box(low=0, high=2, shape=(self.n_pistons,), dtype=np.int32)
         
         # Observation space: each piston gets its position and ball information
         obs_dim = 6  # piston_pos + ball_x + ball_y + ball_vx + ball_vy + ball_angular_vel
@@ -245,6 +264,10 @@ class PistonballEnv(Env, EzPickle):
         
         self.closed = False
         self.seed()
+        
+        # State tracking for local rewards
+        self.last_ball_x = None
+        self.last_ball_positions = None  # Will store ball positions for each piston
 
     def seed(self, seed=None):
         """Set the random seed for the environment."""
@@ -411,30 +434,70 @@ class PistonballEnv(Env, EzPickle):
         self.terminate = False
         self.truncate = False
         
+        # Initialize ball position tracking for local rewards
+        if self.ball is not None:
+            self.last_ball_x = int(self.ball.position[0] - self.ball_radius)
+            # Initialize last ball positions for each piston
+            self.last_ball_positions = np.full(self.n_pistons, self.last_ball_x)
+        else:
+            self.last_ball_x = None
+            self.last_ball_positions = None
+        
         # Draw initial state
         self.draw_background()
         self.draw()
         
         return self._get_obs(), {}
 
+    def _can_observe_ball(self, piston_index, ball_x):
+        """
+        Determine if a piston can observe the ball based on kappa-hop neighbor system.
+        
+        Args:
+            piston_index: Index of the piston (0 to n_pistons-1)
+            ball_x: X position of the ball
+            
+        Returns:
+            bool: True if the piston can observe the ball, False otherwise
+        """
+        if self.ball is None:
+            return False
+            
+        # Calculate piston's x position
+        piston_x = self.wall_width + self.piston_radius + self.piston_width * piston_index
+        
+        # Calculate the range of pistons that can observe the ball
+        # A piston can observe the ball if it's within kappa hops of the piston closest to the ball
+        ball_piston_index = int((ball_x - self.wall_width - self.piston_radius) / self.piston_width)
+        ball_piston_index = max(0, min(ball_piston_index, self.n_pistons - 1))
+        
+        # Check if current piston is within kappa hops of the ball's piston
+        distance = abs(piston_index - ball_piston_index)
+        return distance <= self.kappa
+
     def _get_obs(self):
-        """Get observations for all agents."""
+        """Get observations for all agents with limited observation range."""
         obs = np.zeros((self.n_pistons, 6))
         
         if self.ball is None:
             return obs
             
         for i in range(self.n_pistons):
-            # Piston position (normalized)
+            # Piston position (normalized) - always observable
             piston_pos = (self.piston_pos_y[i] - self.mid_piston_y) / self.piston_y_half_range
             obs[i, 0] = piston_pos
             
-            # Ball information
-            obs[i, 1] = (self.ball.position[0] - self.wall_width) / (self.screen_width - 2 * self.wall_width)  # normalized x
-            obs[i, 2] = (self.ball.position[1] - self.wall_width) / (self.screen_height - 2 * self.wall_width)  # normalized y
-            obs[i, 3] = self.ball.velocity[0] / 15  # normalized velocity x
-            obs[i, 4] = self.ball.velocity[1] / 8   # normalized velocity y
-            obs[i, 5] = self.ball.angular_velocity / 8  # normalized angular velocity
+            # Check if this piston can observe the ball
+            if self._can_observe_ball(i, self.ball.position[0]):
+                # Ball information - only if within observation range
+                obs[i, 1] = (self.ball.position[0] - self.wall_width) / (self.screen_width - 2 * self.wall_width)  # normalized x
+                obs[i, 2] = (self.ball.position[1] - self.wall_width) / (self.screen_height - 2 * self.wall_width)  # normalized y
+                obs[i, 3] = self.ball.velocity[0] / 15  # normalized velocity x
+                obs[i, 4] = self.ball.velocity[1] / 8   # normalized velocity y
+                obs[i, 5] = self.ball.angular_velocity / 8  # normalized angular velocity
+            else:
+                # Set ball parameters to zero if cannot observe
+                obs[i, 1:6] = 0.0
             
         return obs
 
@@ -443,18 +506,26 @@ class PistonballEnv(Env, EzPickle):
         if self.space is None or self.ball is None:
             return self._get_obs(), 0, True, True, {}
             
+        # Store previous piston positions for movement penalty calculation
+        prev_piston_positions = np.array(self.piston_pos_y.copy())
+        
         # Handle discrete actions
         if not self.continuous:
-            # Convert discrete action to continuous actions for each piston
+            # Convert discrete actions to continuous actions for each piston
             action_array = np.zeros(self.n_pistons)
             for i in range(self.n_pistons):
-                piston_action = (action // (3 ** i)) % 3
-                action_array[i] = piston_action - 1  # Convert 0,1,2 to -1,0,1
+                # Convert discrete action (0, 1, 2) to continuous action (-1, 0, 1)
+                action_array[i] = action[i] - 1
         else:
-            action_array = np.array(action)
+            # Ensure action is a numpy array with correct shape
+            action_array = np.array(action, dtype=np.float32)
+            if action_array.shape != (self.n_pistons,):
+                raise ValueError(f"Action shape {action_array.shape} does not match expected shape ({self.n_pistons},)")
             
-        # Apply actions to pistons
+        # Apply actions to all pistons simultaneously
         for i, action_val in enumerate(action_array):
+            # Clip action to valid range
+            action_val = np.clip(action_val, -1, 1)
             self.move_piston(self.pistonList[i], action_val)
             self.piston_pos_y[i] = self.pistonList[i].position[1]
 
@@ -483,22 +554,82 @@ class PistonballEnv(Env, EzPickle):
         if ball_next_x <= self.wall_width + 1:
             self.terminate = True
             
-        # Calculate reward
-        local_reward = self.get_local_reward(self.lastX, ball_min_x)
-        reward = local_reward + self.time_penalty
+        # Calculate local rewards for each piston
+        local_rewards = np.zeros(self.n_pistons)
+        
+        if self.ball is not None and self.last_ball_positions is not None:
+            for i in range(self.n_pistons):
+                # Get previous ball position for this piston
+                prev_ball_x = self.last_ball_positions[i]
+                curr_ball_x = ball_min_x
+                
+                # Calculate local reward for this piston
+                local_rewards[i] = self.get_local_reward_for_piston(i, prev_ball_x, curr_ball_x)
+                
+                # Update last ball position for this piston
+                self.last_ball_positions[i] = curr_ball_x
+        else:
+            # If no ball or no previous positions, all pistons get time penalty only
+            local_rewards.fill(self.time_penalty)
+            
+        # Calculate movement penalties for each piston
+        movement_penalties = np.zeros(self.n_pistons)
+        if self.movement_penalty != 0.0:
+            current_piston_positions = np.array(self.piston_pos_y)
+            piston_movements = np.abs(current_piston_positions - prev_piston_positions)
+            
+            # Apply penalty only if movement exceeds threshold
+            for i, movement in enumerate(piston_movements):
+                if movement > self.movement_penalty_threshold:
+                    movement_penalties[i] = self.movement_penalty * (movement / self.pixels_per_position)
+        
+        # Add movement penalties to local rewards
+        local_rewards += movement_penalties
+        
+        # Calculate total reward (sum of all local rewards)
+        total_reward = np.sum(local_rewards)
         
         # Update state
-        self.lastX = ball_min_x
+        self.last_ball_x = ball_min_x
         self.frames += 1
         self.truncate = self.frames >= self.max_cycles
         
         # Draw
         self.draw()
         
-        return self._get_obs(), reward, self.terminate, self.truncate, {}
+        # Return observations, local rewards list, total reward, termination flags, and info
+        return self._get_obs(), local_rewards, total_reward, self.terminate, self.truncate, {}
+
+    def get_local_reward_for_piston(self, piston_index, prev_ball_x, curr_ball_x):
+        """
+        Calculate local reward for a specific piston based on its observation.
+        
+        Args:
+            piston_index: Index of the piston
+            prev_ball_x: Previous ball x position
+            curr_ball_x: Current ball x position
+            
+        Returns:
+            float: Local reward for this piston
+        """
+        # Check if this piston can observe the ball
+        can_observe_prev = self._can_observe_ball(piston_index, prev_ball_x)
+        can_observe_curr = self._can_observe_ball(piston_index, curr_ball_x)
+        
+        # If piston cannot observe ball in either state, return only time penalty
+        if not can_observe_prev and not can_observe_curr:
+            return self.time_penalty
+        
+        # If piston can observe ball, calculate ball-related reward
+        if prev_ball_x > curr_ball_x:
+            ball_reward = 0.5 * (prev_ball_x - curr_ball_x)  # Moving left (good)
+        else:
+            ball_reward = prev_ball_x - curr_ball_x  # Moving right (bad)
+        
+        return ball_reward + self.time_penalty
 
     def get_local_reward(self, prev_position, curr_position):
-        """Calculate local reward based on ball movement."""
+        """Calculate local reward based on ball movement (legacy method)."""
         if prev_position > curr_position:
             local_reward = 0.5 * (prev_position - curr_position)
         else:
@@ -521,17 +652,18 @@ class PistonballEnv(Env, EzPickle):
         pygame.draw.rect(self.screen, inner_wall_color, inner_walls)
         self.draw_pistons()
 
-    def draw_pistons(self):
-        """Draw all pistons."""
-        piston_color = (65, 159, 221)
+    def draw_pistons(self, observable_pistons=None):
+        """Draw all pistons. Observable pistons are red, others are blue."""
+        piston_color = (65, 159, 221)  # blue
+        observable_color = (220, 50, 50)  # red
         x_pos = self.wall_width
-        
-        for piston in self.pistonList:
+        if observable_pistons is None:
+            observable_pistons = []
+        for idx, piston in enumerate(self.pistonList):
             self.screen.blit(
                 self.piston_body_sprite,
                 (x_pos, self.screen_height - self.wall_width - self.piston_body_height),
             )
-            
             height = (
                 self.screen_height
                 - self.wall_width
@@ -545,28 +677,24 @@ class PistonballEnv(Env, EzPickle):
                 18,
                 height,
             )
-            pygame.draw.rect(self.screen, piston_color, body_rect)
+            color = observable_color if idx in observable_pistons else piston_color
+            pygame.draw.rect(self.screen, color, body_rect)
             x_pos += self.piston_width
 
     def draw(self):
         """Draw the current state."""
         if self.ball is None:
             return
-            
         if not self.valid_ball_position_rect.collidepoint(self.ball.position):
             self.draw_background()
-
         ball_x = int(self.ball.position[0])
         ball_y = int(self.ball.position[1])
-
         # Draw render area
         color = (255, 255, 255)
         pygame.draw.rect(self.screen, color, self.render_rect)
-        
         # Draw ball
         color = (65, 159, 221)
         pygame.draw.circle(self.screen, color, (ball_x, ball_y), self.ball_radius)
-
         # Draw ball rotation indicator
         line_end_x = ball_x + (self.ball_radius - 1) * np.cos(self.ball.angle)
         line_end_y = ball_y + (self.ball_radius - 1) * np.sin(self.ball.angle)
@@ -574,7 +702,12 @@ class PistonballEnv(Env, EzPickle):
         pygame.draw.line(
             self.screen, color, (ball_x, ball_y), (line_end_x, line_end_y), 3
         )
-
+        # Compute observable pistons
+        observable_pistons = []
+        if self.ball is not None:
+            for i in range(self.n_pistons):
+                if self._can_observe_ball(i, self.ball.position[0]):
+                    observable_pistons.append(i)
         # Draw pistons
         for piston in self.pistonList:
             self.screen.blit(
@@ -584,7 +717,7 @@ class PistonballEnv(Env, EzPickle):
                     piston.position[1] - self.piston_radius,
                 ),
             )
-        self.draw_pistons()
+        self.draw_pistons(observable_pistons=observable_pistons)
 
     def render(self):
         """Render the environment."""

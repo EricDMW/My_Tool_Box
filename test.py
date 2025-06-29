@@ -4,7 +4,7 @@
 # import envlib_project.env_lib.kos_env as kos
 
 import env_lib
-import plotkit
+import toolkit
 import numpy as np
 import matplotlib.pyplot as plt 
 import torch
@@ -34,26 +34,14 @@ env = env_lib.WirelessCommEnv(grid_x=5, grid_y=5)
  
 env = env_lib.ajlatt_env(map_name='obstacles05',num_Robot=4)
 env.reset()
-
-# OPTIMIZATION 1: Pre-allocate action tensor to avoid repeated allocation
-action = 0.1 * torch.tensor([[1.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 0.0]])
-
-# OPTIMIZATION 2: Disable rendering for performance testing
-render_frequency = 10  # Only render every 10 steps
-render_enabled = False  # Set to True if you need visualization
-
 start_time = time.time()
-for step in range(100):
+for _ in range(100):
+    action = 0.1 * torch.tensor([[1.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 0.0]])
     k = env.step(action)
     print(k[1])
-    
-    # OPTIMIZATION 3: Conditional rendering - only render occasionally
-    if render_enabled and step % render_frequency == 0:
-        env.render()
-        
+    env.render()
 end_time = time.time()
 print(f"Time taken: {end_time - start_time} seconds")
-print(f"Average time per step: {(end_time - start_time) / 100:.4f} seconds")
 
 # x = np.arange(100)
 # y = np.sin(x / 10)

@@ -272,14 +272,6 @@ class TargetTrackingEnv0(gym.Env):
 
         self.state = zeros((self.num_agent, self.state_num ))
 
-        # OPTIMIZATION: Add CI caching to avoid repeated optimization calls
-        self.ci_cache = {}
-        self.ci_cache_size = 1000  # Limit cache size to prevent memory issues
-        
-        # OPTIMIZATION: Add spatial indexing for measurement generation
-        self.spatial_cache = {}
-        self.spatial_cache_size = 500
-
     def seed(self, seed_num):
         # Set the seed for NumPy's random number generator
         np.random.seed(seed_num)
@@ -713,11 +705,6 @@ class TargetTrackingEnv0(gym.Env):
         Com_obs = np.eye(nR)
         # Com_obs = np.zeros((nR,nR))
 
-        # OPTIMIZATION: Pre-calculate all positions to avoid repeated access
-        robot_positions = [self.robot_true[i].state for i in range(nR)]
-        target_positions = [self.target_true[i].state for i in range(nT)]
-        robot_est_positions = [self.robot_est[i].state for i in range(nR)]
-
         for ell in range(nR):
             total_meas_num = -1
             curr_meas_num = -1
@@ -731,47 +718,50 @@ class TargetTrackingEnv0(gym.Env):
                 if ell == j:
                     continue
 
-                # OPTIMIZATION: Use pre-calculated positions
-                if j < nR:
-                    r, th = cartesian2polar(robot_positions[j][0] - robot_positions[ell][0],
-                                            robot_positions[j][1]-robot_positions[ell][1])
+                # if self.robot_est[ell].state[0]<1 or self.robot_est[ell].state[0]>35 or \
+                #     self.robot_est[ell].state[1]<1 or self.robot_est[ell].state[1]>35:
+                #     r, th = cartesian2polar(self.robot_true[j].state[0] - self.robot_true[ell].state[0],
+                #                                 self.robot_true[j].state[1]-self.robot_true[ell].state[1])
 
-                    # OPTIMIZATION: Check bounds once and cache result
-                    robot_est_pos = robot_est_positions[ell]
-                    out_of_bounds = (robot_est_pos[0]<self.MAP.mapmin[0] or robot_est_pos[0]>self.MAP.mapmax[0] or 
-                                   robot_est_pos[1]<self.MAP.mapmin[1] or robot_est_pos[1]>self.MAP.mapmax[1])
-                    
-                    if out_of_bounds:
-                        block = True
+                #     block  = True
+                # else:            
+
+                if j < nR:
+                    r, th = cartesian2polar(self.robot_true[j].state[0] - self.robot_true[ell].state[0],
+                                            self.robot_true[j].state[1]-self.robot_true[ell].state[1])
+
+                    if self.robot_est[ell].state[0]<self.MAP.mapmin[0] or self.robot_est[ell].state[0]>self.MAP.mapmax[0] or \
+                        self.robot_est[ell].state[1]<self.MAP.mapmin[1]  or self.robot_est[ell].state[1]>self.MAP.mapmax[1]:
+                        block  = True
                     else:
-                        # OPTIMIZATION: Use spatial caching for blocking checks
-                        block = self._cached_blocking_check(robot_positions[ell], robot_positions[j])
+                        block  = self.MAP.is_blocked( self.robot_true[ell].state,self.robot_true[j].state)                        
                 
                 else:
                     idx_T = j-nR
-                    r, th = cartesian2polar(target_positions[idx_T][0] - robot_positions[ell][0],
-                                            target_positions[idx_T][1]-robot_positions[ell][1])
+                    r, th = cartesian2polar(self.target_true[idx_T].state[0] - self.robot_true[ell].state[0],
+                                            self.target_true[idx_T].state[1]-self.robot_true[ell].state[1])
                     
-                    # OPTIMIZATION: Check bounds once
-                    robot_est_pos = robot_est_positions[ell]
-                    out_of_bounds = (robot_est_pos[0]<self.MAP.mapmin[0] or robot_est_pos[0]>self.MAP.mapmax[0] or 
-                                   robot_est_pos[1]<self.MAP.mapmin[1] or robot_est_pos[1]>self.MAP.mapmax[1])
-                    
-                    if out_of_bounds:                        
-                        block = True
+
+                    if self.robot_est[ell].state[0]<self.MAP.mapmin[0] or self.robot_est[ell].state[0]>self.MAP.mapmax[0] or \
+                        self.robot_est[ell].state[1]<self.MAP.mapmin[1]  or self.robot_est[ell].state[1]>self.MAP.mapmax[1]:                        
+                        block  = True
+
                     else:
-                        # OPTIMIZATION: Use spatial caching for blocking checks
-                        block = self._cached_blocking_check(robot_positions[ell], target_positions[idx_T])
+                        # if idx_T ==0 :
+                        block = self.MAP.is_blocked( self.robot_true[ell].state, self.target_true[idx_T].state) 
+                        # print('target block',block)
+                        # else:
+                        #     block = False
                         if block == False:
                             check =1
 
                 # measurement wrt robot_true
-                th = pi_to_pi(th-robot_positions[ell][2])
+                th = pi_to_pi(th-self.robot_true[ell].state[2])
 
                 if block == False:
                     check = 1
 
-                # OPTIMIZATION: Pre-calculate sigma_r
+
                 if self.SIGPERCENT == 1:
                     sigma_r = self.sigma_p*r  # sigma_p percentage of range
                 else:
@@ -804,25 +794,6 @@ class TargetTrackingEnv0(gym.Env):
                     total_meas_num = total_meas_num+1
 
         return zr, Rrb, Rb, Com_obs, RT_obs
-
-    def _cached_blocking_check(self, start_pos, end_pos):
-        """Cached blocking check to avoid repeated expensive ray tracing"""
-        # Create a cache key based on discretized positions
-        start_key = tuple(np.round(start_pos[:2] * 10).astype(int))
-        end_key = tuple(np.round(end_pos[:2] * 10).astype(int))
-        cache_key = (start_key, end_key)
-        
-        if cache_key in self.spatial_cache:
-            return self.spatial_cache[cache_key]
-        
-        # Perform the actual blocking check
-        result = self.MAP.is_blocked(start_pos, end_pos)
-        
-        # Cache the result
-        if len(self.spatial_cache) < self.spatial_cache_size:
-            self.spatial_cache[cache_key] = result
-        
-        return result
 
     def update(self, zr_a, Rrb_a, Rb_a, Com_obs_a, RT_obs):
         global s_temp
@@ -1171,11 +1142,6 @@ class TargetTrackingEnv0(gym.Env):
 
     def CI(self, s, y, infomation_form=0, no_weight=0, print_weight=0, xyfusion=0,plot=0):
 
-        # OPTIMIZATION: Check cache first
-        cache_key = hash((s.tobytes(), y.tobytes(), infomation_form, no_weight, xyfusion))
-        if cache_key in self.ci_cache:
-            return self.ci_cache[cache_key]
-        
         # optimize
         S_fused = zeros((s.shape[1], s.shape[1]))
         x_fuesd = zeros((y.shape[0], 1))
@@ -1197,18 +1163,33 @@ class TargetTrackingEnv0(gym.Env):
             c[1] = 0.0
 
         else:
-            # OPTIMIZATION: Use simpler approach for common cases
-            if N == 2:
-                # For 2 sources, use analytical solution when possible
-                try:
-                    # Try analytical solution first
-                    c = self._analytical_ci_weights(s)
-                except:
-                    # Fall back to optimization
-                    c = self._optimize_ci_weights(s)
-            else:
-                c = self._optimize_ci_weights(s)
-            
+            x0 = ones((N))/N
+            # print(x0)
+
+            # x0 = zeros((N))
+            # x0[0] = 0.0
+            # x0[1] = 1.0
+
+            # for the range of boundaries: consistant with the mentioned cases
+            b = (0.0, 1.0-1e-10)
+            # bnds = b
+            bnds = tuple([b for i in range(N)])
+            # self.robot_cov_trace_list = [[] for i in range(self.num_agent)]
+
+            # print('Original Objective: ' + str(objective(x0)))
+            con2 = {'type': 'eq', 'fun': constraint}
+            cons = ([con2])
+            try:
+                solution = minimize(objective, x0, method='SLSQP',  # SLSQP
+                                bounds=bnds, constraints=cons,
+                                options={'ftol': 1e-10})
+            except:
+                solution = minimize(objective, x0, method='SLSQP',  # SLSQP
+                                bounds=bnds, constraints=cons,
+                                options={'ftol': 1e-10})
+
+            c = solution.x
+            # print(c)
             if (c[0] == 0.00) and (not infomation_form):
                 check = 1
                 # print(check)
@@ -1222,7 +1203,8 @@ class TargetTrackingEnv0(gym.Env):
             S_fused = S_fused + c[i]*s[i, :, :]
 
         if infomation_form:
-            result = (S_fused, y@c)
+            return S_fused, y@c
+
         else:
             P_fused = pinv(S_fused)
             x_fuesd = P_fused@(y@c)
@@ -1244,46 +1226,8 @@ class TargetTrackingEnv0(gym.Env):
                 #         trace( pinv(s[1, :, :]) ),trace( P_fused ) )
                 print()
 
-            result = (P_fused, x_fuesd)
-        
-        # OPTIMIZATION: Cache the result
-        if len(self.ci_cache) < self.ci_cache_size:
-            self.ci_cache[cache_key] = result
-        
-        return result
 
-    def _analytical_ci_weights(self, s):
-        """Analytical solution for 2-source CI weights"""
-        # For 2 sources, we can often use analytical solutions
-        # This is much faster than optimization
-        try:
-            # Simple heuristic: weight inversely proportional to trace
-            trace1 = trace(pinv(s[0, :, :]))
-            trace2 = trace(pinv(s[1, :, :]))
-            total_trace = trace1 + trace2
-            c = np.array([trace2 / total_trace, trace1 / total_trace])
-            return c
-        except:
-            # Fall back to optimization
-            return self._optimize_ci_weights(s)
-    
-    def _optimize_ci_weights(self, s):
-        """Optimize CI weights using scipy"""
-        N = s.shape[0]
-        x0 = ones((N))/N
-        b = (0.0, 1.0-1e-10)
-        bnds = tuple([b for i in range(N)])
-        con2 = {'type': 'eq', 'fun': constraint}
-        cons = ([con2])
-        try:
-            solution = minimize(objective, x0, method='SLSQP',
-                            bounds=bnds, constraints=cons,
-                            options={'ftol': 1e-10})
-        except:
-            solution = minimize(objective, x0, method='SLSQP',
-                            bounds=bnds, constraints=cons,
-                            options={'ftol': 1e-10})
-        return solution.x
+            return P_fused, x_fuesd
 
     def get_target_action(self):
         self.turn_time = 4

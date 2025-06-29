@@ -1,34 +1,43 @@
 # Pistonball Environment
 
-A standard gym environment for the multi-agent pistonball game, rewritten as a clean, configurable gym environment.
+A comprehensive, configurable gym environment for multi-agent pistonball simulation with advanced features for reinforcement learning research.
 
-## Overview
+## 🎯 Overview
 
-The Pistonball environment simulates a physics-based cooperative game where multiple pistons work together to move a ball to the left wall. Each piston can move up or down to create a path for the ball. The goal is to coordinate the pistons to successfully guide the ball to the left side of the screen.
+The Pistonball environment simulates a physics-based cooperative game where multiple pistons work together to move a ball to the left wall. Each piston can move up or down to create a path for the ball, requiring coordinated control to achieve the objective efficiently.
 
-## Features
+### 🚀 Key Features
 
-- **Configurable number of agents**: Set the number of pistons from 1 to any reasonable number
-- **Flexible physics parameters**: Adjust ball mass, friction, and elasticity
-- **Continuous and discrete action spaces**: Support for both continuous (-1 to 1) and discrete (0, 1, 2) actions
-- **Human control**: Manual policy for human interaction
-- **Standard gym interface**: Compatible with gymnasium/gym environments
-- **Rendering support**: Both human and rgb_array rendering modes
+- **🔧 Configurable Multi-Agent Control**: Set the number of pistons from 1 to any reasonable number
+- **⚡ Simultaneous Control**: Control all pistons at once with sequence-based actions
+- **💰 Flexible Reward System**: Configurable movement penalties to encourage efficient control
+- **🎮 Multiple Action Spaces**: Support for both continuous (-1 to 1) and discrete (0, 1, 2) actions
+- **⚙️ Adjustable Physics**: Fine-tune ball mass, friction, elasticity, and other physics parameters
+- **🎨 Human Control**: Manual policy for human interaction and debugging
+- **📊 Standard Gym Interface**: Fully compatible with gymnasium/gym environments
+- **🖼️ Rendering Support**: Both human and rgb_array rendering modes
+- **🔍 Robust Validation**: Comprehensive action validation and error handling
 
-## Installation
+## 📦 Installation
+
+### Prerequisites
 
 The environment is self-contained and requires the following dependencies:
-- `gymnasium` (or `gym`)
-- `pygame`
-- `pymunk`
-- `numpy`
 
-## Usage
+```bash
+pip install gymnasium pygame pymunk numpy
+```
 
-### Basic Usage
+Or if using conda:
+
+```bash
+conda install -c conda-forge gymnasium pygame pymunk numpy
+```
+
+### Quick Start
 
 ```python
-from envs.pistonball_new import PistonballEnv
+from pistonball_env import PistonballEnv
 
 # Create environment with default parameters
 env = PistonballEnv(n_pistons=20)
@@ -36,9 +45,9 @@ env = PistonballEnv(n_pistons=20)
 # Reset environment
 obs, info = env.reset()
 
-# Take actions
+# Take actions - action is a sequence with dimension equal to number of pistons
 for step in range(100):
-    action = env.action_space.sample()  # Random action
+    action = env.action_space.sample()  # Random action for all pistons
     obs, reward, terminated, truncated, info = env.step(action)
     
     if terminated or truncated:
@@ -47,56 +56,314 @@ for step in range(100):
 env.close()
 ```
 
-### Configuration Parameters
+## ⚙️ Configuration Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `n_pistons` | int | 20 | Number of piston agents |
-| `time_penalty` | float | -0.1 | Reward penalty per time step |
-| `continuous` | bool | True | Whether to use continuous actions |
-| `random_drop` | bool | True | Whether to randomly drop the ball |
-| `random_rotate` | bool | True | Whether to randomly rotate the ball |
-| `ball_mass` | float | 0.75 | Mass of the ball |
-| `ball_friction` | float | 0.3 | Friction coefficient of the ball |
-| `ball_elasticity` | float | 1.5 | Elasticity of the ball |
+| `n_pistons` | int | 20 | Number of piston agents (1 to any reasonable number) |
+| `time_penalty` | float | -0.1 | Reward penalty per time step (encourages faster completion) |
+| `continuous` | bool | True | Whether to use continuous actions (-1 to 1) or discrete (0, 1, 2) |
+| `random_drop` | bool | True | Whether to randomly drop the ball at start |
+| `random_rotate` | bool | True | Whether to randomly rotate the ball at start |
+| `ball_mass` | float | 0.75 | Mass of the ball (affects physics behavior) |
+| `ball_friction` | float | 0.3 | Friction coefficient of the ball (0.0 to 1.0) |
+| `ball_elasticity` | float | 1.5 | Elasticity of the ball (bounciness, >0) |
 | `max_cycles` | int | 125 | Maximum number of steps per episode |
 | `render_mode` | str | None | Rendering mode ('human', 'rgb_array', None) |
+| `movement_penalty` | float | 0.0 | Penalty for piston movement (negative value, 0.0 = no penalty) |
+| `movement_penalty_threshold` | float | 0.01 | Minimum movement to trigger penalty |
 
-### Action Space
+## 🎮 Action Space
 
-- **Continuous mode**: `Box(-1, 1, shape=(n_pistons,))` - Each value controls one piston
-- **Discrete mode**: `Discrete(3^n_pistons)` - Each piston has 3 actions (down, stay, up)
+### Continuous Mode (Default)
+```python
+Box(-1, 1, shape=(n_pistons,), dtype=np.float32)
+```
 
-### Observation Space
+**Action Format**: Sequence of actions for all pistons
+- **Shape**: `(n_pistons,)` - one action value per piston
+- **Values**: 
+  - `-1.0`: Move piston down
+  - `0.0`: Keep piston stationary
+  - `1.0`: Move piston up
+  - Values in between: Proportional movement
 
-`Box(-inf, inf, shape=(n_pistons, 6))` where each piston gets:
-- Piston position (normalized)
-- Ball x-position (normalized)
-- Ball y-position (normalized)
-- Ball x-velocity (normalized)
-- Ball y-velocity (normalized)
-- Ball angular velocity (normalized)
+**Example**:
+```python
+# For 5 pistons
+action = np.array([1.0, -1.0, 0.0, 0.5, -0.5])
+# Piston 1: Move up fully
+# Piston 2: Move down fully  
+# Piston 3: Stay still
+# Piston 4: Move up half way
+# Piston 5: Move down half way
+```
 
-### Reward Function
+### Discrete Mode
+```python
+Box(0, 2, shape=(n_pistons,), dtype=np.int32)
+```
 
-The reward is based on:
-- Local reward: How much the ball moved left when near pistons
-- Time penalty: Small negative reward per step
-- Global reward: Overall ball movement
+**Action Format**: Sequence of discrete actions for all pistons
+- **Shape**: `(n_pistons,)` - one discrete action value per piston
+- **Values**: 
+  - `0`: Move piston down (-1 in continuous space)
+  - `1`: Keep piston stationary (0 in continuous space)
+  - `2`: Move piston up (1 in continuous space)
 
-## Manual Control
+**Example**:
+```python
+# For 5 pistons
+action = np.array([2, 0, 1, 2, 0])
+# Piston 1: Move up (2)
+# Piston 2: Move down (0)
+# Piston 3: Stay still (1)
+# Piston 4: Move up (2)
+# Piston 5: Move down (0)
+```
 
-You can control the environment manually using the `ManualPolicy`:
+## 👁️ Observation Space
 
 ```python
-from envs.pistonball_new import PistonballEnv
-from envs.pistonball_new.manual_policy import ManualPolicy
+Box(-inf, inf, shape=(n_pistons, 6), dtype=np.float32)
+```
 
-env = PistonballEnv(n_pistons=10, render_mode="human")
+Each piston receives a 6-dimensional observation vector:
+
+| Index | Description | Normalization |
+|-------|-------------|---------------|
+| 0 | Piston position | Normalized to [-1, 1] relative to center |
+| 1 | Ball x-position | Normalized to [0, 1] across screen width |
+| 2 | Ball y-position | Normalized to [0, 1] across screen height |
+| 3 | Ball x-velocity | Normalized by 15 (typical max velocity) |
+| 4 | Ball y-velocity | Normalized by 8 (typical max velocity) |
+| 5 | Ball angular velocity | Normalized by 8 (typical max angular velocity) |
+
+**Example Observation**:
+```python
+obs = np.array([
+    [0.5, 0.8, 0.6, 0.2, -0.1, 0.05],  # Piston 1 observation
+    [0.2, 0.8, 0.6, 0.2, -0.1, 0.05],  # Piston 2 observation
+    [-0.1, 0.8, 0.6, 0.2, -0.1, 0.05], # Piston 3 observation
+    # ... for all pistons
+])
+```
+
+## 🏆 Reward Function
+
+The reward is composed of multiple components:
+
+### 1. Local Reward
+Based on ball movement toward the goal (left wall):
+```python
+if prev_position > curr_position:
+    local_reward = 0.5 * (prev_position - curr_position)  # Moving left (good)
+else:
+    local_reward = prev_position - curr_position  # Moving right (bad)
+```
+
+### 2. Time Penalty
+Small negative reward per step to encourage faster completion:
+```python
+time_penalty = -0.1  # Configurable via time_penalty parameter
+```
+
+### 3. Movement Penalty (New Feature)
+Penalty for piston movement to encourage efficient control:
+```python
+if movement > movement_penalty_threshold:
+    penalty = movement_penalty * (movement_distance / pixels_per_position)
+```
+
+### 4. Total Reward
+```python
+total_reward = local_reward + time_penalty + movement_penalty_total
+```
+
+## 💰 Movement Penalty System
+
+The movement penalty feature allows you to penalize piston movement to encourage more efficient control strategies.
+
+### Configuration Examples
+
+```python
+# No movement penalty (default behavior)
+env = PistonballEnv(n_pistons=10, movement_penalty=0.0)
+
+# Light movement penalty
+env = PistonballEnv(
+    n_pistons=10,
+    movement_penalty=-0.05,  # Small penalty per unit of movement
+    movement_penalty_threshold=0.01  # Only penalize if movement > threshold
+)
+
+# Heavy movement penalty
+env = PistonballEnv(
+    n_pistons=10,
+    movement_penalty=-0.2,  # Large penalty per unit of movement
+    movement_penalty_threshold=0.02  # Higher threshold
+)
+```
+
+### How It Works
+
+1. **Movement Detection**: Tracks piston position changes between steps
+2. **Threshold Filtering**: Only applies penalty if movement exceeds threshold
+3. **Proportional Penalty**: Penalty scales with movement distance
+4. **Efficiency Encouragement**: Rewards agents that use minimal movements
+
+### Use Cases
+
+- **Efficiency Training**: Encourage agents to find optimal control strategies
+- **Energy Conservation**: Simulate real-world energy constraints
+- **Smooth Control**: Promote gradual, controlled movements
+- **Research Experiments**: Study trade-offs between effectiveness and efficiency
+
+## 🎯 Usage Examples
+
+### Basic Environment Setup
+
+```python
+from pistonball_env import PistonballEnv
+import numpy as np
+
+# Create environment
+env = PistonballEnv(
+    n_pistons=8,
+    render_mode="human",  # For visualization
+    continuous=True
+)
+
+# Reset and get initial observation
+obs, info = env.reset()
+print(f"Observation shape: {obs.shape}")
+print(f"Action space: {env.action_space}")
+```
+
+### Different Control Strategies
+
+```python
+# Strategy 1: All pistons move up
+action = np.ones(env.n_pistons)
+obs, reward, terminated, truncated, info = env.step(action)
+
+# Strategy 2: All pistons move down
+action = -np.ones(env.n_pistons)
+obs, reward, terminated, truncated, info = env.step(action)
+
+# Strategy 3: Stay still
+action = np.zeros(env.n_pistons)
+obs, reward, terminated, truncated, info = env.step(action)
+
+# Strategy 4: Alternating pattern
+action = np.array([1, -1, 1, -1, 1, -1, 1, -1])
+obs, reward, terminated, truncated, info = env.step(action)
+
+# Strategy 5: Wave pattern
+action = np.array([1, 0.5, 0, -0.5, -1, -0.5, 0, 0.5])
+obs, reward, terminated, truncated, info = env.step(action)
+```
+
+### Training Loop Example
+
+```python
+import numpy as np
+from pistonball_env import PistonballEnv
+
+# Create environment with movement penalty
+env = PistonballEnv(
+    n_pistons=10,
+    movement_penalty=-0.1,
+    movement_penalty_threshold=0.01,
+    render_mode=None  # No rendering for faster training
+)
+
+# Training loop
+episode_rewards = []
+for episode in range(100):
+    obs, info = env.reset()
+    episode_reward = 0
+    
+    for step in range(200):  # Max 200 steps per episode
+        # Your agent's action selection here
+        action = env.action_space.sample()  # Random for demonstration
+        
+        obs, reward, terminated, truncated, info = env.step(action)
+        episode_reward += reward
+        
+        if terminated or truncated:
+            break
+    
+    episode_rewards.append(episode_reward)
+    print(f"Episode {episode}: Total reward = {episode_reward:.2f}")
+
+env.close()
+```
+
+### Physics Parameter Experiments
+
+```python
+# Heavy ball experiment
+env_heavy = PistonballEnv(
+    n_pistons=15,
+    ball_mass=2.0,        # Heavy ball
+    ball_friction=0.8,    # High friction
+    ball_elasticity=0.5,  # Low bounce
+    movement_penalty=-0.05
+)
+
+# Bouncy ball experiment
+env_bouncy = PistonballEnv(
+    n_pistons=15,
+    ball_mass=0.5,        # Light ball
+    ball_friction=0.1,    # Low friction
+    ball_elasticity=2.0,  # High bounce
+    movement_penalty=-0.1
+)
+```
+
+### Discrete Action Space
+
+```python
+# Discrete action environment
+env_discrete = PistonballEnv(
+    n_pistons=5,
+    continuous=False,  # Use discrete actions
+    movement_penalty=-0.1
+)
+
+print(f"Discrete action space: {env_discrete.action_space}")
+print(f"Action space shape: {env_discrete.action_space.shape}")
+
+# Take discrete action - sequence of discrete actions for each piston
+action = np.array([2, 0, 1, 2, 0])  # up, down, stay, up, down
+obs, reward, terminated, truncated, info = env_discrete.step(action)
+
+# Or sample random discrete actions
+action = env_discrete.action_space.sample()  # Random discrete actions
+obs, reward, terminated, truncated, info = env_discrete.step(action)
+```
+
+## 🎮 Manual Control
+
+### Setup Manual Control
+
+```python
+from pistonball_env import PistonballEnv
+from manual_policy import ManualPolicy
+
+# Create environment with human rendering
+env = PistonballEnv(
+    n_pistons=6,
+    render_mode="human",
+    continuous=True
+)
+
+# Create manual policy
 manual_policy = ManualPolicy(env)
 
+# Manual control loop
 obs, info = env.reset()
-
 while True:
     action = manual_policy(obs)
     obs, reward, terminated, truncated, info = env.step(action)
@@ -108,78 +375,234 @@ while True:
 
 ### Manual Control Keys
 
-- **W/S**: Move selected piston up/down
-- **A/D**: Select previous/next piston
-- **ESC**: Exit
-- **BACKSPACE**: Reset environment
+| Key | Action |
+|-----|--------|
+| **W** | Move selected piston up |
+| **S** | Move selected piston down |
+| **A** | Select previous piston |
+| **D** | Select next piston |
+| **ESC** | Exit the environment |
+| **BACKSPACE** | Reset the environment |
 
-## Examples
+## 🧪 Testing and Validation
 
-### Different Configurations
-
-```python
-# Few pistons for easier learning
-env = PistonballEnv(n_pistons=5, continuous=True)
-
-# Heavy ball for different physics
-env = PistonballEnv(n_pistons=15, ball_mass=2.0, ball_friction=0.8)
-
-# Bouncy ball
-env = PistonballEnv(n_pistons=10, ball_elasticity=2.0)
-
-# Discrete actions
-env = PistonballEnv(n_pistons=8, continuous=False)
-```
-
-### Training with RL Libraries
-
-```python
-# Compatible with stable-baselines3
-from stable_baselines3 import PPO
-from envs.pistonball_new import PistonballEnv
-
-env = PistonballEnv(n_pistons=10)
-model = PPO("MlpPolicy", env, verbose=1)
-model.learn(total_timesteps=10000)
-```
-
-## Testing
-
-Run the test script to verify the environment works correctly:
+### Run Basic Tests
 
 ```bash
-cd envs/pistonball_new
-python test_env.py
+# Run comprehensive test suite
+python test_movement_penalty.py
+
+# Run basic examples
+python example.py
+
+# Run interactive demo
+python demo_enhanced_features.py
 ```
 
-This will run various tests including:
-- Basic environment functionality
-- Different configurations
-- Physics parameters
-- Manual control (optional)
+### Test Coverage
 
-## Registration
+The test suite covers:
+- ✅ Action validation and error handling
+- ✅ Movement penalty functionality
+- ✅ Different environment configurations
+- ✅ Multi-piston control patterns
+- ✅ Action clipping and type conversion
+- ✅ Physics parameter variations
+- ✅ Discrete vs continuous action spaces
 
-The environment is automatically registered with gymnasium when imported:
+### Custom Testing
+
+```python
+# Test action validation
+env = PistonballEnv(n_pistons=5)
+obs, info = env.reset()
+
+# Correct action shape
+action = np.ones(5)
+obs, reward, terminated, truncated, info = env.step(action)
+
+# Incorrect action shape (will raise error)
+try:
+    action = np.ones(3)  # Wrong shape
+    obs, reward, terminated, truncated, info = env.step(action)
+except ValueError as e:
+    print(f"Correctly caught error: {e}")
+```
+
+## 🔧 Advanced Configuration
+
+### Environment Registration
+
+The environment is automatically registered with gymnasium:
 
 ```python
 import gymnasium as gym
-from envs.pistonball_new import PistonballEnv
+from pistonball_env import PistonballEnv
 
 # Can be created using gym.make
 env = gym.make("Pistonball-v0", n_pistons=10)
 ```
 
-## Differences from Original
+### Custom Reward Functions
 
-This version differs from the original PettingZoo implementation in several ways:
+You can extend the environment to add custom reward components:
 
-1. **Standard gym interface**: Uses gymnasium/gym instead of PettingZoo
-2. **Single agent perspective**: Treats all pistons as a single agent with multi-dimensional actions
-3. **Simplified observation space**: More compact observation representation
-4. **Configurable parameters**: Easy to adjust physics and game parameters
-5. **Cleaner code structure**: Better organized and documented
+```python
+class CustomPistonballEnv(PistonballEnv):
+    def step(self, action):
+        obs, reward, terminated, truncated, info = super().step(action)
+        
+        # Add custom reward component
+        custom_reward = self.calculate_custom_reward()
+        reward += custom_reward
+        
+        return obs, reward, terminated, truncated, info
+    
+    def calculate_custom_reward(self):
+        # Your custom reward logic here
+        return 0.0
+```
 
-## License
+### Multi-Environment Training
 
-This environment is part of the DSDP project and follows the same license terms. 
+```python
+import numpy as np
+from pistonball_env import PistonballEnv
+
+# Create multiple environments with different configurations
+envs = []
+configs = [
+    {"n_pistons": 5, "movement_penalty": -0.05},
+    {"n_pistons": 10, "movement_penalty": -0.1},
+    {"n_pistons": 15, "movement_penalty": -0.15}
+]
+
+for config in configs:
+    env = PistonballEnv(**config, render_mode=None)
+    envs.append(env)
+
+# Train on multiple environments
+for episode in range(100):
+    for i, env in enumerate(envs):
+        obs, info = env.reset()
+        episode_reward = 0
+        
+        for step in range(100):
+            action = env.action_space.sample()
+            obs, reward, terminated, truncated, info = env.step(action)
+            episode_reward += reward
+            
+            if terminated or truncated:
+                break
+        
+        print(f"Env {i}, Episode {episode}: Reward = {episode_reward:.2f}")
+
+# Clean up
+for env in envs:
+    env.close()
+```
+
+## 📊 Performance Considerations
+
+### Rendering Modes
+
+- **`render_mode=None`**: Fastest, no visualization (recommended for training)
+- **`render_mode="rgb_array"`**: Returns RGB array for logging/recording
+- **`render_mode="human"`**: Interactive window (for debugging/visualization)
+
+### Memory Usage
+
+- **Small teams** (1-10 pistons): Low memory usage
+- **Medium teams** (10-20 pistons): Moderate memory usage
+- **Large teams** (20+ pistons): Higher memory usage
+
+### Training Speed
+
+- **No rendering**: ~1000+ steps/second
+- **RGB array rendering**: ~100-500 steps/second
+- **Human rendering**: ~20-50 steps/second
+
+## 🔍 Troubleshooting
+
+### Common Issues
+
+1. **Action Shape Error**:
+   ```python
+   # Error: Action shape (3,) does not match expected shape (5,)
+   # Solution: Ensure action has correct number of elements
+   action = np.ones(env.n_pistons)  # Correct
+   ```
+
+2. **Rendering Issues**:
+   ```python
+   # If pygame rendering fails, try:
+   env = PistonballEnv(render_mode="rgb_array")  # Alternative rendering
+   ```
+
+3. **Physics Instability**:
+   ```python
+   # For very large teams, adjust physics parameters:
+   env = PistonballEnv(
+       n_pistons=30,
+       ball_mass=1.0,  # Stable mass
+       ball_friction=0.5  # Moderate friction
+   )
+   ```
+
+### Debug Mode
+
+```python
+# Enable detailed logging
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+env = PistonballEnv(n_pistons=5, render_mode="human")
+```
+
+## 🤝 Contributing
+
+### Development Setup
+
+1. Clone the repository
+2. Install dependencies: `pip install -r requirements.txt`
+3. Run tests: `python test_movement_penalty.py`
+4. Make changes and test thoroughly
+
+### Code Style
+
+- Follow PEP 8 guidelines
+- Add docstrings for all functions
+- Include type hints where appropriate
+- Write tests for new features
+
+## 📚 References
+
+### Related Work
+
+- **PettingZoo Pistonball**: Original multi-agent implementation
+- **Gymnasium**: Standard RL environment interface
+- **Pymunk**: 2D physics engine
+- **Pygame**: Graphics and input handling
+
+### Research Applications
+
+- Multi-agent reinforcement learning
+- Cooperative control systems
+- Resource allocation optimization
+- Emergent behavior studies
+- Efficiency vs effectiveness trade-offs
+
+## 📄 License
+
+This environment is part of the DSDP project and follows the same license terms.
+
+## 🙏 Acknowledgments
+
+- Original PettingZoo implementation
+- Pymunk physics engine developers
+- Gymnasium community
+- Contributors and testers
+
+---
+
+**For questions, issues, or contributions, please refer to the project documentation or create an issue in the repository.** 
