@@ -50,7 +50,7 @@ def plot_map(map_data, mapmin, mapmax, map_name):
 
 def main():
     parser = argparse.ArgumentParser(description='Plot a map from a .cfg/.yaml map file')
-    parser.add_argument('--map', type=str, default='sample_map_config', help='Map name (e.g., obstacles05)')
+    parser.add_argument('--map', type=str, default='obstacles05', help='Map name (e.g., obstacles05)')
     args = parser.parse_args()
     map_data, mapmin, mapmax = load_map(args.map)
     plot_map(map_data, mapmin, mapmax, args.map)
