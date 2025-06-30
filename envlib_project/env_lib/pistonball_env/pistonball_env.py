@@ -208,7 +208,7 @@ class PistonballEnv(Env, EzPickle):
             self.action_space = Box(low=0, high=2, shape=(self.n_pistons,), dtype=np.int32)
         
         # Observation space: each piston gets its position and ball information
-        obs_dim = 6  # piston_pos + ball_x + ball_y + ball_vx + ball_vy + ball_angular_vel
+        obs_dim = 7  # piston_pos_y + piston_pos_x + ball_x + ball_y + ball_vx + ball_vy + ball_angular_vel
         self.observation_space = Box(
             low=-np.inf, 
             high=np.inf, 
@@ -477,27 +477,29 @@ class PistonballEnv(Env, EzPickle):
 
     def _get_obs(self):
         """Get observations for all agents with limited observation range."""
-        obs = np.zeros((self.n_pistons, 6))
+        obs = np.zeros((self.n_pistons, 7))
         
         if self.ball is None:
             return obs
             
         for i in range(self.n_pistons):
             # Piston position (normalized) - always observable
-            piston_pos = (self.piston_pos_y[i] - self.mid_piston_y) / self.piston_y_half_range
-            obs[i, 0] = piston_pos
+            piston_pos_y = (self.piston_pos_y[i] - self.mid_piston_y) / self.piston_y_half_range
+            piston_pos_x = (self.wall_width + self.piston_radius + self.piston_width * i - self.wall_width) / (self.screen_width - 2 * self.wall_width)
+            obs[i, 0] = piston_pos_y
+            obs[i, 1] = piston_pos_x
             
             # Check if this piston can observe the ball
             if self._can_observe_ball(i, self.ball.position[0]):
                 # Ball information - only if within observation range
-                obs[i, 1] = (self.ball.position[0] - self.wall_width) / (self.screen_width - 2 * self.wall_width)  # normalized x
-                obs[i, 2] = (self.ball.position[1] - self.wall_width) / (self.screen_height - 2 * self.wall_width)  # normalized y
-                obs[i, 3] = self.ball.velocity[0] / 15  # normalized velocity x
-                obs[i, 4] = self.ball.velocity[1] / 8   # normalized velocity y
-                obs[i, 5] = self.ball.angular_velocity / 8  # normalized angular velocity
+                obs[i, 2] = (self.ball.position[0] - self.wall_width) / (self.screen_width - 2 * self.wall_width)  # normalized x
+                obs[i, 3] = (self.ball.position[1] - self.wall_width) / (self.screen_height - 2 * self.wall_width)  # normalized y
+                obs[i, 4] = self.ball.velocity[0] / 15  # normalized velocity x
+                obs[i, 5] = self.ball.velocity[1] / 8   # normalized velocity y
+                obs[i, 6] = self.ball.angular_velocity / 8  # normalized angular velocity
             else:
                 # Set ball parameters to zero if cannot observe
-                obs[i, 1:6] = 0.0
+                obs[i, 2:7] = 0.0
             
         return obs
 
