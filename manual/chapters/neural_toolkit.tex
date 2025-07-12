@@ -1,0 +1,679 @@
+\chapter{Neural Toolkit}
+
+\section{Overview}
+
+The \texttt{neural\_toolkit} is the core component of the toolkit, providing comprehensive neural network architectures and utilities for reinforcement learning. It includes policy networks, value networks, Q-networks, encoders, decoders, and discrete tools.
+
+\section{Network Architectures}
+
+\subsection{Policy Networks}
+
+Policy networks map states to action probabilities or continuous actions.
+
+\subsubsection{MLPPolicyNetwork}
+
+Multi-layer perceptron policy network for discrete and continuous action spaces.
+
+\begin{lstlisting}[language=python, caption=MLP Policy Network]
+from toolkit.neural_toolkit import MLPPolicyNetwork
+
+# Discrete action space
+policy_network = MLPPolicyNetwork(
+    input_dim=10,
+    output_dim=4,  # Number of actions
+    hidden_dims=[256, 256],
+    activation='relu',
+    dropout=0.1,
+    layer_norm=False
+)
+
+# Continuous action space
+policy_network = MLPPolicyNetwork(
+    input_dim=10,
+    output_dim=2,  # Action dimensions
+    hidden_dims=[256, 256],
+    activation='relu',
+    action_type='continuous',
+    action_std=1.0
+)
+\end{lstlisting}
+
+\subsubsection{CNPolicyNetwork}
+
+Convolutional neural network policy for image-based observations.
+
+\begin{lstlisting}[language=python, caption=CNN Policy Network]
+from toolkit.neural_toolkit import CNPolicyNetwork
+
+policy_network = CNPolicyNetwork(
+    input_channels=3,
+    output_dim=4,
+    conv_dims=[32, 64, 128],
+    fc_dims=[256, 256],
+    kernel_sizes=[3, 3, 3],
+    strides=[2, 2, 2],
+    activation='relu'
+)
+\end{lstlisting}
+
+\subsubsection{RNNPolicyNetwork}
+
+Recurrent neural network policy for sequential decision making.
+
+\begin{lstlisting}[language=python, caption=RNN Policy Network]
+from toolkit.neural_toolkit import RNNPolicyNetwork
+
+policy_network = RNNPolicyNetwork(
+    input_dim=10,
+    output_dim=4,
+    hidden_dim=256,
+    num_layers=2,
+    rnn_type='lstm',  # 'lstm' or 'gru'
+    fc_dims=[256],
+    activation='relu'
+)
+\end{lstlisting}
+
+\subsubsection{TransformerPolicyNetwork}
+
+Transformer-based policy network for complex sequential patterns.
+
+\begin{lstlisting}[language=python, caption=Transformer Policy Network]
+from toolkit.neural_toolkit import TransformerPolicyNetwork
+
+policy_network = TransformerPolicyNetwork(
+    input_dim=10,
+    output_dim=4,
+    d_model=256,
+    nhead=8,
+    num_layers=6,
+    dim_feedforward=1024,
+    dropout=0.1,
+    fc_dims=[256],
+    activation='relu'
+)
+\end{lstlisting}
+
+\subsection{Value Networks}
+
+Value networks estimate state values or state-action values.
+
+\subsubsection{MLPValueNetwork}
+
+Multi-layer perceptron value network.
+
+\begin{lstlisting}[language=python, caption=MLP Value Network]
+from toolkit.neural_toolkit import MLPValueNetwork
+
+value_network = MLPValueNetwork(
+    input_dim=10,
+    hidden_dims=[256, 256],
+    activation='relu',
+    dropout=0.1,
+    layer_norm=False
+)
+\end{lstlisting}
+
+\subsubsection{CNValueNetwork}
+
+Convolutional neural network value network.
+
+\begin{lstlisting}[language=python, caption=CNN Value Network]
+from toolkit.neural_toolkit import CNValueNetwork
+
+value_network = CNValueNetwork(
+    input_channels=3,
+    conv_dims=[32, 64, 128],
+    fc_dims=[256, 256],
+    kernel_sizes=[3, 3, 3],
+    strides=[2, 2, 2],
+    activation='relu'
+)
+\end{lstlisting}
+
+\subsubsection{RNNValueNetwork}
+
+Recurrent neural network value network.
+
+\begin{lstlisting}[language=python, caption=RNN Value Network]
+from toolkit.neural_toolkit import RNNValueNetwork
+
+value_network = RNNValueNetwork(
+    input_dim=10,
+    hidden_dim=256,
+    num_layers=2,
+    rnn_type='lstm',
+    fc_dims=[256],
+    activation='relu'
+)
+\end{lstlisting}
+
+\subsubsection{TransformerValueNetwork}
+
+Transformer-based value network.
+
+\begin{lstlisting}[language=python, caption=Transformer Value Network]
+from toolkit.neural_toolkit import TransformerValueNetwork
+
+value_network = TransformerValueNetwork(
+    input_dim=10,
+    d_model=256,
+    nhead=8,
+    num_layers=6,
+    dim_feedforward=1024,
+    dropout=0.1,
+    fc_dims=[256],
+    activation='relu'
+)
+\end{lstlisting}
+
+\subsection{Q-Networks}
+
+Q-networks estimate action-value functions for Q-learning algorithms.
+
+\subsubsection{MLPQNetwork}
+
+Multi-layer perceptron Q-network.
+
+\begin{lstlisting}[language=python, caption=MLP Q-Network]
+from toolkit.neural_toolkit import MLPQNetwork
+
+q_network = MLPQNetwork(
+    input_dim=10,
+    output_dim=4,  # Number of actions
+    hidden_dims=[256, 256],
+    activation='relu',
+    dropout=0.1
+)
+\end{lstlisting}
+
+\subsubsection{DuelingQNetwork}
+
+Dueling architecture Q-network with separate value and advantage streams.
+
+\begin{lstlisting}[language=python, caption=Dueling Q-Network]
+from toolkit.neural_toolkit import DuelingQNetwork
+
+q_network = DuelingQNetwork(
+    input_dim=10,
+    output_dim=4,
+    hidden_dims=[256, 256],
+    value_hidden_dims=[256],
+    advantage_hidden_dims=[256],
+    activation='relu'
+)
+\end{lstlisting}
+
+\section{State Encoders}
+
+State encoders transform raw observations into neural network inputs.
+
+\subsection{MLPEncoder}
+
+Multi-layer perceptron encoder for vector observations.
+
+\begin{lstlisting}[language=python, caption=MLP Encoder]
+from toolkit.neural_toolkit import MLPEncoder
+
+encoder = MLPEncoder(
+    input_dim=100,
+    output_dim=256,
+    hidden_dims=[512, 256],
+    activation='relu',
+    dropout=0.1,
+    layer_norm=False
+)
+\end{lstlisting}
+
+\subsection{CNNEncoder}
+
+Convolutional neural network encoder for image observations.
+
+\begin{lstlisting}[language=python, caption=CNN Encoder]
+from toolkit.neural_toolkit import CNNEncoder
+
+encoder = CNNEncoder(
+    input_channels=3,
+    output_dim=256,
+    conv_dims=[32, 64, 128, 256],
+    fc_dims=[512],
+    kernel_sizes=[3, 3, 3, 3],
+    strides=[2, 2, 2, 2],
+    activation='relu'
+)
+\end{lstlisting}
+
+\subsection{RNNEncoder}
+
+Recurrent neural network encoder for sequential observations.
+
+\begin{lstlisting}[language=python, caption=RNN Encoder]
+from toolkit.neural_toolkit import RNNEncoder
+
+encoder = RNNEncoder(
+    input_dim=10,
+    output_dim=256,
+    hidden_dim=256,
+    num_layers=2,
+    rnn_type='lstm',
+    fc_dims=[256],
+    activation='relu'
+)
+\end{lstlisting}
+
+\subsection{TransformerEncoder}
+
+Transformer-based encoder for complex sequential patterns.
+
+\begin{lstlisting}[language=python, caption=Transformer Encoder]
+from toolkit.neural_toolkit import TransformerEncoder
+
+encoder = TransformerEncoder(
+    input_dim=10,
+    output_dim=256,
+    d_model=256,
+    nhead=8,
+    num_layers=6,
+    dim_feedforward=1024,
+    dropout=0.1,
+    fc_dims=[256],
+    activation='relu'
+)
+\end{lstlisting}
+
+\section{Output Decoders}
+
+Output decoders transform network outputs into actions or values.
+
+\subsection{MLPDecoder}
+
+Multi-layer perceptron decoder.
+
+\begin{lstlisting}[language=python, caption=MLP Decoder]
+from toolkit.neural_toolkit import MLPDecoder
+
+decoder = MLPDecoder(
+    latent_dim=256,
+    output_dim=10,
+    hidden_dims=[256, 128],
+    activation='relu',
+    dropout=0.1
+)
+\end{lstlisting}
+
+\subsection{CNNDecoder}
+
+Convolutional neural network decoder for image generation.
+
+\begin{lstlisting}[language=python, caption=CNN Decoder]
+from toolkit.neural_toolkit import CNNDecoder
+
+decoder = CNNDecoder(
+    latent_dim=256,
+    output_channels=3,
+    fc_dims=[512, 256],
+    conv_dims=[256, 128, 64, 32],
+    kernel_sizes=[3, 3, 3, 3],
+    strides=[2, 2, 2, 2],
+    initial_size=4
+)
+\end{lstlisting}
+
+\subsection{RNNDecoder}
+
+Recurrent neural network decoder for sequential generation.
+
+\begin{lstlisting}[language=python, caption=RNN Decoder]
+from toolkit.neural_toolkit import RNNDecoder
+
+decoder = RNNDecoder(
+    latent_dim=256,
+    output_dim=10,
+    hidden_dim=256,
+    num_layers=2,
+    rnn_type='lstm',
+    max_seq_len=100,
+    fc_dims=[256],
+    activation='relu'
+)
+\end{lstlisting}
+
+\subsection{TransformerDecoder}
+
+Transformer-based decoder for complex sequential generation.
+
+\begin{lstlisting}[language=python, caption=Transformer Decoder]
+from toolkit.neural_toolkit import TransformerDecoder
+
+decoder = TransformerDecoder(
+    latent_dim=256,
+    output_dim=10,
+    d_model=256,
+    nhead=8,
+    num_layers=6,
+    dim_feedforward=1024,
+    max_seq_len=100,
+    dropout=0.1,
+    fc_dims=[256],
+    activation='relu'
+)
+\end{lstlisting}
+
+\section{Discrete Tools}
+
+Discrete tools provide tabular reinforcement learning methods.
+
+\subsection{QTable}
+
+Q-learning table for discrete state-action spaces.
+
+\begin{lstlisting}[language=python, caption=Q-Table Usage]
+from toolkit.neural_toolkit import QTable
+
+# Create Q-table
+q_table = QTable(
+    state_space_size=100,
+    action_space_size=4,
+    initial_value=0.0
+)
+
+# Get Q-value
+q_value = q_table.get_value(state=0, action=1)
+
+# Update Q-value
+q_table.update_value(state=0, action=1, value=0.5, learning_rate=0.1)
+
+# Get best action
+best_action = q_table.get_max_action(state=0)
+
+# Epsilon-greedy policy
+action = q_table.get_policy(state=0, epsilon=0.1)
+\end{lstlisting}
+
+\subsection{ValueTable}
+
+Value table for discrete state spaces.
+
+\begin{lstlisting}[language=python, caption=Value Table Usage]
+from toolkit.neural_toolkit import ValueTable
+
+# Create value table
+value_table = ValueTable(
+    state_space_size=100,
+    initial_value=0.0
+)
+
+# Get value
+value = value_table.get_value(state=0)
+
+# Update value
+value_table.update_value(state=0, value=0.5, learning_rate=0.1)
+
+# Get all values
+values = value_table.get_values()
+\end{lstlisting}
+
+\subsection{PolicyTable}
+
+Policy table for discrete state-action spaces.
+
+\begin{lstlisting}[language=python, caption=Policy Table Usage]
+from toolkit.neural_toolkit import PolicyTable
+
+# Create policy table
+policy_table = PolicyTable(
+    state_space_size=100,
+    action_space_size=4
+)
+
+# Get policy probability
+prob = policy_table.get_value(state=0, action=1)
+
+# Update policy
+policy_table.update_value(state=0, action=1, value=0.3, learning_rate=0.1)
+
+# Sample action
+action = policy_table.get_policy(state=0)
+
+# Get policy probabilities
+probs = policy_table.get_policy_probs(state=0)
+\end{lstlisting}
+
+\subsection{DiscreteTools}
+
+Utility functions for discrete reinforcement learning.
+
+\begin{lstlisting}[language=python, caption=Discrete Tools Usage]
+from toolkit.neural_toolkit import DiscreteTools
+
+# Q-learning update
+DiscreteTools.q_learning_update(
+    q_table=q_table,
+    state=0, action=1, reward=1.0,
+    next_state=2, gamma=0.99, alpha=0.1
+)
+
+# SARSA update
+DiscreteTools.sarsa_update(
+    q_table=q_table,
+    state=0, action=1, reward=1.0,
+    next_state=2, next_action=3,
+    gamma=0.99, alpha=0.1
+)
+
+# Expected SARSA update
+DiscreteTools.expected_sarsa_update(
+    q_table=q_table,
+    state=0, action=1, reward=1.0,
+    next_state=2, policy_table=policy_table,
+    gamma=0.99, alpha=0.1
+)
+
+# Epsilon-greedy policy
+action = DiscreteTools.epsilon_greedy_policy(
+    q_table=q_table, state=0, epsilon=0.1
+)
+
+# Softmax policy
+action = DiscreteTools.softmax_policy(
+    q_table=q_table, state=0, temperature=1.0
+)
+\end{lstlisting}
+
+\section{Training Examples}
+
+\subsection{PPO Training}
+
+\begin{lstlisting}[language=python, caption=PPO Training Example]
+import torch
+import torch.optim as optim
+from toolkit.neural_toolkit import MLPPolicyNetwork, MLPValueNetwork
+
+# Create networks
+policy_network = MLPPolicyNetwork(
+    input_dim=10, output_dim=4,
+    hidden_dims=[256, 256], activation='relu'
+)
+value_network = MLPValueNetwork(
+    input_dim=10, hidden_dims=[256, 256], activation='relu'
+)
+
+# Optimizers
+policy_optimizer = optim.Adam(policy_network.parameters(), lr=0.001)
+value_optimizer = optim.Adam(value_network.parameters(), lr=0.001)
+
+# Training loop
+for episode in range(1000):
+    # Collect experience
+    states, actions, rewards, next_states, dones = collect_experience()
+    
+    # Compute advantages
+    advantages = compute_advantages(states, rewards, value_network)
+    
+    # PPO update
+    for _ in range(10):  # Multiple epochs
+        # Policy loss
+        log_probs = policy_network.get_log_probs(states, actions)
+        ratio = torch.exp(log_probs - old_log_probs)
+        surr1 = ratio * advantages
+        surr2 = torch.clamp(ratio, 0.8, 1.2) * advantages
+        policy_loss = -torch.min(surr1, surr2).mean()
+        
+        # Value loss
+        value_pred = value_network(states)
+        value_loss = torch.nn.functional.mse_loss(value_pred, returns)
+        
+        # Update networks
+        policy_optimizer.zero_grad()
+        policy_loss.backward()
+        policy_optimizer.step()
+        
+        value_optimizer.zero_grad()
+        value_loss.backward()
+        value_optimizer.step()
+\end{lstlisting}
+
+\subsection{DQN Training}
+
+\begin{lstlisting}[language=python, caption=DQN Training Example]
+import torch
+import torch.optim as optim
+from toolkit.neural_toolkit import MLPQNetwork
+from collections import deque
+import random
+
+# Create Q-network
+q_network = MLPQNetwork(
+    input_dim=10, output_dim=4,
+    hidden_dims=[256, 256], activation='relu'
+)
+target_network = MLPQNetwork(
+    input_dim=10, output_dim=4,
+    hidden_dims=[256, 256], activation='relu'
+)
+target_network.load_state_dict(q_network.state_dict())
+
+# Replay buffer
+replay_buffer = deque(maxlen=10000)
+
+# Optimizer
+optimizer = optim.Adam(q_network.parameters(), lr=0.001)
+
+# Training loop
+for episode in range(1000):
+    state = env.reset()
+    done = False
+    
+    while not done:
+        # Epsilon-greedy action selection
+        if random.random() < epsilon:
+            action = env.action_space.sample()
+        else:
+            action = q_network.select_action(state)
+        
+        # Take action
+        next_state, reward, done, _ = env.step(action)
+        
+        # Store experience
+        replay_buffer.append((state, action, reward, next_state, done))
+        
+        # Sample batch
+        if len(replay_buffer) >= batch_size:
+            batch = random.sample(replay_buffer, batch_size)
+            states, actions, rewards, next_states, dones = zip(*batch)
+            
+            # Convert to tensors
+            states = torch.FloatTensor(states)
+            actions = torch.LongTensor(actions)
+            rewards = torch.FloatTensor(rewards)
+            next_states = torch.FloatTensor(next_states)
+            dones = torch.BoolTensor(dones)
+            
+            # Compute Q-values
+            current_q_values = q_network(states).gather(1, actions.unsqueeze(1))
+            next_q_values = target_network(next_states).max(1)[0].detach()
+            target_q_values = rewards + (gamma * next_q_values * ~dones)
+            
+            # Compute loss
+            loss = torch.nn.functional.mse_loss(current_q_values.squeeze(), target_q_values)
+            
+            # Update network
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+        
+        state = next_state
+    
+    # Update target network
+    if episode % target_update_freq == 0:
+        target_network.load_state_dict(q_network.state_dict())
+\end{lstlisting}
+
+\section{Network Utilities}
+
+\subsection{Weight Initialization}
+
+\begin{lstlisting}[language=python, caption=Weight Initialization]
+from toolkit.neural_toolkit import initialize_weights
+
+# Initialize network weights
+initialize_weights(policy_network, method='xavier_uniform')
+initialize_weights(value_network, method='orthogonal')
+\end{lstlisting}
+
+\subsection{Model Saving and Loading}
+
+\begin{lstlisting}[language=python, caption=Model Persistence]
+import torch
+
+# Save model
+torch.save({
+    'policy_state_dict': policy_network.state_dict(),
+    'value_state_dict': value_network.state_dict(),
+    'policy_optimizer_state_dict': policy_optimizer.state_dict(),
+    'value_optimizer_state_dict': value_optimizer.state_dict(),
+    'episode': episode,
+    'reward_history': reward_history
+}, 'checkpoint.pth')
+
+# Load model
+checkpoint = torch.load('checkpoint.pth')
+policy_network.load_state_dict(checkpoint['policy_state_dict'])
+value_network.load_state_dict(checkpoint['value_state_dict'])
+policy_optimizer.load_state_dict(checkpoint['policy_optimizer_state_dict'])
+value_optimizer.load_state_dict(checkpoint['value_optimizer_state_dict'])
+episode = checkpoint['episode']
+reward_history = checkpoint['reward_history']
+\end{lstlisting}
+
+\section{Best Practices}
+
+\subsection{Network Architecture}
+
+\begin{enumerate}
+    \item Start with simple architectures and gradually increase complexity
+    \item Use appropriate activation functions (ReLU for most cases, GELU for transformers)
+    \item Consider using layer normalization for training stability
+    \item Use dropout for regularization
+    \item Monitor gradient flow and weight distributions
+\end{enumerate}
+
+\subsection{Training}
+
+\begin{enumerate}
+    \item Use appropriate learning rates (typically 0.001 for Adam)
+    \item Implement learning rate scheduling
+    \item Use gradient clipping for stability
+    \item Monitor training progress with plots
+    \item Save checkpoints regularly
+\end{enumerate}
+
+\subsection{Hyperparameter Tuning}
+
+\begin{enumerate}
+    \item Use grid search or random search for hyperparameter optimization
+    \item Start with broad ranges and narrow down
+    \item Use cross-validation when possible
+    \item Monitor multiple metrics (reward, loss, convergence)
+    \item Document all hyperparameter settings
+\end{enumerate} 

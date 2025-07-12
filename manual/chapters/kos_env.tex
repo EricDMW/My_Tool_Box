@@ -1,0 +1,653 @@
+\chapter{Kuramoto Oscillator Environment}
+
+\section{Overview}
+
+The Kuramoto Oscillator Environment (\texttt{kos\_env}) is a specialized environment for studying synchronization phenomena in complex systems. It implements the Kuramoto model, which describes the dynamics of coupled oscillators and is widely used in physics, biology, and engineering.
+
+\section{Theoretical Background}
+
+\subsection{Kuramoto Model}
+
+The Kuramoto model describes the dynamics of $N$ coupled oscillators:
+
+\begin{equation}
+\frac{d\theta_i}{dt} = \omega_i + \frac{K}{N}\sum_{j=1}^{N}\sin(\theta_j - \theta_i) + \eta_i(t)
+\end{equation}
+
+where:
+\begin{itemize}
+    \item $\theta_i$ is the phase of oscillator $i$
+    \item $\omega_i$ is the natural frequency of oscillator $i$
+    \item $K$ is the coupling strength
+    \item $\eta_i(t)$ is noise
+\end{itemize}
+
+\subsection{Synchronization Order Parameter}
+
+The degree of synchronization is measured by the order parameter:
+
+\begin{equation}
+r = \left|\frac{1}{N}\sum_{j=1}^{N}e^{i\theta_j}\right|
+\end{equation}
+
+where $r = 1$ indicates perfect synchronization and $r = 0$ indicates complete desynchronization.
+
+\section{Environment Features}
+
+\subsection{Core Components}
+
+\begin{itemize}
+    \item \textbf{Oscillator Dynamics}: Realistic implementation of Kuramoto equations
+    \item \textbf{Multiple Oscillators}: Configurable number of oscillators
+    \item \textbf{Coupling Control}: Adjustable coupling strength
+    \item \textbf{Noise Injection}: Configurable noise levels
+    \item \textbf{Synchronization Metrics}: Real-time synchronization measurement
+\end{itemize}
+
+\subsection{Observation Space}
+
+The environment provides rich observations:
+
+\begin{lstlisting}[language=python, caption=Observation Components]
+observation = [
+    phase_1, phase_2, ..., phase_N,      # Oscillator phases
+    frequency_1, frequency_2, ..., frequency_N,  # Natural frequencies
+    order_parameter,                     # Synchronization measure
+    coupling_strength,                   # Current coupling
+    time_step                           # Current time
+]
+\end{lstlisting}
+
+\subsection{Action Space}
+
+Actions control the coupling strength and external forcing:
+
+\begin{lstlisting}[language=python, caption=Action Space]
+# Continuous actions
+action_space = spaces.Box(
+    low=[0.0, -1.0],  # [coupling_strength, external_force]
+    high=[10.0, 1.0],
+    dtype=np.float32
+)
+\end{lstlisting}
+
+\section{Installation and Setup}
+
+\subsection{Basic Installation}
+
+\begin{lstlisting}[language=bash, caption=Install Kuramoto Environment]
+cd envlib_project/env_lib/kos_env
+pip install -e .
+\end{lstlisting}
+
+\subsection{Dependencies}
+
+The environment requires:
+\begin{itemize}
+    \item \textbf{NumPy}: For numerical computations
+    \item \textbf{SciPy}: For ODE integration
+    \item \textbf{Matplotlib}: For visualization (optional)
+\end{itemize}
+
+\section{Basic Usage}
+
+\subsection{Creating the Environment}
+
+\begin{lstlisting}[language=python, caption=Basic Environment Creation]
+from env_lib import kos_env
+
+# Create environment with default settings
+env = kos_env.KuramotoEnv(
+    num_oscillators=10,
+    coupling_strength=1.0,
+    noise_strength=0.1,
+    max_steps=200
+)
+
+# Get environment information
+print(f"Number of oscillators: {env.num_oscillators}")
+print(f"Observation space: {env.observation_space}")
+print(f"Action space: {env.action_space}")
+\end{lstlisting}
+
+\subsection{Running a Simple Episode}
+
+\begin{lstlisting}[language=python, caption=Simple Episode]
+import numpy as np
+
+# Reset environment
+observations = env.reset()
+
+# Run episode
+done = False
+total_reward = 0
+synchronization_history = []
+
+while not done:
+    # Random action
+    action = env.action_space.sample()
+    
+    # Take step
+    next_observations, reward, done, info = env.step(action)
+    
+    # Extract synchronization
+    order_parameter = next_observations[env.num_oscillators]
+    synchronization_history.append(order_parameter)
+    
+    observations = next_observations
+    total_reward += reward
+
+print(f"Episode completed with total reward: {total_reward}")
+print(f"Final synchronization: {synchronization_history[-1]:.3f}")
+\end{lstlisting}
+
+\section{Configuration Options}
+
+\subsection{Environment Parameters}
+
+\begin{lstlisting}[language=python, caption=Environment Configuration]
+# Configure environment
+config = {
+    'num_oscillators': 20,        # Number of oscillators
+    'coupling_strength': 2.0,     # Initial coupling strength
+    'noise_strength': 0.05,       # Noise level
+    'max_steps': 500,             # Maximum steps per episode
+    'dt': 0.01,                   # Time step for integration
+    'frequency_distribution': 'uniform',  # Frequency distribution
+    'frequency_range': [-1.0, 1.0],       # Frequency range
+    'reward_type': 'synchronization'      # Reward type
+}
+
+env = kos_env.KuramotoEnv(**config)
+\end{lstlisting}
+
+\subsection{Parameter Descriptions}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|l|l|l|}
+\hline
+\textbf{Parameter} & \textbf{Type} & \textbf{Description} \\
+\hline
+num\_oscillators & int & Number of oscillators (default: 10) \\
+coupling\_strength & float & Initial coupling strength (default: 1.0) \\
+noise\_strength & float & Noise level (default: 0.1) \\
+max\_steps & int & Maximum steps per episode (default: 200) \\
+dt & float & Time step for integration (default: 0.01) \\
+frequency\_distribution & str & Distribution type (default: 'uniform') \\
+frequency\_range & list & Frequency range (default: [-1.0, 1.0]) \\
+reward\_type & str & Reward type (default: 'synchronization') \\
+\hline
+\end{tabular}
+\caption{Environment parameters}
+\end{table}
+
+\section{Reward System}
+
+\subsection{Reward Types}
+
+The environment supports different reward schemes:
+
+\begin{lstlisting}[language=python, caption=Reward Types]
+# Synchronization reward
+def synchronization_reward(order_parameter, target_sync=1.0):
+    return order_parameter - target_sync
+
+# Energy efficiency reward
+def energy_reward(order_parameter, coupling_strength):
+    sync_benefit = order_parameter
+    energy_cost = coupling_strength ** 2
+    return sync_benefit - 0.1 * energy_cost
+
+# Multi-objective reward
+def multi_objective_reward(order_parameter, coupling_strength, action):
+    sync_reward = order_parameter
+    energy_penalty = 0.1 * coupling_strength ** 2
+    action_smoothness = -0.01 * np.sum(action ** 2)
+    return sync_reward + energy_penalty + action_smoothness
+\end{lstlisting}
+
+\section{Advanced Features}
+
+\subsection{Multiple Integration Methods}
+
+The environment supports different ODE integration methods:
+
+\begin{lstlisting}[language=python, caption=Integration Methods]
+# Configure integration method
+env = kos_env.KuramotoEnv(
+    integration_method='rk4',     # Runge-Kutta 4th order
+    # integration_method='euler', # Euler method (faster)
+    # integration_method='scipy', # SciPy integrator
+    dt=0.01
+)
+\end{lstlisting}
+
+\subsection{Frequency Distributions}
+
+Different frequency distributions can be used:
+
+\begin{lstlisting}[language=python, caption=Frequency Distributions]
+# Uniform distribution
+env = kos_env.KuramotoEnv(
+    frequency_distribution='uniform',
+    frequency_range=[-1.0, 1.0]
+)
+
+# Normal distribution
+env = kos_env.KuramotoEnv(
+    frequency_distribution='normal',
+    frequency_mean=0.0,
+    frequency_std=0.5
+)
+
+# Lorentzian distribution
+env = kos_env.KuramotoEnv(
+    frequency_distribution='lorentzian',
+    frequency_center=0.0,
+    frequency_width=0.5
+)
+\end{lstlisting}
+
+\section{Training Examples}
+
+\subsection{PPO Training for Synchronization}
+
+\begin{lstlisting}[language=python, caption=PPO Training Example]
+import torch
+import torch.optim as optim
+import numpy as np
+from toolkit.neural_toolkit import MLPPolicyNetwork, MLPValueNetwork
+from env_lib import kos_env
+from toolkit.plotkit import plot_training_curves
+
+# Create environment
+env = kos_env.KuramotoEnv(
+    num_oscillators=15,
+    coupling_strength=1.0,
+    noise_strength=0.1,
+    max_steps=300
+)
+
+# Create networks
+policy_network = MLPPolicyNetwork(
+    input_dim=env.observation_space.shape[0],
+    output_dim=env.action_space.shape[0],
+    hidden_dims=[128, 128],
+    activation='relu',
+    action_type='continuous'
+)
+
+value_network = MLPValueNetwork(
+    input_dim=env.observation_space.shape[0],
+    hidden_dims=[128, 128],
+    activation='relu'
+)
+
+# Optimizers
+policy_optimizer = optim.Adam(policy_network.parameters(), lr=0.001)
+value_optimizer = optim.Adam(value_network.parameters(), lr=0.001)
+
+# Training loop
+num_episodes = 1000
+episode_rewards = []
+synchronization_history = []
+
+for episode in range(num_episodes):
+    observations = env.reset()
+    episode_reward = 0
+    episode_sync = 0
+    done = False
+    
+    # Collect episode data
+    states, actions, rewards, values, log_probs = [], [], [], [], []
+    
+    while not done:
+        # Get action from policy
+        action_mean = policy_network(torch.FloatTensor(observations))
+        action_dist = torch.distributions.Normal(action_mean, 0.1)
+        action = action_dist.sample()
+        log_prob = action_dist.log_prob(action).sum()
+        
+        # Get value estimate
+        value = value_network(torch.FloatTensor(observations))
+        
+        # Take action
+        next_observations, reward, done, info = env.step(action.detach().numpy())
+        
+        # Store data
+        states.append(observations)
+        actions.append(action.detach().numpy())
+        rewards.append(reward)
+        values.append(value.item())
+        log_probs.append(log_prob.item())
+        
+        # Track synchronization
+        order_parameter = next_observations[env.num_oscillators]
+        episode_sync += order_parameter
+        
+        observations = next_observations
+        episode_reward += reward
+    
+    # Convert to tensors
+    states = torch.FloatTensor(states)
+    actions = torch.FloatTensor(actions)
+    rewards = torch.FloatTensor(rewards)
+    values = torch.FloatTensor(values)
+    old_log_probs = torch.FloatTensor(log_probs)
+    
+    # Compute advantages
+    advantages = compute_gae(rewards, values, gamma=0.99, gae_lambda=0.95)
+    returns = advantages + values
+    
+    # Normalize advantages
+    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+    
+    # PPO update
+    for _ in range(10):  # Multiple epochs
+        # Get current policy and value
+        action_means = policy_network(states)
+        action_dist = torch.distributions.Normal(action_means, 0.1)
+        new_log_probs = action_dist.log_prob(actions).sum(dim=1)
+        entropy = action_dist.entropy().mean()
+        
+        current_values = value_network(states).squeeze()
+        
+        # Compute ratios
+        ratio = torch.exp(new_log_probs - old_log_probs)
+        
+        # Compute surrogate losses
+        surr1 = ratio * advantages
+        surr2 = torch.clamp(ratio, 0.8, 1.2) * advantages
+        policy_loss = -torch.min(surr1, surr2).mean()
+        
+        value_loss = torch.nn.functional.mse_loss(current_values, returns)
+        
+        # Total loss
+        total_loss = policy_loss + 0.5 * value_loss - 0.01 * entropy
+        
+        # Update networks
+        policy_optimizer.zero_grad()
+        value_optimizer.zero_grad()
+        total_loss.backward()
+        policy_optimizer.step()
+        value_optimizer.step()
+    
+    # Log results
+    episode_rewards.append(episode_reward)
+    synchronization_history.append(episode_sync / env.max_steps)
+    
+    if episode % 100 == 0:
+        avg_reward = np.mean(episode_rewards[-100:])
+        avg_sync = np.mean(synchronization_history[-100:])
+        print(f"Episode {episode}: Reward = {avg_reward:.2f}, Sync = {avg_sync:.3f}")
+
+# Plot results
+plot_training_curves(
+    episodes=np.arange(num_episodes),
+    rewards=episode_rewards,
+    losses=synchronization_history,
+    title="Kuramoto Oscillator Training",
+    save_path="kuramoto_training.png"
+)
+
+def compute_gae(rewards, values, gamma, gae_lambda):
+    """Compute Generalized Advantage Estimation"""
+    advantages = torch.zeros_like(rewards)
+    last_advantage = 0
+    
+    for t in reversed(range(len(rewards))):
+        if t == len(rewards) - 1:
+            next_value = 0
+        else:
+            next_value = values[t + 1]
+        
+        delta = rewards[t] + gamma * next_value - values[t]
+        advantages[t] = delta + gamma * gae_lambda * last_advantage
+        last_advantage = advantages[t]
+    
+    return advantages
+\end{lstlisting}
+
+\subsection{Multi-Agent Control}
+
+Training multiple agents to control different groups of oscillators:
+
+\begin{lstlisting}[language=python, caption=Multi-Agent Control]
+import torch
+import torch.optim as optim
+import numpy as np
+from toolkit.neural_toolkit import MLPPolicyNetwork
+from env_lib import kos_env
+
+# Create environment with multiple oscillator groups
+env = kos_env.KuramotoEnv(
+    num_oscillators=20,
+    coupling_strength=1.0,
+    noise_strength=0.1,
+    max_steps=300
+)
+
+# Create agents for different oscillator groups
+num_agents = 4
+oscillators_per_agent = env.num_oscillators // num_agents
+
+agents = {}
+optimizers = {}
+
+for i in range(num_agents):
+    agents[f'agent_{i}'] = MLPPolicyNetwork(
+        input_dim=oscillators_per_agent + 2,  # Phases + order_param + coupling
+        output_dim=2,  # [coupling_strength, external_force]
+        hidden_dims=[64, 64],
+        activation='relu',
+        action_type='continuous'
+    )
+    optimizers[f'agent_{i}'] = optim.Adam(agents[f'agent_{i}'].parameters(), lr=0.001)
+
+# Training loop
+num_episodes = 500
+episode_rewards = []
+
+for episode in range(num_episodes):
+    observations = env.reset()
+    episode_reward = 0
+    done = False
+    
+    while not done:
+        # Get actions from all agents
+        actions = {}
+        for i in range(num_agents):
+            agent_id = f'agent_{i}'
+            start_idx = i * oscillators_per_agent
+            end_idx = start_idx + oscillators_per_agent
+            
+            # Agent-specific observation
+            agent_obs = np.concatenate([
+                observations[start_idx:end_idx],  # Phases
+                [observations[env.num_oscillators]],  # Order parameter
+                [observations[env.num_oscillators + 1]]  # Coupling strength
+            ])
+            
+            action_mean = agents[agent_id](torch.FloatTensor(agent_obs))
+            action_dist = torch.distributions.Normal(action_mean, 0.1)
+            action = action_dist.sample()
+            actions[agent_id] = action.detach().numpy()
+        
+        # Combine actions (average coupling, sum forces)
+        combined_action = np.array([
+            np.mean([actions[agent_id][0] for agent_id in actions]),
+            np.sum([actions[agent_id][1] for agent_id in actions])
+        ])
+        
+        # Take step
+        next_observations, reward, done, info = env.step(combined_action)
+        
+        # Update observations
+        observations = next_observations
+        episode_reward += reward
+    
+    episode_rewards.append(episode_reward)
+    
+    if episode % 50 == 0:
+        avg_reward = np.mean(episode_rewards[-50:])
+        print(f"Episode {episode}: Average reward = {avg_reward:.2f}")
+\end{lstlisting}
+
+\section{Visualization and Analysis}
+
+\subsection{Phase Evolution Visualization}
+
+\begin{lstlisting}[language=python, caption=Phase Evolution]
+import matplotlib.pyplot as plt
+import numpy as np
+from env_lib import kos_env
+
+# Create environment
+env = kos_env.KuramotoEnv(num_oscillators=10, max_steps=1000)
+
+# Run simulation
+observations = env.reset()
+phase_history = []
+sync_history = []
+
+done = False
+while not done:
+    action = env.action_space.sample()  # Random actions
+    observations, reward, done, info = env.step(action)
+    
+    # Store phases and synchronization
+    phases = observations[:env.num_oscillators]
+    order_parameter = observations[env.num_oscillators]
+    
+    phase_history.append(phases.copy())
+    sync_history.append(order_parameter)
+
+# Convert to arrays
+phase_history = np.array(phase_history)
+sync_history = np.array(sync_history)
+
+# Plot phase evolution
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+
+# Phase trajectories
+for i in range(env.num_oscillators):
+    ax1.plot(phase_history[:, i], label=f'Oscillator {i+1}')
+ax1.set_title('Phase Evolution')
+ax1.set_xlabel('Time Step')
+ax1.set_ylabel('Phase')
+ax1.legend()
+ax1.grid(True)
+
+# Synchronization
+ax2.plot(sync_history, 'r-', linewidth=2)
+ax2.set_title('Synchronization Order Parameter')
+ax2.set_xlabel('Time Step')
+ax2.set_ylabel('Order Parameter')
+ax2.grid(True)
+ax2.set_ylim([0, 1])
+
+plt.tight_layout()
+plt.savefig('kuramoto_evolution.png', dpi=300, bbox_inches='tight')
+plt.show()
+\end{lstlisting}
+
+\subsection{Parameter Space Analysis}
+
+\begin{lstlisting}[language=python, caption=Parameter Analysis]
+import numpy as np
+import matplotlib.pyplot as plt
+from env_lib import kos_env
+
+# Analyze synchronization vs coupling strength
+coupling_strengths = np.linspace(0, 5, 50)
+final_sync = []
+
+for K in coupling_strengths:
+    env = kos_env.KuramotoEnv(
+        num_oscillators=20,
+        coupling_strength=K,
+        noise_strength=0.1,
+        max_steps=500
+    )
+    
+    observations = env.reset()
+    done = False
+    
+    while not done:
+        action = env.action_space.sample()
+        observations, reward, done, info = env.step(action)
+    
+    # Final synchronization
+    final_sync.append(observations[env.num_oscillators])
+
+# Plot results
+plt.figure(figsize=(10, 6))
+plt.plot(coupling_strengths, final_sync, 'b-', linewidth=2)
+plt.xlabel('Coupling Strength (K)')
+plt.ylabel('Final Synchronization')
+plt.title('Synchronization vs Coupling Strength')
+plt.grid(True)
+plt.savefig('sync_vs_coupling.png', dpi=300, bbox_inches='tight')
+plt.show()
+\end{lstlisting}
+
+\section{Research Applications}
+
+\subsection{Synchronization Control}
+
+The environment is useful for studying:
+\begin{itemize}
+    \item \textbf{Optimal Control}: Finding optimal coupling strategies
+    \item \textbf{Robustness}: Studying synchronization under noise
+    \item \textbf{Network Effects}: Analyzing different network topologies
+    \item \textbf{Multi-Scale Dynamics}: Understanding hierarchical synchronization
+\end{itemize}
+
+\subsection{Extensions and Modifications}
+
+\begin{lstlisting}[language=python, caption=Custom Extensions]
+# Custom frequency distribution
+class CustomKuramotoEnv(kos_env.KuramotoEnv):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+    
+    def generate_frequencies(self):
+        # Custom frequency generation
+        return np.random.exponential(scale=0.5, size=self.num_oscillators)
+    
+    def custom_reward(self, order_parameter, coupling_strength):
+        # Custom reward function
+        sync_reward = order_parameter
+        energy_cost = 0.1 * coupling_strength ** 2
+        return sync_reward - energy_cost
+\end{lstlisting}
+
+\section{Best Practices}
+
+\subsection{Environment Configuration}
+
+\begin{enumerate}
+    \item Start with fewer oscillators (10-20) for initial experiments
+    \item Use appropriate coupling strength ranges (0-5)
+    \item Set reasonable noise levels (0.01-0.1)
+    \item Choose appropriate episode lengths (200-500 steps)
+\end{enumerate}
+
+\subsection{Training Strategies}
+
+\begin{enumerate}
+    \item Use continuous action spaces for smooth control
+    \item Implement reward shaping for better learning
+    \item Monitor both synchronization and energy efficiency
+    \item Consider multi-objective optimization
+\end{enumerate}
+
+\subsection{Analysis}
+
+\begin{enumerate}
+    \item Track phase evolution over time
+    \item Analyze synchronization transitions
+    \item Study parameter sensitivity
+    \item Compare different control strategies
+\end{enumerate} 

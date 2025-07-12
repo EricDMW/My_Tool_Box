@@ -1,0 +1,366 @@
+\chapter{Toolkit Overview}
+
+\section{Introduction to the Toolkit}
+
+The \texttt{toolkit} package is a unified Python package that combines neural network components, plotting utilities, and parameter management tools into a single, cohesive research toolkit. It's designed to provide researchers and developers with a comprehensive set of tools for reinforcement learning and machine learning experiments.
+
+\section{Package Structure}
+
+The toolkit is organized into three main subpackages:
+
+\begin{figure}[H]
+\centering
+\begin{verbatim}
+toolkit/
+├── __init__.py              # Main package initialization
+├── neural_toolkit/          # Neural network components
+│   ├── networks/            # Network architectures
+│   ├── encoders/            # State encoders
+│   ├── decoders/            # Output decoders
+│   ├── discrete_tools/      # Tabular methods
+│   └── utils/               # Utility functions
+├── plotkit/                 # Plotting utilities
+│   ├── core.py              # Core plotting functions
+│   └── __main__.py          # Command-line interface
+└── parakit/                 # Parameter management
+\end{verbatim}
+\caption{Toolkit package structure}
+\end{figure}
+
+\section{Neural Toolkit}
+
+The \texttt{neural\_toolkit} subpackage provides comprehensive neural network components for reinforcement learning.
+
+\subsection{Network Architectures}
+
+\subsubsection{Policy Networks}
+
+Policy networks implement different policy architectures:
+
+\begin{itemize}
+    \item \textbf{MLPPolicyNetwork}: Multi-layer perceptron policy
+    \item \textbf{CNPolicyNetwork}: Convolutional neural network policy
+    \item \textbf{RNNPolicyNetwork}: Recurrent neural network policy
+    \item \textbf{TransformerPolicyNetwork}: Transformer-based policy
+    \item \textbf{HybridPolicyNetwork}: Combination of different architectures
+\end{itemize}
+
+\subsubsection{Value Networks}
+
+Value networks for state-value and action-value estimation:
+
+\begin{itemize}
+    \item \textbf{MLPValueNetwork}: MLP-based value network
+    \item \textbf{CNValueNetwork}: CNN-based value network
+    \item \textbf{RNNValueNetwork}: RNN-based value network
+    \item \textbf{TransformerValueNetwork}: Transformer-based value network
+\end{itemize}
+
+\subsubsection{Q-Networks}
+
+Q-networks for action-value function approximation:
+
+\begin{itemize}
+    \item \textbf{MLPQNetwork}: MLP-based Q-network
+    \item \textbf{CNQNetwork}: CNN-based Q-network
+    \item \textbf{RNNQNetwork}: RNN-based Q-network
+    \item \textbf{TransformerQNetwork}: Transformer-based Q-network
+    \item \textbf{DuelingQNetwork}: Dueling architecture Q-network
+\end{itemize}
+
+\subsection{State Encoders}
+
+State encoders transform raw observations into neural network inputs:
+
+\begin{itemize}
+    \item \textbf{MLPEncoder}: Multi-layer perceptron encoder
+    \item \textbf{CNNEncoder}: Convolutional neural network encoder
+    \item \textbf{RNNEncoder}: Recurrent neural network encoder
+    \item \textbf{TransformerEncoder}: Transformer-based encoder
+    \item \textbf{HybridEncoder}: Combination of different encoders
+\end{itemize}
+
+\subsection{Output Decoders}
+
+Output decoders transform network outputs into actions or values:
+
+\begin{itemize}
+    \item \textbf{MLPDecoder}: Multi-layer perceptron decoder
+    \item \textbf{CNNDecoder}: Convolutional neural network decoder
+    \item \textbf{RNNDecoder}: Recurrent neural network decoder
+    \item \textbf{TransformerDecoder}: Transformer-based decoder
+    \item \textbf{VariationalDecoder}: Variational autoencoder decoder
+\end{itemize}
+
+\subsection{Discrete Tools}
+
+Tools for tabular reinforcement learning methods:
+
+\begin{itemize}
+    \item \textbf{QTable}: Q-learning table implementation
+    \item \textbf{ValueTable}: Value iteration table
+    \item \textbf{PolicyTable}: Policy table for discrete actions
+    \item \textbf{DiscreteTools}: Utility functions for discrete RL
+\end{itemize}
+
+\section{Plotkit}
+
+The \texttt{plotkit} subpackage provides advanced plotting utilities for research visualization.
+
+\subsection{Core Features}
+
+\begin{itemize}
+    \item \textbf{Training Plots}: Loss curves, reward plots, and convergence analysis
+    \item \textbf{Performance Metrics}: Accuracy, precision, recall, and F1-score plots
+    \item \textbf{Network Analysis}: Weight distributions, activation maps, and gradients
+    \item \textbf{Environment Visualization}: State representations and action distributions
+    \item \textbf{Comparison Plots}: Multi-algorithm and multi-environment comparisons
+\end{itemize}
+
+\subsection{Plot Types}
+
+\subsubsection{Training Visualization}
+
+\begin{lstlisting}[language=python, caption=Training plot example]
+from toolkit.plotkit import plot_training_curves
+
+# Plot training progress
+plot_training_curves(
+    rewards=rewards_history,
+    losses=loss_history,
+    title="Training Progress",
+    save_path="training_curves.png"
+)
+\end{lstlisting}
+
+\subsubsection{Performance Analysis}
+
+\begin{lstlisting}[language=python, caption=Performance analysis example]
+from toolkit.plotkit import plot_performance_metrics
+
+# Plot performance metrics
+plot_performance_metrics(
+    metrics={
+        'accuracy': accuracy_history,
+        'precision': precision_history,
+        'recall': recall_history
+    },
+    title="Performance Metrics",
+    save_path="performance.png"
+)
+\end{lstlisting}
+
+\subsubsection{Network Analysis}
+
+\begin{lstlisting}[language=python, caption=Network analysis example]
+from toolkit.plotkit import plot_weight_distributions
+
+# Plot weight distributions
+plot_weight_distributions(
+    model=policy_network,
+    title="Weight Distributions",
+    save_path="weights.png"
+)
+\end{lstlisting}
+
+\section{Parakit}
+
+The \texttt{parakit} subpackage provides parameter management and configuration tools.
+
+\subsection{Features}
+
+\begin{itemize}
+    \item \textbf{Parameter Configuration}: JSON and YAML configuration files
+    \item \textbf{Hyperparameter Management}: Grid search and random search utilities
+    \item \textbf{Experiment Tracking}: Parameter logging and experiment management
+    \item \textbf{Configuration Validation}: Parameter validation and type checking
+\end{itemize}
+
+\section{Usage Examples}
+
+\subsection{Basic Usage}
+
+\begin{lstlisting}[language=python, caption=Basic toolkit usage]
+import torch
+from toolkit.neural_toolkit import MLPPolicyNetwork, MLPValueNetwork
+from toolkit.plotkit import plot_training_curves
+
+# Create networks
+policy_network = MLPPolicyNetwork(
+    input_dim=10,
+    output_dim=4,
+    hidden_dims=[256, 256],
+    activation='relu'
+)
+
+value_network = MLPValueNetwork(
+    input_dim=10,
+    hidden_dims=[256, 256],
+    activation='relu'
+)
+
+# Training loop
+rewards = []
+losses = []
+
+for episode in range(1000):
+    # Training code here
+    episode_reward = train_episode(policy_network, value_network)
+    rewards.append(episode_reward)
+    
+    if episode % 100 == 0:
+        loss = compute_loss(policy_network, value_network)
+        losses.append(loss)
+
+# Plot results
+plot_training_curves(
+    rewards=rewards,
+    losses=losses,
+    title="Training Progress",
+    save_path="training_results.png"
+)
+\end{lstlisting}
+
+\subsection{Advanced Usage}
+
+\begin{lstlisting}[language=python, caption=Advanced toolkit usage]
+import torch
+from toolkit.neural_toolkit import (
+    TransformerPolicyNetwork,
+    TransformerValueNetwork,
+    CNNEncoder,
+    MLPDecoder
+)
+from toolkit.plotkit import plot_network_analysis
+
+# Create complex network architecture
+encoder = CNNEncoder(
+    input_channels=3,
+    hidden_dims=[32, 64, 128],
+    output_dim=256
+)
+
+policy_network = TransformerPolicyNetwork(
+    input_dim=256,
+    output_dim=10,
+    d_model=256,
+    nhead=8,
+    num_layers=6
+)
+
+value_network = TransformerValueNetwork(
+    input_dim=256,
+    d_model=256,
+    nhead=8,
+    num_layers=6
+)
+
+# Network analysis
+plot_network_analysis(
+    networks={
+        'encoder': encoder,
+        'policy': policy_network,
+        'value': value_network
+    },
+    title="Network Architecture Analysis",
+    save_path="network_analysis.png"
+)
+\end{lstlisting}
+
+\section{Configuration}
+
+\subsection{Default Configuration}
+
+The toolkit uses sensible defaults for most parameters:
+
+\begin{lstlisting}[language=python, caption=Default configuration]
+DEFAULT_CONFIG = {
+    'device': 'cuda' if torch.cuda.is_available() else 'cpu',
+    'dtype': torch.float32,
+    'seed': 42,
+    'activation': 'relu',
+    'dropout': 0.1,
+    'layer_norm': False,
+    'hidden_dims': [256, 256],
+    'learning_rate': 0.001,
+    'batch_size': 32
+}
+\end{lstlisting}
+
+\subsection{Custom Configuration}
+
+You can override default settings:
+
+\begin{lstlisting}[language=python, caption=Custom configuration]
+from toolkit import set_config
+
+# Set custom configuration
+set_config({
+    'device': 'cuda:0',
+    'dtype': torch.float16,
+    'activation': 'gelu',
+    'hidden_dims': [512, 512, 256],
+    'learning_rate': 0.0001
+})
+\end{lstlisting}
+
+\section{Best Practices}
+
+\subsection{Network Design}
+
+\begin{enumerate}
+    \item Start with simple architectures and gradually increase complexity
+    \item Use appropriate activation functions for your task
+    \item Consider using layer normalization for training stability
+    \item Monitor gradient flow and weight distributions
+    \item Use appropriate learning rates and optimizers
+\end{enumerate}
+
+\subsection{Training}
+
+\begin{enumerate}
+    \item Use appropriate batch sizes for your hardware
+    \item Monitor training progress with plots
+    \item Implement early stopping to prevent overfitting
+    \item Use learning rate scheduling for better convergence
+    \item Save model checkpoints regularly
+\end{enumerate}
+
+\subsection{Visualization}
+
+\begin{enumerate}
+    \item Plot training curves to monitor progress
+    \item Analyze network weights and activations
+    \item Compare different architectures and hyperparameters
+    \item Use appropriate plot types for different metrics
+    \item Save plots with descriptive filenames
+\end{enumerate}
+
+\section{Integration with Environments}
+
+The toolkit is designed to work seamlessly with the environment library:
+
+\begin{lstlisting}[language=python, caption=Environment integration]
+import gym
+from toolkit.neural_toolkit import MLPPolicyNetwork
+from env_lib import pistonball_env
+
+# Create environment
+env = pistonball_env.PistonballEnv()
+
+# Create policy network
+policy_network = MLPPolicyNetwork(
+    input_dim=env.observation_space.shape[0],
+    output_dim=env.action_space.n,
+    hidden_dims=[256, 256]
+)
+
+# Training loop
+for episode in range(1000):
+    obs = env.reset()
+    done = False
+    
+    while not done:
+        action = policy_network.select_action(obs)
+        obs, reward, done, info = env.step(action)
+\end{lstlisting} 

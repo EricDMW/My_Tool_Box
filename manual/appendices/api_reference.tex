@@ -1,0 +1,756 @@
+\appendix
+
+\chapter{API Reference}
+
+\section{Neural Toolkit API}
+
+\subsection{Policy Networks}
+
+\subsubsection{MLPPolicyNetwork}
+
+\begin{lstlisting}[language=python]
+class MLPPolicyNetwork(nn.Module):
+    def __init__(self, input_dim, output_dim, hidden_dims=[256, 256], 
+                 activation='relu', dropout=0.1, layer_norm=False, 
+                 action_type='discrete', action_std=1.0):
+        """
+        Multi-layer perceptron policy network.
+        
+        Args:
+            input_dim (int): Input dimension
+            output_dim (int): Output dimension
+            hidden_dims (list): Hidden layer dimensions
+            activation (str): Activation function
+            dropout (float): Dropout rate
+            layer_norm (bool): Use layer normalization
+            action_type (str): 'discrete' or 'continuous'
+            action_std (float): Standard deviation for continuous actions
+        """
+\end{lstlisting}
+
+\subsubsection{CNPolicyNetwork}
+
+\begin{lstlisting}[language=python]
+class CNPolicyNetwork(nn.Module):
+    def __init__(self, input_channels, output_dim, conv_dims=[32, 64, 128],
+                 fc_dims=[256, 256], kernel_sizes=[3, 3, 3], strides=[2, 2, 2],
+                 activation='relu', dropout=0.1):
+        """
+        Convolutional neural network policy.
+        
+        Args:
+            input_channels (int): Number of input channels
+            output_dim (int): Output dimension
+            conv_dims (list): Convolutional layer dimensions
+            fc_dims (list): Fully connected layer dimensions
+            kernel_sizes (list): Kernel sizes for conv layers
+            strides (list): Strides for conv layers
+            activation (str): Activation function
+            dropout (float): Dropout rate
+        """
+\end{lstlisting}
+
+\subsubsection{RNNPolicyNetwork}
+
+\begin{lstlisting}[language=python]
+class RNNPolicyNetwork(nn.Module):
+    def __init__(self, input_dim, output_dim, hidden_dim=256, num_layers=2,
+                 rnn_type='lstm', fc_dims=[256], activation='relu', dropout=0.1):
+        """
+        Recurrent neural network policy.
+        
+        Args:
+            input_dim (int): Input dimension
+            output_dim (int): Output dimension
+            hidden_dim (int): Hidden dimension
+            num_layers (int): Number of RNN layers
+            rnn_type (str): 'lstm' or 'gru'
+            fc_dims (list): Fully connected layer dimensions
+            activation (str): Activation function
+            dropout (float): Dropout rate
+        """
+\end{lstlisting}
+
+\subsubsection{TransformerPolicyNetwork}
+
+\begin{lstlisting}[language=python]
+class TransformerPolicyNetwork(nn.Module):
+    def __init__(self, input_dim, output_dim, d_model=256, nhead=8, 
+                 num_layers=6, dim_feedforward=1024, dropout=0.1,
+                 fc_dims=[256], activation='relu'):
+        """
+        Transformer-based policy network.
+        
+        Args:
+            input_dim (int): Input dimension
+            output_dim (int): Output dimension
+            d_model (int): Model dimension
+            nhead (int): Number of attention heads
+            num_layers (int): Number of transformer layers
+            dim_feedforward (int): Feedforward dimension
+            dropout (float): Dropout rate
+            fc_dims (list): Fully connected layer dimensions
+            activation (str): Activation function
+        """
+\end{lstlisting}
+
+\subsection{Value Networks}
+
+\subsubsection{MLPValueNetwork}
+
+\begin{lstlisting}[language=python]
+class MLPValueNetwork(nn.Module):
+    def __init__(self, input_dim, hidden_dims=[256, 256], activation='relu',
+                 dropout=0.1, layer_norm=False):
+        """
+        Multi-layer perceptron value network.
+        
+        Args:
+            input_dim (int): Input dimension
+            hidden_dims (list): Hidden layer dimensions
+            activation (str): Activation function
+            dropout (float): Dropout rate
+            layer_norm (bool): Use layer normalization
+        """
+\end{lstlisting}
+
+\subsubsection{CNValueNetwork}
+
+\begin{lstlisting}[language=python]
+class CNValueNetwork(nn.Module):
+    def __init__(self, input_channels, conv_dims=[32, 64, 128],
+                 fc_dims=[256, 256], kernel_sizes=[3, 3, 3], strides=[2, 2, 2],
+                 activation='relu', dropout=0.1):
+        """
+        Convolutional neural network value network.
+        
+        Args:
+            input_channels (int): Number of input channels
+            conv_dims (list): Convolutional layer dimensions
+            fc_dims (list): Fully connected layer dimensions
+            kernel_sizes (list): Kernel sizes for conv layers
+            strides (list): Strides for conv layers
+            activation (str): Activation function
+            dropout (float): Dropout rate
+        """
+\end{lstlisting}
+
+\subsubsection{RNNValueNetwork}
+
+\begin{lstlisting}[language=python]
+class RNNValueNetwork(nn.Module):
+    def __init__(self, input_dim, hidden_dim=256, num_layers=2, rnn_type='lstm',
+                 fc_dims=[256], activation='relu', dropout=0.1):
+        """
+        Recurrent neural network value network.
+        
+        Args:
+            input_dim (int): Input dimension
+            hidden_dim (int): Hidden dimension
+            num_layers (int): Number of RNN layers
+            rnn_type (str): 'lstm' or 'gru'
+            fc_dims (list): Fully connected layer dimensions
+            activation (str): Activation function
+            dropout (float): Dropout rate
+        """
+\end{lstlisting}
+
+\subsubsection{TransformerValueNetwork}
+
+\begin{lstlisting}[language=python]
+class TransformerValueNetwork(nn.Module):
+    def __init__(self, input_dim, d_model=256, nhead=8, num_layers=6,
+                 dim_feedforward=1024, dropout=0.1, fc_dims=[256], activation='relu'):
+        """
+        Transformer-based value network.
+        
+        Args:
+            input_dim (int): Input dimension
+            d_model (int): Model dimension
+            nhead (int): Number of attention heads
+            num_layers (int): Number of transformer layers
+            dim_feedforward (int): Feedforward dimension
+            dropout (float): Dropout rate
+            fc_dims (list): Fully connected layer dimensions
+            activation (str): Activation function
+        """
+\end{lstlisting}
+
+\subsection{Q-Networks}
+
+\subsubsection{MLPQNetwork}
+
+\begin{lstlisting}[language=python]
+class MLPQNetwork(nn.Module):
+    def __init__(self, input_dim, output_dim, hidden_dims=[256, 256],
+                 activation='relu', dropout=0.1):
+        """
+        Multi-layer perceptron Q-network.
+        
+        Args:
+            input_dim (int): Input dimension
+            output_dim (int): Output dimension (number of actions)
+            hidden_dims (list): Hidden layer dimensions
+            activation (str): Activation function
+            dropout (float): Dropout rate
+        """
+\end{lstlisting}
+
+\subsubsection{DuelingQNetwork}
+
+\begin{lstlisting}[language=python]
+class DuelingQNetwork(nn.Module):
+    def __init__(self, input_dim, output_dim, hidden_dims=[256, 256],
+                 value_hidden_dims=[256], advantage_hidden_dims=[256],
+                 activation='relu', dropout=0.1):
+        """
+        Dueling architecture Q-network.
+        
+        Args:
+            input_dim (int): Input dimension
+            output_dim (int): Output dimension (number of actions)
+            hidden_dims (list): Shared hidden layer dimensions
+            value_hidden_dims (list): Value stream hidden dimensions
+            advantage_hidden_dims (list): Advantage stream hidden dimensions
+            activation (str): Activation function
+            dropout (float): Dropout rate
+        """
+\end{lstlisting}
+
+\subsection{State Encoders}
+
+\subsubsection{MLPEncoder}
+
+\begin{lstlisting}[language=python]
+class MLPEncoder(nn.Module):
+    def __init__(self, input_dim, output_dim, hidden_dims=[512, 256],
+                 activation='relu', dropout=0.1, layer_norm=False):
+        """
+        Multi-layer perceptron encoder.
+        
+        Args:
+            input_dim (int): Input dimension
+            output_dim (int): Output dimension
+            hidden_dims (list): Hidden layer dimensions
+            activation (str): Activation function
+            dropout (float): Dropout rate
+            layer_norm (bool): Use layer normalization
+        """
+\end{lstlisting}
+
+\subsubsection{CNNEncoder}
+
+\begin{lstlisting}[language=python]
+class CNNEncoder(nn.Module):
+    def __init__(self, input_channels, output_dim, conv_dims=[32, 64, 128, 256],
+                 fc_dims=[512], kernel_sizes=[3, 3, 3, 3], strides=[2, 2, 2, 2],
+                 activation='relu', dropout=0.1):
+        """
+        Convolutional neural network encoder.
+        
+        Args:
+            input_channels (int): Number of input channels
+            output_dim (int): Output dimension
+            conv_dims (list): Convolutional layer dimensions
+            fc_dims (list): Fully connected layer dimensions
+            kernel_sizes (list): Kernel sizes for conv layers
+            strides (list): Strides for conv layers
+            activation (str): Activation function
+            dropout (float): Dropout rate
+        """
+\end{lstlisting}
+
+\subsubsection{RNNEncoder}
+
+\begin{lstlisting}[language=python]
+class RNNEncoder(nn.Module):
+    def __init__(self, input_dim, output_dim, hidden_dim=256, num_layers=2,
+                 rnn_type='lstm', fc_dims=[256], activation='relu', dropout=0.1):
+        """
+        Recurrent neural network encoder.
+        
+        Args:
+            input_dim (int): Input dimension
+            output_dim (int): Output dimension
+            hidden_dim (int): Hidden dimension
+            num_layers (int): Number of RNN layers
+            rnn_type (str): 'lstm' or 'gru'
+            fc_dims (list): Fully connected layer dimensions
+            activation (str): Activation function
+            dropout (float): Dropout rate
+        """
+\end{lstlisting}
+
+\subsubsection{TransformerEncoder}
+
+\begin{lstlisting}[language=python]
+class TransformerEncoder(nn.Module):
+    def __init__(self, input_dim, output_dim, d_model=256, nhead=8, num_layers=6,
+                 dim_feedforward=1024, dropout=0.1, fc_dims=[256], activation='relu'):
+        """
+        Transformer-based encoder.
+        
+        Args:
+            input_dim (int): Input dimension
+            output_dim (int): Output dimension
+            d_model (int): Model dimension
+            nhead (int): Number of attention heads
+            num_layers (int): Number of transformer layers
+            dim_feedforward (int): Feedforward dimension
+            dropout (float): Dropout rate
+            fc_dims (list): Fully connected layer dimensions
+            activation (str): Activation function
+        """
+\end{lstlisting}
+
+\subsection{Output Decoders}
+
+\subsubsection{MLPDecoder}
+
+\begin{lstlisting}[language=python]
+class MLPDecoder(nn.Module):
+    def __init__(self, latent_dim, output_dim, hidden_dims=[256, 128],
+                 activation='relu', dropout=0.1):
+        """
+        Multi-layer perceptron decoder.
+        
+        Args:
+            latent_dim (int): Latent dimension
+            output_dim (int): Output dimension
+            hidden_dims (list): Hidden layer dimensions
+            activation (str): Activation function
+            dropout (float): Dropout rate
+        """
+\end{lstlisting}
+
+\subsubsection{CNNDecoder}
+
+\begin{lstlisting}[language=python]
+class CNNDecoder(nn.Module):
+    def __init__(self, latent_dim, output_channels, fc_dims=[512, 256],
+                 conv_dims=[256, 128, 64, 32], kernel_sizes=[3, 3, 3, 3],
+                 strides=[2, 2, 2, 2], initial_size=4):
+        """
+        Convolutional neural network decoder.
+        
+        Args:
+            latent_dim (int): Latent dimension
+            output_channels (int): Number of output channels
+            fc_dims (list): Fully connected layer dimensions
+            conv_dims (list): Convolutional layer dimensions
+            kernel_sizes (list): Kernel sizes for conv layers
+            strides (list): Strides for conv layers
+            initial_size (int): Initial feature map size
+        """
+\end{lstlisting}
+
+\subsubsection{RNNDecoder}
+
+\begin{lstlisting}[language=python]
+class RNNDecoder(nn.Module):
+    def __init__(self, latent_dim, output_dim, hidden_dim=256, num_layers=2,
+                 rnn_type='lstm', max_seq_len=100, fc_dims=[256], activation='relu'):
+        """
+        Recurrent neural network decoder.
+        
+        Args:
+            latent_dim (int): Latent dimension
+            output_dim (int): Output dimension
+            hidden_dim (int): Hidden dimension
+            num_layers (int): Number of RNN layers
+            rnn_type (str): 'lstm' or 'gru'
+            max_seq_len (int): Maximum sequence length
+            fc_dims (list): Fully connected layer dimensions
+            activation (str): Activation function
+        """
+\end{lstlisting}
+
+\subsubsection{TransformerDecoder}
+
+\begin{lstlisting}[language=python]
+class TransformerDecoder(nn.Module):
+    def __init__(self, latent_dim, output_dim, d_model=256, nhead=8, num_layers=6,
+                 dim_feedforward=1024, max_seq_len=100, dropout=0.1,
+                 fc_dims=[256], activation='relu'):
+        """
+        Transformer-based decoder.
+        
+        Args:
+            latent_dim (int): Latent dimension
+            output_dim (int): Output dimension
+            d_model (int): Model dimension
+            nhead (int): Number of attention heads
+            num_layers (int): Number of transformer layers
+            dim_feedforward (int): Feedforward dimension
+            max_seq_len (int): Maximum sequence length
+            dropout (float): Dropout rate
+            fc_dims (list): Fully connected layer dimensions
+            activation (str): Activation function
+        """
+\end{lstlisting}
+
+\subsection{Discrete Tools}
+
+\subsubsection{QTable}
+
+\begin{lstlisting}[language=python]
+class QTable:
+    def __init__(self, state_space_size, action_space_size, initial_value=0.0):
+        """
+        Q-learning table for discrete state-action spaces.
+        
+        Args:
+            state_space_size (int): Size of state space
+            action_space_size (int): Size of action space
+            initial_value (float): Initial Q-value
+        """
+    
+    def get_value(self, state, action):
+        """Get Q-value for state-action pair."""
+    
+    def update_value(self, state, action, value, learning_rate=0.1):
+        """Update Q-value for state-action pair."""
+    
+    def get_max_action(self, state):
+        """Get action with maximum Q-value for state."""
+    
+    def get_policy(self, state, epsilon=0.1):
+        """Get epsilon-greedy policy action."""
+\end{lstlisting}
+
+\subsubsection{ValueTable}
+
+\begin{lstlisting}[language=python]
+class ValueTable:
+    def __init__(self, state_space_size, initial_value=0.0):
+        """
+        Value table for discrete state spaces.
+        
+        Args:
+            state_space_size (int): Size of state space
+            initial_value (float): Initial value
+        """
+    
+    def get_value(self, state):
+        """Get value for state."""
+    
+    def update_value(self, state, value, learning_rate=0.1):
+        """Update value for state."""
+    
+    def get_values(self):
+        """Get all values."""
+\end{lstlisting}
+
+\subsubsection{PolicyTable}
+
+\begin{lstlisting}[language=python]
+class PolicyTable:
+    def __init__(self, state_space_size, action_space_size):
+        """
+        Policy table for discrete state-action spaces.
+        
+        Args:
+            state_space_size (int): Size of state space
+            action_space_size (int): Size of action space
+        """
+    
+    def get_value(self, state, action):
+        """Get policy probability for state-action pair."""
+    
+    def update_value(self, state, action, value, learning_rate=0.1):
+        """Update policy probability for state-action pair."""
+    
+    def get_policy(self, state):
+        """Sample action from policy."""
+    
+    def get_policy_probs(self, state):
+        """Get policy probabilities for state."""
+\end{lstlisting}
+
+\section{Plotkit API}
+
+\subsection{Core Plotting Functions}
+
+\subsubsection{plot\_training\_curves}
+
+\begin{lstlisting}[language=python]
+def plot_training_curves(episodes, rewards, losses=None, title="Training Progress",
+                        xlabel="Episode", ylabel="Value", save_path=None, show_plot=True):
+    """
+    Plot training curves for rewards and losses.
+    
+    Args:
+        episodes (array): Episode numbers
+        rewards (array): Reward values
+        losses (array, optional): Loss values
+        title (str): Plot title
+        xlabel (str): X-axis label
+        ylabel (str): Y-axis label
+        save_path (str, optional): Path to save plot
+        show_plot (bool): Whether to display plot
+    """
+\end{lstlisting}
+
+\subsubsection{plot\_performance\_metrics}
+
+\begin{lstlisting}[language=python]
+def plot_performance_metrics(episodes, metrics, title="Performance Metrics",
+                           xlabel="Episode", ylabel="Score", save_path=None, show_plot=True):
+    """
+    Plot multiple performance metrics.
+    
+    Args:
+        episodes (array): Episode numbers
+        metrics (dict): Dictionary of metric arrays
+        title (str): Plot title
+        xlabel (str): X-axis label
+        ylabel (str): Y-axis label
+        save_path (str, optional): Path to save plot
+        show_plot (bool): Whether to display plot
+    """
+\end{lstlisting}
+
+\subsubsection{plot\_network\_analysis}
+
+\begin{lstlisting}[language=python]
+def plot_network_analysis(model, title="Network Analysis", save_path=None,
+                         show_plot=True, bins=50):
+    """
+    Analyze and plot network weights and activations.
+    
+    Args:
+        model (nn.Module): Neural network model
+        title (str): Plot title
+        save_path (str, optional): Path to save plot
+        show_plot (bool): Whether to display plot
+        bins (int): Number of histogram bins
+    """
+\end{lstlisting}
+
+\subsubsection{plot\_weight\_distributions}
+
+\begin{lstlisting}[language=python]
+def plot_weight_distributions(model, title="Weight Distributions", save_path=None,
+                            show_plot=True, bins=50):
+    """
+    Plot weight distributions for network layers.
+    
+    Args:
+        model (nn.Module): Neural network model
+        title (str): Plot title
+        save_path (str, optional): Path to save plot
+        show_plot (bool): Whether to display plot
+        bins (int): Number of histogram bins
+    """
+\end{lstlisting}
+
+\subsection{Specialized Plotting Functions}
+
+\subsubsection{plot\_policy\_analysis}
+
+\begin{lstlisting}[language=python]
+def plot_policy_analysis(states, action_probabilities, action_names=None,
+                        title="Policy Analysis", xlabel="State", ylabel="Action Probability",
+                        save_path=None, show_plot=True):
+    """
+    Visualize policy distributions and action probabilities.
+    
+    Args:
+        states (array): State values
+        action_probabilities (array): Action probability arrays
+        action_names (list, optional): Names for actions
+        title (str): Plot title
+        xlabel (str): X-axis label
+        ylabel (str): Y-axis label
+        save_path (str, optional): Path to save plot
+        show_plot (bool): Whether to display plot
+    """
+\end{lstlisting}
+
+\subsubsection{plot\_value\_function}
+
+\begin{lstlisting}[language=python]
+def plot_value_function(states, values, title="Value Function", xlabel="State",
+                       ylabel="Value", save_path=None, show_plot=True):
+    """
+    Visualize value function estimates.
+    
+    Args:
+        states (array): State values
+        values (array): Value estimates
+        title (str): Plot title
+        xlabel (str): X-axis label
+        ylabel (str): Y-axis label
+        save_path (str, optional): Path to save plot
+        show_plot (bool): Whether to display plot
+    """
+\end{lstlisting}
+
+\subsubsection{plot\_q\_value\_analysis}
+
+\begin{lstlisting}[language=python]
+def plot_q_value_analysis(states, actions, q_values, action_names=None,
+                         title="Q-Value Analysis", xlabel="State", ylabel="Q-Value",
+                         save_path=None, show_plot=True):
+    """
+    Analyze Q-value distributions and action-value functions.
+    
+    Args:
+        states (array): State values
+        actions (array): Action values
+        q_values (array): Q-value matrix
+        action_names (list, optional): Names for actions
+        title (str): Plot title
+        xlabel (str): X-axis label
+        ylabel (str): Y-axis label
+        save_path (str, optional): Path to save plot
+        show_plot (bool): Whether to display plot
+    """
+\end{lstlisting}
+
+\section{Environment Library API}
+
+\subsection{Pistonball Environment}
+
+\subsubsection{PistonballEnv}
+
+\begin{lstlisting}[language=python]
+class PistonballEnv(gym.Env):
+    def __init__(self, num_agents=4, max_steps=1000, ball_speed=5.0, gravity=0.5,
+                 piston_speed=2.0, reward_scale=1.0, observation_type='vector',
+                 render_mode='rgb_array'):
+        """
+        Multi-agent physics-based environment.
+        
+        Args:
+            num_agents (int): Number of pistons/agents
+            max_steps (int): Maximum steps per episode
+            ball_speed (float): Initial ball speed
+            gravity (float): Gravity strength
+            piston_speed (float): Piston movement speed
+            reward_scale (float): Reward scaling factor
+            observation_type (str): Observation type
+            render_mode (str): Rendering mode
+        """
+    
+    def reset(self):
+        """Reset environment to initial state."""
+    
+    def step(self, actions):
+        """Take action and return (observations, rewards, dones, infos)."""
+    
+    def render(self, mode='human'):
+        """Render environment."""
+\end{lstlisting}
+
+\subsection{Kuramoto Oscillator Environment}
+
+\subsubsection{KuramotoEnv}
+
+\begin{lstlisting}[language=python]
+class KuramotoEnv(gym.Env):
+    def __init__(self, num_oscillators=10, coupling_strength=1.0, noise_strength=0.1,
+                 max_steps=200, dt=0.01, frequency_distribution='uniform',
+                 frequency_range=[-1.0, 1.0], reward_type='synchronization'):
+        """
+        Kuramoto oscillator environment.
+        
+        Args:
+            num_oscillators (int): Number of oscillators
+            coupling_strength (float): Initial coupling strength
+            noise_strength (float): Noise level
+            max_steps (int): Maximum steps per episode
+            dt (float): Time step for integration
+            frequency_distribution (str): Distribution type
+            frequency_range (list): Frequency range
+            reward_type (str): Reward type
+        """
+    
+    def reset(self):
+        """Reset environment to initial state."""
+    
+    def step(self, action):
+        """Take action and return (observation, reward, done, info)."""
+    
+    def compute_order_parameter(self):
+        """Compute synchronization order parameter."""
+\end{lstlisting}
+
+\section{Utility Functions}
+
+\subsection{Weight Initialization}
+
+\begin{lstlisting}[language=python]
+def initialize_weights(model, method='xavier_uniform'):
+    """
+    Initialize model weights.
+    
+    Args:
+        model (nn.Module): Neural network model
+        method (str): Initialization method
+    """
+\end{lstlisting}
+
+\subsection{Discrete Tools}
+
+\begin{lstlisting}[language=python]
+def q_learning_update(q_table, state, action, reward, next_state, gamma=0.99, alpha=0.1):
+    """Q-learning update rule."""
+    
+def sarsa_update(q_table, state, action, reward, next_state, next_action, gamma=0.99, alpha=0.1):
+    """SARSA update rule."""
+    
+def expected_sarsa_update(q_table, state, action, reward, next_state, policy_table, gamma=0.99, alpha=0.1):
+    """Expected SARSA update rule."""
+    
+def epsilon_greedy_policy(q_table, state, epsilon=0.1):
+    """Epsilon-greedy policy."""
+    
+def softmax_policy(q_table, state, temperature=1.0):
+    """Softmax policy."""
+\end{lstlisting}
+
+\section{Configuration}
+
+\subsection{Default Configuration}
+
+\begin{lstlisting}[language=python]
+DEFAULT_CONFIG = {
+    'device': 'cuda' if torch.cuda.is_available() else 'cpu',
+    'dtype': torch.float32,
+    'seed': 42,
+    'activation': 'relu',
+    'dropout': 0.1,
+    'layer_norm': False,
+    'hidden_dims': [256, 256],
+    'learning_rate': 0.001,
+    'batch_size': 32
+}
+\end{lstlisting}
+
+\subsection{Environment Configuration}
+
+\begin{lstlisting}[language=python]
+ENVIRONMENT_CONFIG = {
+    'pistonball': {
+        'num_agents': 4,
+        'max_steps': 1000,
+        'ball_speed': 5.0,
+        'gravity': 0.5,
+        'piston_speed': 2.0,
+        'reward_scale': 1.0,
+        'observation_type': 'vector',
+        'render_mode': 'rgb_array'
+    },
+    'kuramoto': {
+        'num_oscillators': 10,
+        'coupling_strength': 1.0,
+        'noise_strength': 0.1,
+        'max_steps': 200,
+        'dt': 0.01,
+        'frequency_distribution': 'uniform',
+        'frequency_range': [-1.0, 1.0],
+        'reward_type': 'synchronization'
+    }
+}
+\end{lstlisting} 

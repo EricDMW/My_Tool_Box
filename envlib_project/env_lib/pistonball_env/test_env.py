@@ -28,6 +28,7 @@ def test_basic_usage():
     
     # Take a few random steps
     for step in range(10):
+        
         action = env.action_space.sample()
         obs, reward, terminated, truncated, info = env.step(action)
         print(f"Step {step}: Reward = {reward:.3f}, Terminated = {terminated}")
@@ -108,6 +109,7 @@ def test_manual_control():
         obs, info = env.reset()
         
         # Main loop
+        
         clock = pygame.time.Clock()
         step_count = 0
         
