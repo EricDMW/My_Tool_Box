@@ -32,7 +32,7 @@ env = env_lib.KuramotoOscillatorEnv(n_oscillators=5)
 env = env_lib.KuramotoOscillatorEnvTorch(n_oscillators=5)
 env = env_lib.WirelessCommEnv(grid_x=5, grid_y=5)
  
-env = env_lib.ajlatt_env(map_name='obstacles05',num_Robot=4)
+env = env_lib.ajlatt_env(map_name='obstacles04',num_Robot=4)
 env.reset()
 start_time = time.time()
 for _ in range(100):

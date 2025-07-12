@@ -19,6 +19,9 @@ Parameters:
 - movement_penalty: Penalty for piston movement (default: 0.0)
 - movement_penalty_threshold: Minimum movement to trigger penalty (default: 0.01)
 - kappa: Number of hops for observation range (default: 1)
+- terminated_condition: Whether to terminate when ball hits left wall (default: True)
+- leftmost_piston_reward: Reward for leftmost piston when ball hits left wall (default: 0.0)
+- termination_reward: Reward for observable pistons when ball hits left wall (default: 0.5)
 """
 
 import math
@@ -119,6 +122,9 @@ class PistonballEnv(Env, EzPickle):
         movement_penalty=0.0,
         movement_penalty_threshold=0.01,
         kappa=1,
+        terminated_condition=True,
+        leftmost_piston_reward=0.0,
+        termination_reward=0.5,
     ):
         """
         Initialize the Pistonball environment.
@@ -137,6 +143,9 @@ class PistonballEnv(Env, EzPickle):
             movement_penalty: Penalty for piston movement (negative value)
             movement_penalty_threshold: Minimum movement to trigger penalty
             kappa: Number of hops for observation range (default: 1)
+            terminated_condition: Whether to terminate when ball hits left wall (default: True)
+            leftmost_piston_reward: Reward for leftmost piston when ball hits left wall (default: 0.0)
+            termination_reward: Reward for observable pistons when ball hits left wall (default: 0.5)
         """
         EzPickle.__init__(
             self,
@@ -153,6 +162,9 @@ class PistonballEnv(Env, EzPickle):
             movement_penalty,
             movement_penalty_threshold,
             kappa,
+            terminated_condition,
+            leftmost_piston_reward,
+            termination_reward,
         )
         
         # Environment parameters
@@ -169,6 +181,9 @@ class PistonballEnv(Env, EzPickle):
         self.movement_penalty = movement_penalty
         self.movement_penalty_threshold = movement_penalty_threshold
         self.kappa = kappa
+        self.terminated_condition = terminated_condition
+        self.leftmost_piston_reward = leftmost_piston_reward
+        self.termination_reward = termination_reward
         
         # Physics parameters
         self.dt = 1.0 / FPS
@@ -553,7 +568,10 @@ class PistonballEnv(Env, EzPickle):
             + self.ball.velocity[0] * self.dt
         )
         
-        if ball_next_x <= self.wall_width + 1:
+        # Check if ball hits left wall for termination
+        ball_hit_left_wall = ball_next_x <= self.wall_width + 0.5
+        
+        if self.terminated_condition and ball_hit_left_wall:
             self.terminate = True
             
         # Calculate local rewards for each piston
@@ -567,6 +585,14 @@ class PistonballEnv(Env, EzPickle):
                 
                 # Calculate local reward for this piston
                 local_rewards[i] = self.get_local_reward_for_piston(i, prev_ball_x, curr_ball_x)
+                
+                # Add termination reward if ball hits left wall and piston can observe it
+                if self.terminated_condition and ball_hit_left_wall and self._can_observe_ball(i, self.ball.position[0]):
+                    local_rewards[i] += self.termination_reward
+                
+                # Add leftmost piston reward if ball hits left wall
+                if self.terminated_condition and ball_hit_left_wall and i == 0:  # i == 0 is the leftmost piston
+                    local_rewards[i] += self.leftmost_piston_reward
                 
                 # Update last ball position for this piston
                 self.last_ball_positions[i] = curr_ball_x
@@ -599,8 +625,11 @@ class PistonballEnv(Env, EzPickle):
         # Draw
         self.draw()
         
-        # Return observations, local rewards list, total reward, termination flags, and info
-        return self._get_obs(), local_rewards, total_reward, self.terminate, self.truncate, {}
+
+        
+        # Return observations, total reward, termination flags, and info
+        info = {"local_rewards": local_rewards, "total_reward": total_reward}
+        return self._get_obs(), total_reward, self.terminate, self.truncate, info
 
     def get_local_reward_for_piston(self, piston_index, prev_ball_x, curr_ball_x):
         """

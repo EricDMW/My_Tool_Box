@@ -200,7 +200,7 @@ def plot_training_progress(rewards):
     plt.plot(rewards, alpha=0.6, color='blue', label='Episode Reward')
     plt.title('Training Progress')
     plt.xlabel('Episode')
-    plt.ylabel('Reward')
+    plt.ylabel('Episodic Return')
     plt.legend()
     plt.grid(True, alpha=0.3)
     
@@ -215,7 +215,7 @@ def plot_training_progress(rewards):
             moving_avg.append(np.mean(rewards[i-window_size+1:i+1]))
     
     plt.plot(moving_avg, color='red', linewidth=2, label=f'{window_size}-Episode Moving Average')
-    plt.title('Moving Average Reward')
+    plt.title('Constraint Violation (times per episode)')
     plt.xlabel('Episode')
     plt.ylabel('Average Reward')
     plt.legend()

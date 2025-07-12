@@ -1,0 +1,666 @@
+\chapter{Examples and Tutorials}
+
+\section{Overview}
+
+This chapter provides comprehensive examples and tutorials for using the My Tool Box. These examples demonstrate how to combine the toolkit components with the environment library to create complete reinforcement learning experiments.
+
+\section{Quick Start Examples}
+
+\subsection{Basic PPO Training}
+
+A simple PPO training example with the pistonball environment:
+
+\begin{lstlisting}[language=python, caption=Basic PPO Training]
+import torch
+import torch.optim as optim
+import numpy as np
+from toolkit.neural_toolkit import MLPPolicyNetwork, MLPValueNetwork
+from env_lib import pistonball_env
+from toolkit.plotkit import plot_training_curves
+
+# Set random seeds
+torch.manual_seed(42)
+np.random.seed(42)
+
+# Create environment
+env = pistonball_env.PistonballEnv(num_agents=2, max_steps=500)
+
+# Create networks
+policy_network = MLPPolicyNetwork(
+    input_dim=env.observation_space.shape[0],
+    output_dim=env.action_space.n,
+    hidden_dims=[128, 128],
+    activation='relu'
+)
+
+value_network = MLPValueNetwork(
+    input_dim=env.observation_space.shape[0],
+    hidden_dims=[128, 128],
+    activation='relu'
+)
+
+# Optimizers
+policy_optimizer = optim.Adam(policy_network.parameters(), lr=0.001)
+value_optimizer = optim.Adam(value_network.parameters(), lr=0.001)
+
+# Training parameters
+num_episodes = 1000
+gamma = 0.99
+gae_lambda = 0.95
+clip_ratio = 0.2
+value_loss_coef = 0.5
+entropy_coef = 0.01
+
+# Training loop
+episode_rewards = []
+episode_lengths = []
+
+for episode in range(num_episodes):
+    observations = env.reset()
+    episode_reward = 0
+    episode_length = 0
+    
+    # Collect episode data
+    states, actions, rewards, values, log_probs = [], [], [], [], []
+    
+    done = False
+    while not done:
+        # Get action from policy
+        action_probs = policy_network(torch.FloatTensor(observations))
+        action_dist = torch.distributions.Categorical(action_probs)
+        action = action_dist.sample()
+        log_prob = action_dist.log_prob(action)
+        
+        # Get value estimate
+        value = value_network(torch.FloatTensor(observations))
+        
+        # Take action
+        next_observations, reward, done, info = env.step(action.item())
+        
+        # Store data
+        states.append(observations)
+        actions.append(action.item())
+        rewards.append(reward)
+        values.append(value.item())
+        log_probs.append(log_prob.item())
+        
+        observations = next_observations
+        episode_reward += reward
+        episode_length += 1
+    
+    # Convert to tensors
+    states = torch.FloatTensor(states)
+    actions = torch.LongTensor(actions)
+    rewards = torch.FloatTensor(rewards)
+    values = torch.FloatTensor(values)
+    old_log_probs = torch.FloatTensor(log_probs)
+    
+    # Compute advantages
+    advantages = compute_gae(rewards, values, gamma, gae_lambda)
+    returns = advantages + values
+    
+    # Normalize advantages
+    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+    
+    # PPO update
+    for _ in range(10):  # Multiple epochs
+        # Get current policy and value
+        action_probs = policy_network(states)
+        action_dist = torch.distributions.Categorical(action_probs)
+        new_log_probs = action_dist.log_prob(actions)
+        entropy = action_dist.entropy().mean()
+        
+        current_values = value_network(states).squeeze()
+        
+        # Compute ratios
+        ratio = torch.exp(new_log_probs - old_log_probs)
+        
+        # Compute surrogate losses
+        surr1 = ratio * advantages
+        surr2 = torch.clamp(ratio, 1 - clip_ratio, 1 + clip_ratio) * advantages
+        policy_loss = -torch.min(surr1, surr2).mean()
+        
+        value_loss = torch.nn.functional.mse_loss(current_values, returns)
+        
+        # Total loss
+        total_loss = policy_loss + value_loss_coef * value_loss - entropy_coef * entropy
+        
+        # Update networks
+        policy_optimizer.zero_grad()
+        value_optimizer.zero_grad()
+        total_loss.backward()
+        policy_optimizer.step()
+        value_optimizer.step()
+    
+    # Log results
+    episode_rewards.append(episode_reward)
+    episode_lengths.append(episode_length)
+    
+    if episode % 100 == 0:
+        avg_reward = np.mean(episode_rewards[-100:])
+        print(f"Episode {episode}: Average reward = {avg_reward:.2f}")
+
+# Plot results
+plot_training_curves(
+    episodes=np.arange(num_episodes),
+    rewards=episode_rewards,
+    losses=episode_lengths,
+    title="PPO Training Progress",
+    save_path="ppo_training.png"
+)
+
+def compute_gae(rewards, values, gamma, gae_lambda):
+    """Compute Generalized Advantage Estimation"""
+    advantages = torch.zeros_like(rewards)
+    last_advantage = 0
+    
+    for t in reversed(range(len(rewards))):
+        if t == len(rewards) - 1:
+            next_value = 0
+        else:
+            next_value = values[t + 1]
+        
+        delta = rewards[t] + gamma * next_value - values[t]
+        advantages[t] = delta + gamma * gae_lambda * last_advantage
+        last_advantage = advantages[t]
+    
+    return advantages
+\end{lstlisting}
+
+\subsection{Multi-Agent DQN Training}
+
+Training multiple agents with DQN in the pistonball environment:
+
+\begin{lstlisting}[language=python, caption=Multi-Agent DQN Training]
+import torch
+import torch.optim as optim
+import numpy as np
+from collections import deque
+import random
+from toolkit.neural_toolkit import MLPQNetwork
+from env_lib import pistonball_env
+from toolkit.plotkit import plot_training_curves
+
+# Set random seeds
+torch.manual_seed(42)
+np.random.seed(42)
+
+# Create environment
+env = pistonball_env.PistonballEnv(num_agents=3, max_steps=500)
+
+# Create Q-networks for each agent
+q_networks = {}
+target_networks = {}
+optimizers = {}
+
+for agent_id in env.agent_ids:
+    q_networks[agent_id] = MLPQNetwork(
+        input_dim=env.observation_space.shape[0],
+        output_dim=env.action_space.n,
+        hidden_dims=[128, 128],
+        activation='relu'
+    )
+    target_networks[agent_id] = MLPQNetwork(
+        input_dim=env.observation_space.shape[0],
+        output_dim=env.action_space.n,
+        hidden_dims=[128, 128],
+        activation='relu'
+    )
+    target_networks[agent_id].load_state_dict(q_networks[agent_id].state_dict())
+    optimizers[agent_id] = optim.Adam(q_networks[agent_id].parameters(), lr=0.001)
+
+# Replay buffers
+replay_buffers = {agent_id: deque(maxlen=10000) for agent_id in env.agent_ids}
+
+# Training parameters
+num_episodes = 1000
+batch_size = 32
+gamma = 0.99
+epsilon_start = 1.0
+epsilon_end = 0.01
+epsilon_decay = 0.995
+target_update_freq = 100
+
+epsilon = epsilon_start
+episode_rewards = []
+
+for episode in range(num_episodes):
+    observations = env.reset()
+    episode_reward = 0
+    done = False
+    
+    while not done:
+        # Select actions
+        actions = {}
+        for agent_id in env.agent_ids:
+            if random.random() < epsilon:
+                actions[agent_id] = env.action_space.sample()
+            else:
+                with torch.no_grad():
+                    q_values = q_networks[agent_id](torch.FloatTensor(observations[agent_id]))
+                    actions[agent_id] = q_values.argmax().item()
+        
+        # Take step
+        next_observations, rewards, dones, infos = env.step(actions)
+        
+        # Store experience
+        for agent_id in env.agent_ids:
+            replay_buffers[agent_id].append((
+                observations[agent_id],
+                actions[agent_id],
+                rewards[agent_id],
+                next_observations[agent_id],
+                dones[agent_id]
+            ))
+        
+        # Update observations
+        observations = next_observations
+        episode_reward += sum(rewards.values())
+        done = all(dones.values())
+        
+        # Train networks
+        for agent_id in env.agent_ids:
+            if len(replay_buffers[agent_id]) >= batch_size:
+                # Sample batch
+                batch = random.sample(replay_buffers[agent_id], batch_size)
+                states, actions, rewards, next_states, dones = zip(*batch)
+                
+                # Convert to tensors
+                states = torch.FloatTensor(states)
+                actions = torch.LongTensor(actions)
+                rewards = torch.FloatTensor(rewards)
+                next_states = torch.FloatTensor(next_states)
+                dones = torch.BoolTensor(dones)
+                
+                # Compute Q-values
+                current_q_values = q_networks[agent_id](states).gather(1, actions.unsqueeze(1))
+                next_q_values = target_networks[agent_id](next_states).max(1)[0].detach()
+                target_q_values = rewards + (gamma * next_q_values * ~dones)
+                
+                # Compute loss
+                loss = torch.nn.functional.mse_loss(current_q_values.squeeze(), target_q_values)
+                
+                # Update network
+                optimizers[agent_id].zero_grad()
+                loss.backward()
+                optimizers[agent_id].step()
+    
+    # Update target networks
+    if episode % target_update_freq == 0:
+        for agent_id in env.agent_ids:
+            target_networks[agent_id].load_state_dict(q_networks[agent_id].state_dict())
+    
+    # Decay epsilon
+    epsilon = max(epsilon_end, epsilon * epsilon_decay)
+    
+    # Log results
+    episode_rewards.append(episode_reward)
+    
+    if episode % 100 == 0:
+        avg_reward = np.mean(episode_rewards[-100:])
+        print(f"Episode {episode}: Average reward = {avg_reward:.2f}, Epsilon = {epsilon:.3f}")
+
+# Plot results
+plot_training_curves(
+    episodes=np.arange(num_episodes),
+    rewards=episode_rewards,
+    title="Multi-Agent DQN Training",
+    save_path="multi_agent_dqn.png"
+)
+\end{lstlisting}
+
+\section{Advanced Examples}
+
+\subsection{Transformer-based Policy Training}
+
+Using transformer networks for sequential decision making:
+
+\begin{lstlisting}[language=python, caption=Transformer Policy Training]
+import torch
+import torch.optim as optim
+import numpy as np
+from toolkit.neural_toolkit import TransformerPolicyNetwork, TransformerValueNetwork
+from env_lib import pistonball_env
+from toolkit.plotkit import plot_training_curves
+
+# Create environment
+env = pistonball_env.PistonballEnv(num_agents=2, max_steps=200)
+
+# Create transformer networks
+policy_network = TransformerPolicyNetwork(
+    input_dim=env.observation_space.shape[0],
+    output_dim=env.action_space.n,
+    d_model=128,
+    nhead=8,
+    num_layers=4,
+    dim_feedforward=512,
+    dropout=0.1,
+    fc_dims=[128],
+    activation='relu'
+)
+
+value_network = TransformerValueNetwork(
+    input_dim=env.observation_space.shape[0],
+    d_model=128,
+    nhead=8,
+    num_layers=4,
+    dim_feedforward=512,
+    dropout=0.1,
+    fc_dims=[128],
+    activation='relu'
+)
+
+# Optimizers
+policy_optimizer = optim.Adam(policy_network.parameters(), lr=0.0001)
+value_optimizer = optim.Adam(value_network.parameters(), lr=0.0001)
+
+# Training loop
+num_episodes = 500
+episode_rewards = []
+
+for episode in range(num_episodes):
+    observations = env.reset()
+    episode_reward = 0
+    done = False
+    
+    # Store sequence data
+    state_sequence = []
+    action_sequence = []
+    reward_sequence = []
+    
+    while not done:
+        # Add to sequence
+        state_sequence.append(observations)
+        
+        # Get action from transformer policy
+        if len(state_sequence) > 1:
+            # Use sequence for transformer
+            sequence_tensor = torch.FloatTensor(state_sequence).unsqueeze(0)
+            action_probs = policy_network(sequence_tensor)
+            action = torch.multinomial(action_probs.squeeze(-1), 1).item()
+        else:
+            # Random action for first step
+            action = env.action_space.sample()
+        
+        action_sequence.append(action)
+        
+        # Take step
+        next_observations, reward, done, info = env.step(action)
+        reward_sequence.append(reward)
+        
+        observations = next_observations
+        episode_reward += reward
+    
+    # Train on episode sequence
+    if len(state_sequence) > 1:
+        states = torch.FloatTensor(state_sequence)
+        actions = torch.LongTensor(action_sequence)
+        rewards = torch.FloatTensor(reward_sequence)
+        
+        # Compute advantages
+        values = value_network(states).squeeze()
+        advantages = compute_advantages(rewards, values)
+        
+        # Policy loss
+        action_probs = policy_network(states)
+        action_dist = torch.distributions.Categorical(action_probs.squeeze(-1))
+        log_probs = action_dist.log_prob(actions)
+        policy_loss = -(log_probs * advantages).mean()
+        
+        # Value loss
+        value_loss = torch.nn.functional.mse_loss(values, rewards)
+        
+        # Update networks
+        policy_optimizer.zero_grad()
+        policy_loss.backward()
+        policy_optimizer.step()
+        
+        value_optimizer.zero_grad()
+        value_loss.backward()
+        value_optimizer.step()
+    
+    episode_rewards.append(episode_reward)
+    
+    if episode % 50 == 0:
+        avg_reward = np.mean(episode_rewards[-50:])
+        print(f"Episode {episode}: Average reward = {avg_reward:.2f}")
+
+# Plot results
+plot_training_curves(
+    episodes=np.arange(num_episodes),
+    rewards=episode_rewards,
+    title="Transformer Policy Training",
+    save_path="transformer_training.png"
+)
+
+def compute_advantages(rewards, values, gamma=0.99):
+    """Compute advantages for sequence"""
+    advantages = torch.zeros_like(rewards)
+    last_advantage = 0
+    
+    for t in reversed(range(len(rewards))):
+        if t == len(rewards) - 1:
+            next_value = 0
+        else:
+            next_value = values[t + 1]
+        
+        delta = rewards[t] + gamma * next_value - values[t]
+        advantages[t] = delta + gamma * last_advantage
+        last_advantage = advantages[t]
+    
+    return advantages
+\end{lstlisting}
+
+\section{Environment-Specific Examples}
+
+\subsection{Kuramoto Oscillator Environment}
+
+Training agents to control oscillator synchronization:
+
+\begin{lstlisting}[language=python, caption=Kuramoto Oscillator Training]
+import torch
+import torch.optim as optim
+import numpy as np
+from toolkit.neural_toolkit import MLPPolicyNetwork, MLPValueNetwork
+from env_lib import kos_env
+from toolkit.plotkit import plot_training_curves
+
+# Create environment
+env = kos_env.KuramotoEnv(
+    num_oscillators=10,
+    coupling_strength=1.0,
+    noise_strength=0.1,
+    max_steps=200
+)
+
+# Create networks
+policy_network = MLPPolicyNetwork(
+    input_dim=env.observation_space.shape[0],
+    output_dim=env.action_space.n,
+    hidden_dims=[128, 128],
+    activation='relu'
+)
+
+value_network = MLPValueNetwork(
+    input_dim=env.observation_space.shape[0],
+    hidden_dims=[128, 128],
+    activation='relu'
+)
+
+# Optimizers
+policy_optimizer = optim.Adam(policy_network.parameters(), lr=0.001)
+value_optimizer = optim.Adam(value_network.parameters(), lr=0.001)
+
+# Training loop
+num_episodes = 500
+episode_rewards = []
+synchronization_metrics = []
+
+for episode in range(num_episodes):
+    observations = env.reset()
+    episode_reward = 0
+    episode_sync = 0
+    done = False
+    
+    while not done:
+        # Get action from policy
+        action_probs = policy_network(torch.FloatTensor(observations))
+        action_dist = torch.distributions.Categorical(action_probs)
+        action = action_dist.sample()
+        
+        # Take step
+        next_observations, reward, done, info = env.step(action.item())
+        
+        # Compute synchronization metric
+        sync_metric = compute_synchronization(observations)
+        episode_sync += sync_metric
+        
+        observations = next_observations
+        episode_reward += reward
+    
+    episode_rewards.append(episode_reward)
+    synchronization_metrics.append(episode_sync / env.max_steps)
+    
+    if episode % 100 == 0:
+        avg_reward = np.mean(episode_rewards[-100:])
+        avg_sync = np.mean(synchronization_metrics[-100:])
+        print(f"Episode {episode}: Reward = {avg_reward:.2f}, Sync = {avg_sync:.3f}")
+
+# Plot results
+plot_training_curves(
+    episodes=np.arange(num_episodes),
+    rewards=episode_rewards,
+    losses=synchronization_metrics,
+    title="Kuramoto Oscillator Training",
+    save_path="kuramoto_training.png"
+)
+
+def compute_synchronization(observations):
+    """Compute synchronization metric from oscillator phases"""
+    phases = observations[:env.num_oscillators]  # Assuming first N values are phases
+    mean_phase = np.mean(phases)
+    sync = np.abs(np.mean(np.exp(1j * phases)))
+    return sync
+\end{lstlisting}
+
+\section{Visualization Examples}
+
+\subsection{Training Progress Visualization}
+
+Comprehensive training visualization:
+
+\begin{lstlisting}[language=python, caption=Training Visualization]
+import numpy as np
+import matplotlib.pyplot as plt
+from toolkit.plotkit import (
+    plot_training_curves,
+    plot_performance_metrics,
+    plot_network_analysis
+)
+from toolkit.neural_toolkit import MLPPolicyNetwork
+from env_lib import pistonball_env
+
+# Create environment and network
+env = pistonball_env.PistonballEnv(num_agents=2)
+policy_network = MLPPolicyNetwork(
+    input_dim=env.observation_space.shape[0],
+    output_dim=env.action_space.n,
+    hidden_dims=[128, 128]
+)
+
+# Simulate training data
+episodes = np.arange(1000)
+rewards = np.random.normal(0, 1, 1000).cumsum()
+losses = np.exp(-episodes / 200) + 0.1 * np.random.randn(1000)
+accuracy = 0.5 + 0.4 * (1 - np.exp(-episodes / 300))
+
+# Plot training curves
+plot_training_curves(
+    episodes=episodes,
+    rewards=rewards,
+    losses=losses,
+    title="Training Progress",
+    save_path="training_curves.png"
+)
+
+# Plot performance metrics
+plot_performance_metrics(
+    episodes=episodes,
+    metrics={
+        'Accuracy': accuracy,
+        'Reward': rewards / np.max(rewards),  # Normalize
+        'Loss': 1 - losses / np.max(losses)   # Invert and normalize
+    },
+    title="Performance Metrics",
+    save_path="performance_metrics.png"
+)
+
+# Plot network analysis
+plot_network_analysis(
+    model=policy_network,
+    title="Policy Network Analysis",
+    save_path="network_analysis.png"
+)
+
+# Create comprehensive dashboard
+fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+
+# Training curves
+axes[0, 0].plot(episodes, rewards, 'b-', label='Reward')
+axes[0, 0].plot(episodes, losses, 'r-', label='Loss')
+axes[0, 0].set_title('Training Progress')
+axes[0, 0].legend()
+axes[0, 0].grid(True)
+
+# Performance metrics
+axes[0, 1].plot(episodes, accuracy, 'g-', label='Accuracy')
+axes[0, 1].set_title('Performance Metrics')
+axes[0, 1].legend()
+axes[0, 1].grid(True)
+
+# Reward distribution
+axes[1, 0].hist(rewards, bins=50, alpha=0.7, color='blue')
+axes[1, 0].set_title('Reward Distribution')
+axes[1, 0].grid(True)
+
+# Moving average
+window = 50
+moving_avg = np.convolve(rewards, np.ones(window)/window, mode='valid')
+axes[1, 1].plot(episodes[window-1:], moving_avg, 'purple', label=f'{window}-episode moving average')
+axes[1, 1].set_title('Moving Average Reward')
+axes[1, 1].legend()
+axes[1, 1].grid(True)
+
+plt.tight_layout()
+plt.savefig('training_dashboard.png', dpi=300, bbox_inches='tight')
+plt.show()
+\end{lstlisting}
+
+\section{Best Practices}
+
+\subsection{Code Organization}
+
+\begin{enumerate}
+    \item Separate environment creation, network creation, and training loops
+    \item Use configuration dictionaries for hyperparameters
+    \item Implement proper logging and checkpointing
+    \item Create reusable training functions
+\end{enumerate}
+
+\subsection{Performance Optimization}
+
+\begin{enumerate}
+    \item Use appropriate batch sizes for your hardware
+    \item Implement experience replay for sample efficiency
+    \item Use vectorized environments when possible
+    \item Monitor GPU memory usage
+\end{enumerate}
+
+\subsection{Experiment Management}
+
+\begin{enumerate}
+    \item Use consistent random seeds for reproducibility
+    \item Save all hyperparameters and configurations
+    \item Implement proper evaluation protocols
+    \item Document all experimental results
+\end{enumerate} 

@@ -197,6 +197,338 @@ def movement_penalty_example():
     print("Movement penalty example completed!\n")
 
 
+def termination_condition_example():
+    """Example demonstrating termination condition functionality."""
+    print("=== Termination Condition Example ===")
+    
+    # Create two environments: one with termination, one without
+    env_with_termination = PistonballEnv(
+        n_pistons=5,
+        terminated_condition=True,
+        render_mode="rgb_array",
+        continuous=True
+    )
+    
+    env_no_termination = PistonballEnv(
+        n_pistons=5,
+        terminated_condition=False,
+        render_mode="rgb_array",
+        continuous=True
+    )
+    
+    print(f"Environment with termination: {env_with_termination.terminated_condition}")
+    print(f"Environment without termination: {env_no_termination.terminated_condition}")
+    
+    # Reset both environments
+    obs1, info1 = env_with_termination.reset()
+    obs2, info2 = env_no_termination.reset()
+    
+    # Run both environments with actions that move ball left
+    print("\nRunning both environments with actions that move ball left...")
+    for step in range(50):
+        # Move all pistons up to create a path for the ball
+        action = np.ones(5)  # All pistons up
+        
+        # Step with termination
+        obs1, reward1, terminated1, truncated1, info1 = env_with_termination.step(action)
+        
+        # Step without termination
+        obs2, reward2, terminated2, truncated2, info2 = env_no_termination.step(action)
+        
+        if step % 10 == 0:
+            print(f"Step {step}: With termination = {reward1:.3f}, Without termination = {reward2:.3f}")
+        
+        # Check termination status
+        if terminated1:
+            print(f"✅ Environment with termination: Episode ended at step {step} (ball hit left wall)")
+            print(f"   Final reward: {reward1:.3f}")
+            obs1, info1 = env_with_termination.reset()
+        
+        if terminated2:
+            print(f"❌ Environment without termination: Unexpected termination at step {step}")
+            obs2, info2 = env_no_termination.reset()
+        
+        if truncated1:
+            print(f"⏰ Environment with termination: Episode truncated at step {step}")
+            obs1, info1 = env_with_termination.reset()
+        
+        if truncated2:
+            print(f"⏰ Environment without termination: Episode truncated at step {step}")
+            obs2, info2 = env_no_termination.reset()
+    
+    # Test different kappa values for termination rewards
+    print("\n=== Testing Different Kappa Values ===")
+    
+    for kappa in [1, 2]:
+        print(f"\nTesting kappa={kappa}")
+        env_kappa = PistonballEnv(
+            n_pistons=8,
+            terminated_condition=True,
+            kappa=kappa,
+            render_mode="rgb_array",
+            continuous=True
+        )
+        
+        obs, info = env_kappa.reset()
+        
+        for step in range(50):
+            action = np.ones(8)  # All pistons up
+            obs, reward, terminated, truncated, info = env_kappa.step(action)
+            
+            if terminated:
+                print(f"   ✅ Episode terminated at step {step}")
+                print(f"   ✅ Final reward: {reward:.3f}")
+                print(f"   ✅ Kappa={kappa} affects which pistons get termination reward")
+                break
+            elif truncated:
+                print(f"   ⏰ Episode truncated at step {step}")
+                break
+        
+        env_kappa.close()
+    
+    env_with_termination.close()
+    env_no_termination.close()
+    print("Termination condition example completed!\n")
+
+
+def leftmost_piston_reward_example():
+    """Example demonstrating leftmost piston reward functionality."""
+    print("=== Leftmost Piston Reward Example ===")
+    
+    # Create environments with different leftmost piston rewards
+    env_no_reward = PistonballEnv(
+        n_pistons=5,
+        terminated_condition=True,
+        leftmost_piston_reward=0.0,  # No leftmost piston reward
+        render_mode="rgb_array",
+        continuous=True
+    )
+    
+    env_positive_reward = PistonballEnv(
+        n_pistons=5,
+        terminated_condition=True,
+        leftmost_piston_reward=1.0,  # Positive leftmost piston reward
+        render_mode="rgb_array",
+        continuous=True
+    )
+    
+    env_negative_reward = PistonballEnv(
+        n_pistons=5,
+        terminated_condition=True,
+        leftmost_piston_reward=-0.5,  # Negative leftmost piston reward
+        render_mode="rgb_array",
+        continuous=True
+    )
+    
+    print(f"Environment with no leftmost reward: {env_no_reward.leftmost_piston_reward}")
+    print(f"Environment with positive leftmost reward: {env_positive_reward.leftmost_piston_reward}")
+    print(f"Environment with negative leftmost reward: {env_negative_reward.leftmost_piston_reward}")
+    
+    # Reset all environments
+    obs1, info1 = env_no_reward.reset()
+    obs2, info2 = env_positive_reward.reset()
+    obs3, info3 = env_negative_reward.reset()
+    
+    # Run all environments with actions that move ball left
+    print("\nRunning all environments with actions that move ball left...")
+    for step in range(50):
+        # Move all pistons up to create a path for the ball
+        action = np.ones(5)  # All pistons up
+        
+        # Step all environments
+        obs1, reward1, terminated1, truncated1, info1 = env_no_reward.step(action)
+        obs2, reward2, terminated2, truncated2, info2 = env_positive_reward.step(action)
+        obs3, reward3, terminated3, truncated3, info3 = env_negative_reward.step(action)
+        
+        if step % 10 == 0:
+            print(f"Step {step}: No reward = {reward1:.3f}, Positive = {reward2:.3f}, Negative = {reward3:.3f}")
+        
+        # Check termination status for all environments
+        if terminated1:
+            print(f"✅ Environment with no leftmost reward: Episode ended at step {step}")
+            print(f"   Final reward: {reward1:.3f}")
+            print(f"   Local rewards: {info1['local_rewards']}")
+            obs1, info1 = env_no_reward.reset()
+        
+        if terminated2:
+            print(f"✅ Environment with positive leftmost reward: Episode ended at step {step}")
+            print(f"   Final reward: {reward2:.3f}")
+            print(f"   Local rewards: {info2['local_rewards']}")
+            print(f"   Leftmost piston reward: {info2['local_rewards'][0]}")
+            print(f"   Other piston rewards: {info2['local_rewards'][1:]}")
+            obs2, info2 = env_positive_reward.reset()
+        
+        if terminated3:
+            print(f"✅ Environment with negative leftmost reward: Episode ended at step {step}")
+            print(f"   Final reward: {reward3:.3f}")
+            print(f"   Local rewards: {info3['local_rewards']}")
+            print(f"   Leftmost piston reward: {info3['local_rewards'][0]}")
+            print(f"   Other piston rewards: {info3['local_rewards'][1:]}")
+            obs3, info3 = env_negative_reward.reset()
+        
+        if truncated1 or truncated2 or truncated3:
+            print(f"⏰ Episode truncated at step {step}")
+            if truncated1:
+                obs1, info1 = env_no_reward.reset()
+            if truncated2:
+                obs2, info2 = env_positive_reward.reset()
+            if truncated3:
+                obs3, info3 = env_negative_reward.reset()
+    
+    # Test different leftmost piston reward values
+    print("\n=== Testing Different Leftmost Piston Reward Values ===")
+    
+    reward_values = [0.5, 1.0, 2.0]
+    for reward_val in reward_values:
+        print(f"\nTesting leftmost_piston_reward={reward_val}")
+        env_test = PistonballEnv(
+            n_pistons=6,
+            terminated_condition=True,
+            leftmost_piston_reward=reward_val,
+            render_mode="rgb_array",
+            continuous=True
+        )
+        
+        obs, info = env_test.reset()
+        
+        for step in range(50):
+            action = np.ones(6)  # All pistons up
+            obs, reward, terminated, truncated, info = env_test.step(action)
+            
+            if terminated:
+                print(f"   ✅ Episode terminated at step {step}")
+                print(f"   ✅ Final reward: {reward:.3f}")
+                print(f"   ✅ Leftmost piston reward: {info['local_rewards'][0]:.3f}")
+                print(f"   ✅ Expected leftmost piston reward: {0.5 + reward_val:.3f}")
+                break
+            elif truncated:
+                print(f"   ⏰ Episode truncated at step {step}")
+                break
+        
+        env_test.close()
+    
+    env_no_reward.close()
+    env_positive_reward.close()
+    env_negative_reward.close()
+    print("Leftmost piston reward example completed!\n")
+
+
+def termination_reward_example():
+    """Example demonstrating configurable termination reward functionality."""
+    print("=== Configurable Termination Reward Example ===")
+    
+    # Create environments with different termination rewards
+    env_default = PistonballEnv(
+        n_pistons=5,
+        terminated_condition=True,
+        render_mode="rgb_array",
+        continuous=True
+    )
+    
+    env_high_reward = PistonballEnv(
+        n_pistons=5,
+        terminated_condition=True,
+        termination_reward=1.0,  # High termination reward
+        render_mode="rgb_array",
+        continuous=True
+    )
+    
+    env_low_reward = PistonballEnv(
+        n_pistons=5,
+        terminated_condition=True,
+        termination_reward=0.1,  # Low termination reward
+        render_mode="rgb_array",
+        continuous=True
+    )
+    
+    print(f"Environment with default termination reward: {env_default.termination_reward}")
+    print(f"Environment with high termination reward: {env_high_reward.termination_reward}")
+    print(f"Environment with low termination reward: {env_low_reward.termination_reward}")
+    
+    # Reset all environments
+    obs1, info1 = env_default.reset()
+    obs2, info2 = env_high_reward.reset()
+    obs3, info3 = env_low_reward.reset()
+    
+    # Run all environments with actions that move ball left
+    print("\nRunning all environments with actions that move ball left...")
+    for step in range(50):
+        # Move all pistons up to create a path for the ball
+        action = np.ones(5)  # All pistons up
+        
+        # Step all environments
+        obs1, reward1, terminated1, truncated1, info1 = env_default.step(action)
+        obs2, reward2, terminated2, truncated2, info2 = env_high_reward.step(action)
+        obs3, reward3, terminated3, truncated3, info3 = env_low_reward.step(action)
+        
+        if step % 10 == 0:
+            print(f"Step {step}: Default = {reward1:.3f}, High = {reward2:.3f}, Low = {reward3:.3f}")
+        
+        # Check termination status for all environments
+        if terminated1:
+            print(f"✅ Environment with default termination reward: Episode ended at step {step}")
+            print(f"   Final reward: {reward1:.3f}")
+            print(f"   Local rewards: {info1['local_rewards']}")
+            obs1, info1 = env_default.reset()
+        
+        if terminated2:
+            print(f"✅ Environment with high termination reward: Episode ended at step {step}")
+            print(f"   Final reward: {reward2:.3f}")
+            print(f"   Local rewards: {info2['local_rewards']}")
+            obs2, info2 = env_high_reward.reset()
+        
+        if terminated3:
+            print(f"✅ Environment with low termination reward: Episode ended at step {step}")
+            print(f"   Final reward: {reward3:.3f}")
+            print(f"   Local rewards: {info3['local_rewards']}")
+            obs3, info3 = env_low_reward.reset()
+        
+        if truncated1 or truncated2 or truncated3:
+            print(f"⏰ Episode truncated at step {step}")
+            if truncated1:
+                obs1, info1 = env_default.reset()
+            if truncated2:
+                obs2, info2 = env_high_reward.reset()
+            if truncated3:
+                obs3, info3 = env_low_reward.reset()
+    
+    # Test different termination reward values
+    print("\n=== Testing Different Termination Reward Values ===")
+    
+    termination_rewards = [0.1, 0.5, 1.0, 2.0]
+    for term_reward in termination_rewards:
+        print(f"\nTesting termination_reward={term_reward}")
+        env_test = PistonballEnv(
+            n_pistons=6,
+            terminated_condition=True,
+            termination_reward=term_reward,
+            render_mode="rgb_array",
+            continuous=True
+        )
+        
+        obs, info = env_test.reset()
+        
+        for step in range(50):
+            action = np.ones(6)  # All pistons up
+            obs, reward, terminated, truncated, info = env_test.step(action)
+            
+            if terminated:
+                print(f"   ✅ Episode terminated at step {step}")
+                print(f"   ✅ Final reward: {reward:.3f}")
+                print(f"   ✅ Termination reward: {term_reward}")
+                break
+            elif truncated:
+                print(f"   ⏰ Episode truncated at step {step}")
+                break
+        
+        env_test.close()
+    
+    env_default.close()
+    env_high_reward.close()
+    env_low_reward.close()
+    print("Configurable termination reward example completed!\n")
+
+
 def multi_piston_control_example():
     """Example demonstrating multi-piston control patterns."""
     print("=== Multi-Piston Control Example ===")
@@ -275,6 +607,9 @@ def main():
         physics_example()
         discrete_actions_example()
         movement_penalty_example()
+        termination_condition_example()
+        leftmost_piston_reward_example()
+        termination_reward_example()
         multi_piston_control_example()
         manual_control_example()
         
@@ -282,6 +617,9 @@ def main():
         print("\nTo test the environment more thoroughly, run:")
         print("python test_env.py")
         print("python test_movement_penalty.py")
+        print("python test_termination_condition.py")
+        print("python test_leftmost_piston_reward.py")
+        print("python test_termination_reward.py")
         
     except Exception as e:
         print(f"Error during examples: {e}")

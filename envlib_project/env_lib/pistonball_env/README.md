@@ -72,6 +72,9 @@ env.close()
 | `render_mode` | str | None | Rendering mode ('human', 'rgb_array', None) |
 | `movement_penalty` | float | 0.0 | Penalty for piston movement (negative value, 0.0 = no penalty) |
 | `movement_penalty_threshold` | float | 0.01 | Minimum movement to trigger penalty |
+| `terminated_condition` | bool | True | Whether to terminate when ball hits left wall |
+| `leftmost_piston_reward` | float | 0.0 | Reward for leftmost piston when ball hits left wall |
+| `termination_reward` | float | 0.5 | Reward for observable pistons when ball hits left wall |
 
 ## 🎮 Action Space
 
@@ -125,26 +128,29 @@ action = np.array([2, 0, 1, 2, 0])
 ## 👁️ Observation Space
 
 ```python
-Box(-inf, inf, shape=(n_pistons, 6), dtype=np.float32)
+Box(-inf, inf, shape=(n_pistons, 7), dtype=np.float32)
 ```
 
-Each piston receives a 6-dimensional observation vector:
+Each piston receives a 7-dimensional observation vector:
 
 | Index | Description | Normalization |
 |-------|-------------|---------------|
-| 0 | Piston position | Normalized to [-1, 1] relative to center |
-| 1 | Ball x-position | Normalized to [0, 1] across screen width |
-| 2 | Ball y-position | Normalized to [0, 1] across screen height |
-| 3 | Ball x-velocity | Normalized by 15 (typical max velocity) |
-| 4 | Ball y-velocity | Normalized by 8 (typical max velocity) |
-| 5 | Ball angular velocity | Normalized by 8 (typical max angular velocity) |
+| 0 | Piston y-position | Normalized to [-1, 1] relative to center |
+| 1 | Piston x-position | Normalized to [0, 1] across screen width |
+| 2 | Ball x-position | Normalized to [0, 1] across screen width (0 if not observable) |
+| 3 | Ball y-position | Normalized to [0, 1] across screen height (0 if not observable) |
+| 4 | Ball x-velocity | Normalized by 15 (typical max velocity) (0 if not observable) |
+| 5 | Ball y-velocity | Normalized by 8 (typical max velocity) (0 if not observable) |
+| 6 | Ball angular velocity | Normalized by 8 (typical max angular velocity) (0 if not observable) |
+
+**Note**: Ball information (indices 2-6) is only available to pistons within `kappa` hops of the ball's position. Pistons outside this range receive zeros for ball-related observations.
 
 **Example Observation**:
 ```python
 obs = np.array([
-    [0.5, 0.8, 0.6, 0.2, -0.1, 0.05],  # Piston 1 observation
-    [0.2, 0.8, 0.6, 0.2, -0.1, 0.05],  # Piston 2 observation
-    [-0.1, 0.8, 0.6, 0.2, -0.1, 0.05], # Piston 3 observation
+    [0.5, 0.1, 0.8, 0.6, 0.2, -0.1, 0.05],  # Piston 1 observation (can see ball)
+    [0.2, 0.2, 0.8, 0.6, 0.2, -0.1, 0.05],  # Piston 2 observation (can see ball)
+    [-0.1, 0.3, 0.0, 0.0, 0.0, 0.0, 0.0],   # Piston 3 observation (cannot see ball)
     # ... for all pistons
 ])
 ```
@@ -175,9 +181,27 @@ if movement > movement_penalty_threshold:
     penalty = movement_penalty * (movement_distance / pixels_per_position)
 ```
 
-### 4. Total Reward
+### 4. Termination Reward (New Feature)
+When `terminated_condition=True` and the ball hits the left wall:
 ```python
-total_reward = local_reward + time_penalty + movement_penalty_total
+if ball_hits_left_wall and piston_can_observe_ball:
+    termination_reward = termination_reward_value  # Configurable (default: 0.5)
+else:
+    termination_reward = 0.0
+```
+
+### 5. Leftmost Piston Reward (New Feature)
+When `terminated_condition=True` and the ball hits the left wall:
+```python
+if ball_hits_left_wall and piston_index == 0:  # Leftmost piston
+    leftmost_piston_reward = leftmost_piston_reward_value
+else:
+    leftmost_piston_reward = 0.0
+```
+
+### 6. Total Reward
+```python
+total_reward = local_reward + time_penalty + movement_penalty_total + termination_reward + leftmost_piston_reward
 ```
 
 ## 💰 Movement Penalty System
@@ -218,6 +242,110 @@ env = PistonballEnv(
 - **Energy Conservation**: Simulate real-world energy constraints
 - **Smooth Control**: Promote gradual, controlled movements
 - **Research Experiments**: Study trade-offs between effectiveness and efficiency
+
+## 🎯 Termination Condition
+
+The environment supports configurable termination when the ball hits the left wall, with optional rewards for pistons that can observe the ball.
+
+### Configuration
+
+```python
+# Default behavior - terminate when ball hits left wall
+env = PistonballEnv(n_pistons=10, terminated_condition=True)
+
+# Disable termination - ball can bounce off left wall
+env = PistonballEnv(n_pistons=10, terminated_condition=False)
+```
+
+### Termination Reward System
+
+When `terminated_condition=True` and the ball hits the left wall:
+
+1. **Episode Termination**: The episode ends immediately
+2. **Observable Pistons**: Pistons within `kappa` hops of the ball receive a reward specified by `termination_reward` (default: +0.5)
+3. **Non-Observable Pistons**: Pistons outside the observation range receive no termination reward
+
+### Example Scenarios
+
+```python
+# Scenario 1: Ball hits left wall, kappa=1, default termination reward
+# Piston closest to ball and its immediate neighbors get +0.5 reward
+env = PistonballEnv(n_pistons=10, terminated_condition=True, kappa=1)
+
+# Scenario 2: Ball hits left wall, kappa=2, custom termination reward
+# Piston closest to ball and pistons within 2 hops get +1.0 reward
+env = PistonballEnv(n_pistons=10, terminated_condition=True, kappa=2, termination_reward=1.0)
+
+# Scenario 3: No termination - ball bounces off left wall
+env = PistonballEnv(n_pistons=10, terminated_condition=False)
+
+# Scenario 4: Custom termination reward
+env = PistonballEnv(n_pistons=10, terminated_condition=True, termination_reward=2.0)
+```
+
+### Use Cases
+
+- **Goal-Oriented Training**: Clear success condition with immediate feedback
+- **Cooperative Learning**: Rewards pistons that contribute to the goal
+- **Research Flexibility**: Choose between termination and continuous play
+- **Performance Evaluation**: Clear metrics for success/failure
+
+## 🎯 Leftmost Piston Reward
+
+The environment supports a special reward for the leftmost piston (piston index 0) when the ball hits the left wall.
+
+### Configuration
+
+```python
+# Default behavior - no leftmost piston reward
+env = PistonballEnv(n_pistons=10, leftmost_piston_reward=0.0)
+
+# Add leftmost piston reward
+env = PistonballEnv(n_pistons=10, leftmost_piston_reward=1.0)
+
+# Negative reward for leftmost piston
+env = PistonballEnv(n_pistons=10, leftmost_piston_reward=-0.5)
+```
+
+### Leftmost Piston Reward System
+
+When `terminated_condition=True` and the ball hits the left wall:
+
+1. **Leftmost Piston**: Piston index 0 receives an additional reward specified by `leftmost_piston_reward`
+2. **Other Pistons**: No additional leftmost piston reward
+3. **Combined Rewards**: Leftmost piston can receive both termination reward (specified by `termination_reward`) and leftmost piston reward
+
+### Example Scenarios
+
+```python
+# Scenario 1: Leftmost piston gets extra reward (default termination reward)
+env = PistonballEnv(n_pistons=10, terminated_condition=True, leftmost_piston_reward=1.0)
+# When ball hits left wall:
+# - Leftmost piston: +0.5 (termination) + 1.0 (leftmost) = +1.5 total
+# - Other observable pistons: +0.5 (termination only)
+# - Non-observable pistons: +0.0
+
+# Scenario 2: Leftmost piston gets penalty (custom termination reward)
+env = PistonballEnv(n_pistons=10, terminated_condition=True, leftmost_piston_reward=-0.5, termination_reward=1.0)
+# When ball hits left wall:
+# - Leftmost piston: +1.0 (termination) + (-0.5) (leftmost) = +0.5 total
+# - Other observable pistons: +1.0 (termination only)
+# - Non-observable pistons: +0.0
+
+# Scenario 3: Custom termination and leftmost piston rewards
+env = PistonballEnv(n_pistons=10, terminated_condition=True, leftmost_piston_reward=2.0, termination_reward=0.5)
+# When ball hits left wall:
+# - Leftmost piston: +0.5 (termination) + 2.0 (leftmost) = +2.5 total
+# - Other observable pistons: +0.5 (termination only)
+# - Non-observable pistons: +0.0
+```
+
+### Use Cases
+
+- **Position-Based Rewards**: Reward pistons based on their spatial position
+- **Responsibility Assignment**: Give extra responsibility to the leftmost piston
+- **Research Experiments**: Study the effect of position-based rewards
+- **Coordination Incentives**: Encourage the leftmost piston to take more active role
 
 ## 🎯 Usage Examples
 

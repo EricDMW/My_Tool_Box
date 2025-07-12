@@ -1,0 +1,65 @@
+\documentclass[11pt,a4paper]{book}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{verbatim}
+
+% Page setup
+\geometry{margin=2.5cm}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+
+% Simple code environment
+\newenvironment{codeblock}
+{\begin{quote}\ttfamily\footnotesize}
+{\end{quote}}
+
+% Title page
+\title{
+    \vspace{-2cm}
+    \Huge\textbf{My Tool Box}\\[0.5cm]
+    \Large\textbf{Comprehensive Research Toolkit and Environment Library}\\[0.5cm]
+    \large User Manual and Documentation
+}
+\author{
+    \Large Dongming Wang\\
+    \large Research Toolkit Development
+}
+\date{\today}
+
+\begin{document}
+
+% Title page
+\maketitle
+\thispagestyle{empty}
+
+% Table of contents
+\tableofcontents
+
+% Main matter
+\mainmatter
+
+% Include chapters
+\include{chapters/introduction}
+\include{chapters/installation}
+\include{chapters/toolkit_overview}
+\include{chapters/neural_toolkit}
+\include{chapters/plotkit}
+\include{chapters/envlib_overview}
+\include{chapters/pistonball_env}
+\include{chapters/kos_env}
+\include{chapters/examples}
+\include{chapters/troubleshooting}
+
+% Back matter
+\backmatter
+
+% Appendices
+\appendix
+\include{appendices/api_reference}
+
+\end{document} 

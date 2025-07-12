@@ -1,0 +1,569 @@
+\chapter{Pistonball Environment}
+
+\section{Overview}
+
+The Pistonball Environment is a multi-agent physics-based environment where agents control pistons to collaboratively move a ball. This environment is designed to study cooperative behavior, coordination, and emergent strategies in multi-agent systems.
+
+\section{Environment Description}
+
+\subsection{Physics Simulation}
+
+The environment simulates a 2D physics world with:
+\begin{itemize}
+    \item \textbf{Multiple Pistons}: Agents control individual pistons that can move up and down
+    \item \textbf{Ball Physics}: A ball that bounces off pistons and walls
+    \item \textbf{Gravity}: Realistic gravitational effects
+    \item \textbf{Collision Detection}: Accurate collision handling between ball and pistons
+\end{itemize}
+
+\subsection{Objective}
+
+The goal is to move the ball from one side of the environment to the other by coordinating piston movements. Agents must learn to:
+\begin{itemize}
+    \item \textbf{Coordinate Timing}: Move pistons at the right moments
+    \item \textbf{Maintain Ball Momentum}: Keep the ball moving in the desired direction
+    \item \textbf{Avoid Obstacles}: Prevent the ball from getting stuck
+    \item \textbf{Work Together}: Coordinate with other agents for optimal performance
+\end{itemize}
+
+\section{Installation}
+
+\subsection{Basic Installation}
+
+\begin{lstlisting}[language=bash, caption=Basic Installation]
+cd envlib_project/env_lib/pistonball_env
+pip install -e .
+\end{lstlisting}
+
+\subsection{Dependencies}
+
+The environment requires:
+\begin{itemize}
+    \item \textbf{PyGame}: For rendering and physics simulation
+    \item \textbf{NumPy}: For numerical computations
+    \item \textbf{Gym}: For the environment interface
+\end{itemize}
+
+\section{Basic Usage}
+
+\subsection{Creating the Environment}
+
+\begin{lstlisting}[language=python, caption=Basic Environment Creation]
+from env_lib import pistonball_env
+
+# Create environment with default settings
+env = pistonball_env.PistonballEnv()
+
+# Get environment information
+print(f"Number of agents: {env.num_agents}")
+print(f"Observation space: {env.observation_space}")
+print(f"Action space: {env.action_space}")
+\end{lstlisting}
+
+\subsection{Running a Simple Episode}
+
+\begin{lstlisting}[language=python, caption=Simple Episode]
+import numpy as np
+
+# Reset environment
+observations = env.reset()
+
+# Run episode
+done = False
+total_reward = 0
+
+while not done:
+    # Random actions for all agents
+    actions = {agent_id: env.action_space.sample() 
+              for agent_id in env.agent_ids}
+    
+    # Take step
+    observations, rewards, dones, infos = env.step(actions)
+    
+    # Accumulate reward
+    total_reward += sum(rewards.values())
+    
+    # Check if episode is done
+    done = all(dones.values())
+
+print(f"Episode completed with total reward: {total_reward}")
+\end{lstlisting}
+
+\section{Configuration Options}
+
+\subsection{Environment Parameters}
+
+\begin{lstlisting}[language=python, caption=Environment Configuration]
+# Configure environment
+config = {
+    'num_agents': 4,              # Number of pistons/agents
+    'max_steps': 1000,            # Maximum steps per episode
+    'ball_speed': 5.0,            # Initial ball speed
+    'gravity': 0.5,               # Gravity strength
+    'piston_speed': 2.0,          # Piston movement speed
+    'reward_scale': 1.0,          # Reward scaling factor
+    'observation_type': 'vector', # Observation type
+    'render_mode': 'rgb_array'    # Rendering mode
+}
+
+env = pistonball_env.PistonballEnv(**config)
+\end{lstlisting}
+
+\subsection{Parameter Descriptions}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|l|l|l|}
+\hline
+\textbf{Parameter} & \textbf{Type} & \textbf{Description} \\
+\hline
+num\_agents & int & Number of pistons/agents (default: 4) \\
+max\_steps & int & Maximum steps per episode (default: 1000) \\
+ball\_speed & float & Initial ball velocity (default: 5.0) \\
+gravity & float & Gravity strength (default: 0.5) \\
+piston\_speed & float & Piston movement speed (default: 2.0) \\
+reward\_scale & float & Reward scaling factor (default: 1.0) \\
+observation\_type & str & Observation type (default: 'vector') \\
+render\_mode & str & Rendering mode (default: 'rgb_array') \\
+\hline
+\end{tabular}
+\caption{Environment parameters}
+\end{table}
+
+\section{Observation Spaces}
+
+\subsection{Vector Observations}
+
+Vector observations provide numerical state information:
+
+\begin{lstlisting}[language=python, caption=Vector Observations]
+# Vector observation space
+observation_space = spaces.Box(
+    low=-np.inf, high=np.inf, 
+    shape=(observation_dim,), dtype=np.float32
+)
+
+# Observation components
+observation = [
+    ball_x, ball_y,           # Ball position
+    ball_vx, ball_vy,         # Ball velocity
+    piston1_y, piston1_vy,    # Piston 1 position and velocity
+    piston2_y, piston2_vy,    # Piston 2 position and velocity
+    # ... for all pistons
+]
+\end{lstlisting}
+
+\subsection{Image Observations}
+
+Image observations provide visual representations:
+
+\begin{lstlisting}[language=python, caption=Image Observations]
+# Image observation space
+observation_space = spaces.Box(
+    low=0, high=255, 
+    shape=(height, width, 3), dtype=np.uint8
+)
+
+# RGB image of the environment
+observation = env.render(mode='rgb_array')
+\end{lstlisting}
+
+\subsection{Multi-Modal Observations}
+
+Combination of vector and image observations:
+
+\begin{lstlisting}[language=python, caption=Multi-Modal Observations]
+# Multi-modal observation space
+observation_space = spaces.Dict({
+    'vector': spaces.Box(low=-np.inf, high=np.inf, shape=(vector_dim,)),
+    'image': spaces.Box(low=0, high=255, shape=(height, width, 3))
+})
+\end{lstlisting}
+
+\section{Action Spaces}
+
+\subsection{Discrete Actions}
+
+Simple discrete action space:
+
+\begin{lstlisting}[language=python, caption=Discrete Actions]
+# Discrete action space
+action_space = spaces.Discrete(3)
+
+# Actions: 0 = no movement, 1 = move up, 2 = move down
+actions = {
+    'agent_0': 1,  # Move up
+    'agent_1': 2,  # Move down
+    'agent_2': 0,  # No movement
+    'agent_3': 1   # Move up
+}
+\end{lstlisting}
+
+\subsection{Continuous Actions}
+
+Continuous action space for smoother control:
+
+\begin{lstlisting}[language=python, caption=Continuous Actions]
+# Continuous action space
+action_space = spaces.Box(
+    low=-1.0, high=1.0, 
+    shape=(1,), dtype=np.float32
+)
+
+# Actions: -1 = move down, 0 = no movement, 1 = move up
+actions = {
+    'agent_0': [0.5],   # Move up
+    'agent_1': [-0.3],  # Move down slightly
+    'agent_2': [0.0],   # No movement
+    'agent_3': [1.0]    # Move up fully
+}
+\end{lstlisting}
+
+\section{Reward System}
+
+\subsection{Reward Components}
+
+The reward system includes multiple components:
+
+\begin{itemize}
+    \item \textbf{Ball Progress}: Reward for ball moving toward the goal
+    \item \textbf{Collision Reward}: Reward for successful ball-piston collisions
+    \item \textbf{Coordination Bonus}: Bonus for coordinated movements
+    \item \textbf{Time Penalty}: Small penalty per step to encourage efficiency
+\end{itemize}
+
+\subsection{Reward Calculation}
+
+\begin{lstlisting}[language=python, caption=Reward Calculation]
+def calculate_reward(self, ball_progress, collisions, coordination):
+    """Calculate reward for the current state"""
+    
+    # Base reward from ball progress
+    progress_reward = ball_progress * self.reward_scale
+    
+    # Collision reward
+    collision_reward = collisions * 0.1
+    
+    # Coordination bonus
+    coordination_bonus = coordination * 0.05
+    
+    # Time penalty
+    time_penalty = -0.001
+    
+    # Total reward
+    total_reward = progress_reward + collision_reward + coordination_bonus + time_penalty
+    
+    return total_reward
+\end{lstlisting}
+
+\section{Advanced Features}
+
+\subsection{Multi-Agent Coordination}
+
+The environment supports sophisticated multi-agent interactions:
+
+\begin{lstlisting}[language=python, caption=Multi-Agent Coordination]
+# Get agent information
+agent_ids = env.agent_ids
+num_agents = env.num_agents
+
+# Agent-specific observations
+agent_observations = {}
+for agent_id in agent_ids:
+    agent_observations[agent_id] = observations[agent_id]
+
+# Coordinated actions
+def coordinated_policy(observations):
+    """Policy that considers other agents"""
+    actions = {}
+    
+    for agent_id in agent_ids:
+        # Consider other agents' positions
+        other_positions = [observations[other_id][:2] 
+                          for other_id in agent_ids if other_id != agent_id]
+        
+        # Make decision based on coordination
+        actions[agent_id] = decide_action(observations[agent_id], other_positions)
+    
+    return actions
+\end{lstlisting}
+
+\subsection{Physics Customization}
+
+Customize physics parameters for different scenarios:
+
+\begin{lstlisting}[language=python, caption=Physics Customization]
+# Custom physics configuration
+physics_config = {
+    'gravity': 0.3,           # Reduced gravity
+    'friction': 0.1,          # Ball friction
+    'restitution': 0.8,       # Ball bounciness
+    'piston_mass': 1.0,       # Piston mass
+    'ball_mass': 0.5          # Ball mass
+}
+
+env = pistonball_env.PistonballEnv(physics_config=physics_config)
+\end{lstlisting}
+
+\section{Training Examples}
+
+\subsection{PPO Training}
+
+\begin{lstlisting}[language=python, caption=PPO Training Example]
+import torch
+from toolkit.neural_toolkit import MLPPolicyNetwork, MLPValueNetwork
+from env_lib import pistonball_env
+
+# Create environment
+env = pistonball_env.PistonballEnv(num_agents=4)
+
+# Create networks for each agent
+policy_networks = {}
+value_networks = {}
+
+for agent_id in env.agent_ids:
+    policy_networks[agent_id] = MLPPolicyNetwork(
+        input_dim=env.observation_space.shape[0],
+        output_dim=env.action_space.n,
+        hidden_dims=[256, 256]
+    )
+    value_networks[agent_id] = MLPValueNetwork(
+        input_dim=env.observation_space.shape[0],
+        hidden_dims=[256, 256]
+    )
+
+# Training loop
+for episode in range(1000):
+    observations = env.reset()
+    episode_rewards = {agent_id: 0 for agent_id in env.agent_ids}
+    
+    done = False
+    while not done:
+        # Get actions from policy networks
+        actions = {}
+        for agent_id in env.agent_ids:
+            action_probs = policy_networks[agent_id](observations[agent_id])
+            actions[agent_id] = torch.multinomial(action_probs, 1).item()
+        
+        # Take step
+        observations, rewards, dones, infos = env.step(actions)
+        
+        # Accumulate rewards
+        for agent_id in env.agent_ids:
+            episode_rewards[agent_id] += rewards[agent_id]
+        
+        done = all(dones.values())
+    
+    # Log episode results
+    avg_reward = sum(episode_rewards.values()) / len(episode_rewards)
+    print(f"Episode {episode}: Average reward = {avg_reward:.2f}")
+\end{lstlisting}
+
+\subsection{MADDPG Training}
+
+\begin{lstlisting}[language=python, caption=MADDPG Training Example]
+import torch
+from toolkit.neural_toolkit import MLPPolicyNetwork, MLPQNetwork
+from env_lib import pistonball_env
+
+# Create environment
+env = pistonball_env.PistonballEnv(num_agents=4)
+
+# Create MADDPG networks
+actors = {}
+critics = {}
+
+for agent_id in env.agent_ids:
+    actors[agent_id] = MLPPolicyNetwork(
+        input_dim=env.observation_space.shape[0],
+        output_dim=env.action_space.n,
+        hidden_dims=[256, 256]
+    )
+    critics[agent_id] = MLPQNetwork(
+        input_dim=env.observation_space.shape[0] * env.num_agents,
+        output_dim=env.action_space.n,
+        hidden_dims=[256, 256]
+    )
+
+# Training loop
+for episode in range(1000):
+    observations = env.reset()
+    episode_rewards = {agent_id: 0 for agent_id in env.agent_ids}
+    
+    done = False
+    while not done:
+        # Get actions from actors
+        actions = {}
+        for agent_id in env.agent_ids:
+            action_probs = actors[agent_id](observations[agent_id])
+            actions[agent_id] = torch.multinomial(action_probs, 1).item()
+        
+        # Take step
+        next_observations, rewards, dones, infos = env.step(actions)
+        
+        # Update critics with global state
+        global_state = torch.cat([observations[agent_id] 
+                                 for agent_id in env.agent_ids])
+        
+        for agent_id in env.agent_ids:
+            # Critic update (simplified)
+            q_values = critics[agent_id](global_state)
+            target_q = rewards[agent_id] + 0.99 * q_values.max()
+            # ... training code here
+        
+        observations = next_observations
+        for agent_id in env.agent_ids:
+            episode_rewards[agent_id] += rewards[agent_id]
+        
+        done = all(dones.values())
+    
+    avg_reward = sum(episode_rewards.values()) / len(episode_rewards)
+    print(f"Episode {episode}: Average reward = {avg_reward:.2f}")
+\end{lstlisting}
+
+\section{Visualization and Analysis}
+
+\subsection{Environment Rendering}
+
+\begin{lstlisting}[language=python, caption=Environment Rendering]
+import matplotlib.pyplot as plt
+
+# Render environment
+env = pistonball_env.PistonballEnv(render_mode='rgb_array')
+
+# Run episode with rendering
+observations = env.reset()
+done = False
+
+while not done:
+    actions = {agent_id: env.action_space.sample() 
+              for agent_id in env.agent_ids}
+    observations, rewards, dones, infos = env.step(actions)
+    
+    # Render current state
+    frame = env.render()
+    plt.imshow(frame)
+    plt.axis('off')
+    plt.show()
+    
+    done = all(dones.values())
+\end{lstlisting}
+
+\subsection{Performance Analysis}
+
+\begin{lstlisting}[language=python, caption=Performance Analysis]
+from toolkit.plotkit import plot_training_curves
+import numpy as np
+
+# Collect training data
+episode_rewards = []
+episode_lengths = []
+
+for episode in range(100):
+    observations = env.reset()
+    episode_reward = 0
+    episode_length = 0
+    
+    done = False
+    while not done:
+        actions = {agent_id: env.action_space.sample() 
+                  for agent_id in env.agent_ids}
+        observations, rewards, dones, infos = env.step(actions)
+        
+        episode_reward += sum(rewards.values())
+        episode_length += 1
+        done = all(dones.values())
+    
+    episode_rewards.append(episode_reward)
+    episode_lengths.append(episode_length)
+
+# Plot results
+plot_training_curves(
+    episodes=np.arange(100),
+    rewards=episode_rewards,
+    losses=episode_lengths,
+    title="Pistonball Training Progress",
+    save_path="pistonball_training.png"
+)
+\end{lstlisting}
+
+\section{Troubleshooting}
+
+\subsection{Common Issues}
+
+\subsubsection{Rendering Issues}
+
+If you encounter rendering problems:
+
+\begin{lstlisting}[language=python, caption=Rendering Troubleshooting]
+# Disable rendering for training
+env = pistonball_env.PistonballEnv(render_mode=None)
+
+# Use headless rendering
+env = pistonball_env.PistonballEnv(render_mode='rgb_array')
+
+# Check display settings
+import os
+os.environ['SDL_VIDEODRIVER'] = 'dummy'
+\end{lstlisting}
+
+\subsubsection{Performance Issues}
+
+For performance optimization:
+
+\begin{lstlisting}[language=python, caption=Performance Optimization]
+# Reduce physics complexity
+env = pistonball_env.PistonballEnv(
+    physics_config={'gravity': 0.1, 'friction': 0.05}
+)
+
+# Use vector observations instead of images
+env = pistonball_env.PistonballEnv(observation_type='vector')
+
+# Limit episode length
+env = pistonball_env.PistonballEnv(max_steps=500)
+\end{lstlisting}
+
+\subsubsection{Training Issues}
+
+For training problems:
+
+\begin{lstlisting}[language=python, caption=Training Troubleshooting]
+# Adjust reward scaling
+env = pistonball_env.PistonballEnv(reward_scale=0.1)
+
+# Use simpler action space
+env = pistonball_env.PistonballEnv(action_type='discrete')
+
+# Increase exploration
+epsilon = 0.1  # Epsilon-greedy exploration
+\end{lstlisting}
+
+\section{Best Practices}
+
+\subsection{Environment Configuration}
+
+\begin{enumerate}
+    \item Start with fewer agents (2-3) for initial experiments
+    \item Use vector observations for faster training
+    \item Adjust reward scaling to match your learning rates
+    \item Set appropriate episode lengths for your training setup
+\end{enumerate}
+
+\subsection{Training Strategies}
+
+\begin{enumerate}
+    \item Use centralized training with decentralized execution
+    \item Implement experience replay for multi-agent learning
+    \item Consider using parameter sharing between agents
+    \item Monitor coordination metrics during training
+\end{enumerate}
+
+\subsection{Evaluation}
+
+\begin{enumerate}
+    \item Evaluate on multiple random seeds
+    \item Measure both individual and team performance
+    \item Analyze coordination patterns in successful episodes
+    \item Compare against baseline policies
+\end{enumerate} 

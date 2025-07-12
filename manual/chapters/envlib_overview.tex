@@ -1,0 +1,414 @@
+\chapter{Environment Library Overview}
+
+\section{Introduction}
+
+The Environment Library (\texttt{env\_lib}) is a comprehensive collection of specialized reinforcement learning environments designed for research in multi-agent systems, physics simulations, communication networks, and complex systems. Each environment is carefully designed to provide realistic, challenging scenarios for testing and developing reinforcement learning algorithms.
+
+\section{Library Structure}
+
+The environment library is organized into five main environments:
+
+\begin{figure}[H]
+\centering
+\begin{verbatim}
+env_lib/
+├── __init__.py              # Main package initialization
+├── pistonball_env/          # Multi-agent physics environment
+├── kos_env/                 # Kuramoto oscillator environment
+├── wireless_comm_env/       # Wireless communication environment
+├── ajlatt_env/             # Agent-based lattice environment
+└── linemsg_env/            # Linear message passing environment
+\end{verbatim}
+\caption{Environment library structure}
+\end{figure}
+
+\section{Environment Categories}
+
+\subsection{Multi-Agent Environments}
+
+Environments designed for studying multi-agent interactions:
+
+\begin{itemize}
+    \item \textbf{Pistonball Environment}: Collaborative physics-based environment where agents must work together to move a ball
+    \item \textbf{Agent-based Lattice Environment}: Grid-based environment for studying spatial agent interactions
+\end{itemize}
+
+\subsection{Physics Simulations}
+
+Realistic physics-based environments:
+
+\begin{itemize}
+    \item \textbf{Pistonball Environment}: 2D physics simulation with multiple pistons and a ball
+    \item \textbf{Kuramoto Oscillator Environment}: Complex systems simulation of coupled oscillators
+\end{itemize}
+
+\subsection{Communication Networks}
+
+Environments for studying communication and coordination:
+
+\begin{itemize}
+    \item \textbf{Wireless Communication Environment}: Realistic wireless network simulation
+    \item \textbf{Linear Message Passing Environment}: Simplified message passing between agents
+\end{itemize}
+
+\subsection{Complex Systems}
+
+Environments for studying emergent behavior and complex dynamics:
+
+\begin{itemize}
+    \item \textbf{Kuramoto Oscillator Environment}: Study synchronization phenomena
+    \item \textbf{Agent-based Lattice Environment}: Emergent behavior in spatial systems
+\end{itemize}
+
+\section{Common Interface}
+
+All environments follow a consistent interface based on the OpenAI Gym standard:
+
+\begin{lstlisting}[language=python, caption=Standard Environment Interface]
+import gym
+from env_lib import pistonball_env
+
+# Create environment
+env = pistonball_env.PistonballEnv()
+
+# Reset environment
+observation = env.reset()
+
+# Take action
+action = env.action_space.sample()  # Random action
+observation, reward, done, info = env.step(action)
+
+# Get environment information
+print(f"Observation space: {env.observation_space}")
+print(f"Action space: {env.action_space}")
+print(f"Number of agents: {env.num_agents}")
+\end{lstlisting}
+
+\section{Environment Features}
+
+\subsection{Multi-Agent Support}
+
+Most environments support multiple agents with different interaction patterns:
+
+\begin{lstlisting}[language=python, caption=Multi-Agent Usage]
+# Get agent information
+num_agents = env.num_agents
+agent_ids = env.agent_ids
+
+# Multi-agent step
+actions = {agent_id: env.action_space.sample() for agent_id in agent_ids}
+observations, rewards, dones, infos = env.step(actions)
+
+# Check if episode is done
+episode_done = all(dones.values())
+\end{lstlisting}
+
+\subsection{Observation Spaces}
+
+Environments provide various observation types:
+
+\begin{itemize}
+    \item \textbf{Vector Observations}: Numerical state representations
+    \item \textbf{Image Observations}: Visual representations (RGB arrays)
+    \item \textbf{Multi-Modal Observations}: Combinations of different observation types
+    \item \textbf{Agent-Specific Observations}: Different observations for different agents
+\end{itemize}
+
+\subsection{Action Spaces}
+
+Different action space types are supported:
+
+\begin{itemize}
+    \item \textbf{Discrete Actions}: Finite set of possible actions
+    \item \textbf{Continuous Actions}: Real-valued action vectors
+    \item \textbf{Multi-Dimensional Actions}: Actions with multiple components
+    \item \textbf{Hierarchical Actions}: Actions with different levels of abstraction
+\end{itemize}
+
+\subsection{Reward Systems}
+
+Sophisticated reward mechanisms:
+
+\begin{itemize}
+    \item \textbf{Individual Rewards}: Agent-specific reward signals
+    \item \textbf{Global Rewards}: Environment-wide reward signals
+    \item \textbf{Sparse Rewards}: Rewards only at specific events
+    \item \textbf{Dense Rewards}: Continuous reward signals
+    \item \textbf{Shaped Rewards}: Reward shaping for learning efficiency
+\end{itemize}
+
+\section{Environment Configuration}
+
+\subsection{Parameter Configuration}
+
+All environments support extensive parameter configuration:
+
+\begin{lstlisting}[language=python, caption=Environment Configuration]
+# Configure environment parameters
+config = {
+    'num_agents': 4,
+    'max_steps': 1000,
+    'reward_scale': 1.0,
+    'observation_type': 'vector',
+    'render_mode': 'rgb_array'
+}
+
+env = pistonball_env.PistonballEnv(**config)
+\end{lstlisting}
+
+\subsection{Environment Wrappers}
+
+Use wrappers to modify environment behavior:
+
+\begin{lstlisting}[language=python, caption=Environment Wrappers]
+from env_lib import pistonball_env
+from env_lib.wrappers import ObservationWrapper, RewardWrapper
+
+# Create base environment
+env = pistonball_env.PistonballEnv()
+
+# Add observation wrapper
+env = ObservationWrapper(env, observation_type='normalized')
+
+# Add reward wrapper
+env = RewardWrapper(env, reward_scale=0.1)
+\end{lstlisting}
+
+\section{Integration with Toolkit}
+
+\subsection{Neural Network Integration}
+
+Seamless integration with neural toolkit components:
+
+\begin{lstlisting}[language=python, caption=Neural Network Integration]
+from toolkit.neural_toolkit import MLPPolicyNetwork
+from env_lib import pistonball_env
+
+# Create environment
+env = pistonball_env.PistonballEnv()
+
+# Create policy network
+policy_network = MLPPolicyNetwork(
+    input_dim=env.observation_space.shape[0],
+    output_dim=env.action_space.n,
+    hidden_dims=[256, 256]
+)
+
+# Training loop
+for episode in range(1000):
+    obs = env.reset()
+    done = False
+    
+    while not done:
+        action = policy_network.select_action(obs)
+        obs, reward, done, info = env.step(action)
+\end{lstlisting}
+
+\subsection{Plotting Integration}
+
+Visualize environment behavior with plotkit:
+
+\begin{lstlisting}[language=python, caption=Plotting Integration]
+from toolkit.plotkit import plot_environment_analysis
+from env_lib import pistonball_env
+
+# Create environment
+env = pistonball_env.PistonballEnv()
+
+# Analyze environment
+plot_environment_analysis(
+    env=env,
+    num_episodes=100,
+    save_path='environment_analysis.png'
+)
+\end{lstlisting}
+
+\section{Performance Considerations}
+
+\subsection{Computational Efficiency}
+
+\begin{itemize}
+    \item \textbf{Vectorized Environments}: Support for parallel environment execution
+    \item \textbf{Optimized Physics}: Efficient physics calculations
+    \item \textbf{Memory Management}: Careful memory usage for large-scale experiments
+    \item \textbf{GPU Acceleration}: GPU support for physics simulations where applicable
+\end{itemize}
+
+\subsection{Scalability}
+
+\begin{itemize}
+    \item \textbf{Variable Agent Counts}: Support for different numbers of agents
+    \item \textbf{Configurable Complexity}: Adjustable environment complexity
+    \item \textbf{Parallel Execution}: Support for multiple environment instances
+    \item \textbf{Distributed Training}: Compatible with distributed training frameworks
+\end{itemize}
+
+\section{Best Practices}
+
+\subsection{Environment Selection}
+
+\begin{enumerate}
+    \item Choose environments appropriate for your research question
+    \item Start with simpler environments and gradually increase complexity
+    \item Consider the computational requirements of each environment
+    \item Match environment characteristics to your algorithm capabilities
+\end{enumerate}
+
+\subsection{Configuration}
+
+\begin{enumerate}
+    \item Use appropriate observation and action spaces for your algorithms
+    \item Configure reward scales to match your learning rates
+    \item Set reasonable episode lengths for your training setup
+    \item Use environment wrappers to standardize interfaces
+\end{enumerate}
+
+\subsection{Training}
+
+\begin{enumerate}
+    \item Monitor environment performance and agent behavior
+    \item Use appropriate exploration strategies for each environment
+    \item Consider the multi-agent nature when designing algorithms
+    \item Validate results across multiple environment seeds
+\end{enumerate}
+
+\section{Development and Extension}
+
+\subsection{Custom Environments}
+
+Guidelines for creating custom environments:
+
+\begin{lstlisting}[language=python, caption=Custom Environment Template]
+import gym
+from gym import spaces
+import numpy as np
+
+class CustomEnv(gym.Env):
+    def __init__(self, **kwargs):
+        super().__init__()
+        
+        # Define observation and action spaces
+        self.observation_space = spaces.Box(
+            low=-np.inf, high=np.inf, shape=(10,), dtype=np.float32
+        )
+        self.action_space = spaces.Discrete(4)
+        
+        # Initialize environment state
+        self.reset()
+    
+    def reset(self):
+        # Reset environment to initial state
+        self.state = np.zeros(10)
+        return self.state
+    
+    def step(self, action):
+        # Execute action and return (observation, reward, done, info)
+        # Implementation here
+        pass
+    
+    def render(self, mode='human'):
+        # Render environment (optional)
+        pass
+\end{lstlisting}
+
+\subsection{Environment Testing}
+
+Comprehensive testing framework:
+
+\begin{lstlisting}[language=python, caption=Environment Testing]
+def test_environment():
+    """Test environment functionality"""
+    env = pistonball_env.PistonballEnv()
+    
+    # Test reset
+    obs = env.reset()
+    assert obs.shape == env.observation_space.shape
+    
+    # Test step
+    action = env.action_space.sample()
+    obs, reward, done, info = env.step(action)
+    assert obs.shape == env.observation_space.shape
+    assert isinstance(reward, (int, float))
+    assert isinstance(done, bool)
+    
+    # Test episode completion
+    step_count = 0
+    while not done and step_count < 1000:
+        action = env.action_space.sample()
+        obs, reward, done, info = env.step(action)
+        step_count += 1
+    
+    print("Environment test passed!")
+\end{lstlisting}
+
+\section{Troubleshooting}
+
+\subsection{Common Issues}
+
+\subsubsection{Import Errors}
+
+If you encounter import errors:
+
+\begin{lstlisting}[language=bash, caption=Fixing Import Issues]
+# Install environment in development mode
+cd envlib_project/env_lib/pistonball_env
+pip install -e .
+
+# Check installation
+python -c "import pistonball_env; print('Import successful')"
+\end{lstlisting}
+
+\subsubsection{Performance Issues}
+
+For performance problems:
+
+\begin{lstlisting}[language=python, caption=Performance Optimization]
+# Use vectorized environments
+from env_lib import pistonball_env
+env = pistonball_env.PistonballEnv(num_envs=4)
+
+# Disable rendering during training
+env = pistonball_env.PistonballEnv(render_mode=None)
+
+# Use appropriate observation types
+env = pistonball_env.PistonballEnv(observation_type='vector')
+\end{lstlisting}
+
+\subsubsection{Memory Issues}
+
+For memory problems:
+
+\begin{lstlisting}[language=python, caption=Memory Management]
+# Limit episode length
+env = pistonball_env.PistonballEnv(max_steps=500)
+
+# Use smaller observation spaces
+env = pistonball_env.PistonballEnv(observation_type='minimal')
+
+# Clear environment state
+env.close()
+del env
+\end{lstlisting}
+
+\section{Future Development}
+
+\subsection{Planned Features}
+
+\begin{itemize}
+    \item \textbf{Additional Environments}: More specialized environments for specific research domains
+    \item \textbf{Enhanced Physics}: More realistic physics simulations
+    \item \textbf{Better Visualization}: Improved rendering and visualization tools
+    \item \textbf{Performance Optimization}: Further optimization for large-scale experiments
+\end{itemize}
+
+\subsection{Contributing}
+
+Guidelines for contributing to the environment library:
+
+\begin{enumerate}
+    \item Follow the existing code style and conventions
+    \item Include comprehensive tests for new environments
+    \item Document all parameters and interfaces
+    \item Provide example usage and tutorials
+    \item Ensure compatibility with the toolkit components
+\end{enumerate} 

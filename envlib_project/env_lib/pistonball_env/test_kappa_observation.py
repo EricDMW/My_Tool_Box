@@ -50,7 +50,7 @@ def test_kappa_observation():
                 observable_pistons.append(i)
             
             # Check if observation matches expectation
-            ball_obs = obs[i, 1:6]  # Ball-related observations
+            ball_obs = obs[i, 2:7]  # Ball-related observations (indices 2-6)
             has_ball_info = np.any(ball_obs != 0)
             
             print(f"Piston {i}: can_observe={can_observe}, has_ball_info={has_ball_info}")
@@ -178,7 +178,7 @@ def test_kappa_dynamics():
         
         # Verify observations
         for i in range(n_pistons):
-            ball_obs = obs[i, 1:6]
+            ball_obs = obs[i, 2:7]  # Ball-related observations (indices 2-6)
             has_ball_info = np.any(ball_obs != 0)
             can_observe = i in observable_pistons
             
@@ -198,7 +198,7 @@ def test_kappa_edge_cases():
     obs, info = env.reset()
     
     for i in range(5):
-        ball_obs = obs[i, 1:6]
+        ball_obs = obs[i, 2:7]  # Ball-related observations (indices 2-6)
         has_ball_info = np.any(ball_obs != 0)
         print(f"Piston {i}: has_ball_info={has_ball_info}")
     
@@ -210,7 +210,7 @@ def test_kappa_edge_cases():
     obs, info = env.reset()
     
     for i in range(5):
-        ball_obs = obs[i, 1:6]
+        ball_obs = obs[i, 2:7]  # Ball-related observations (indices 2-6)
         has_ball_info = np.any(ball_obs != 0)
         print(f"Piston {i}: has_ball_info={has_ball_info}")
     

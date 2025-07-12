@@ -1,0 +1,554 @@
+\chapter{Plotkit}
+
+\section{Overview}
+
+The \texttt{plotkit} subpackage provides comprehensive plotting utilities for research visualization. It's designed to make it easy to create publication-quality plots for reinforcement learning experiments, neural network analysis, and performance evaluation.
+
+\section{Core Features}
+
+\subsection{Training Visualization}
+
+Plotkit provides extensive tools for visualizing training progress:
+
+\begin{itemize}
+    \item \textbf{Loss Curves}: Plot training and validation losses over time
+    \item \textbf{Reward Plots}: Visualize episode rewards and cumulative rewards
+    \item \textbf{Convergence Analysis}: Monitor algorithm convergence
+    \item \textbf{Learning Curves}: Track learning progress across episodes
+\end{itemize}
+
+\subsection{Performance Metrics}
+
+Comprehensive performance analysis tools:
+
+\begin{itemize}
+    \item \textbf{Accuracy Metrics}: Plot accuracy, precision, recall, and F1-score
+    \item \textbf{Policy Analysis}: Visualize policy distributions and action probabilities
+    \item \textbf{Value Function Analysis}: Plot value function estimates
+    \item \textbf{Q-Value Analysis}: Visualize Q-value distributions
+\end{itemize}
+
+\subsection{Network Analysis}
+
+Deep analysis of neural network behavior:
+
+\begin{itemize}
+    \item \textbf{Weight Distributions}: Analyze weight distributions across layers
+    \item \textbf{Activation Maps}: Visualize activation patterns
+    \item \textbf{Gradient Analysis}: Monitor gradient flow and vanishing/exploding gradients
+    \item \textbf{Attention Maps}: Visualize attention patterns in transformer networks
+\end{itemize}
+
+\subsection{Environment Visualization}
+
+Tools for understanding environment dynamics:
+
+\begin{itemize}
+    \item \textbf{State Representations}: Visualize state spaces and transitions
+    \item \textbf{Action Distributions}: Plot action selection patterns
+    \item \textbf{Trajectory Visualization}: Show agent trajectories through environments
+    \item \textbf{Multi-Agent Interactions}: Visualize interactions between agents
+\end{itemize}
+
+\section{Basic Usage}
+
+\subsection{Training Curves}
+
+Plot training progress with multiple metrics:
+
+\begin{lstlisting}[language=python, caption=Training Curves Example]
+from toolkit.plotkit import plot_training_curves
+import numpy as np
+
+# Generate sample data
+episodes = np.arange(1000)
+rewards = np.random.normal(0, 1, 1000).cumsum()
+losses = np.exp(-episodes / 200) + 0.1 * np.random.randn(1000)
+
+# Plot training curves
+plot_training_curves(
+    episodes=episodes,
+    rewards=rewards,
+    losses=losses,
+    title="Training Progress",
+    xlabel="Episode",
+    ylabel="Value",
+    save_path="training_curves.png",
+    show_plot=True
+)
+\end{lstlisting}
+
+\subsection{Performance Metrics}
+
+Visualize multiple performance metrics:
+
+\begin{lstlisting}[language=python, caption=Performance Metrics Example]
+from toolkit.plotkit import plot_performance_metrics
+import numpy as np
+
+# Generate sample metrics
+episodes = np.arange(1000)
+accuracy = 0.5 + 0.4 * (1 - np.exp(-episodes / 200))
+precision = 0.6 + 0.3 * (1 - np.exp(-episodes / 150))
+recall = 0.4 + 0.5 * (1 - np.exp(-episodes / 250))
+
+# Plot performance metrics
+plot_performance_metrics(
+    episodes=episodes,
+    metrics={
+        'Accuracy': accuracy,
+        'Precision': precision,
+        'Recall': recall
+    },
+    title="Performance Metrics",
+    xlabel="Episode",
+    ylabel="Score",
+    save_path="performance_metrics.png",
+    show_plot=True
+)
+\end{lstlisting}
+
+\subsection{Network Analysis}
+
+Analyze neural network weights and activations:
+
+\begin{lstlisting}[language=python, caption=Network Analysis Example]
+from toolkit.plotkit import plot_weight_distributions
+from toolkit.neural_toolkit import MLPPolicyNetwork
+import torch
+
+# Create a network
+network = MLPPolicyNetwork(
+    input_dim=10,
+    output_dim=4,
+    hidden_dims=[256, 256]
+)
+
+# Plot weight distributions
+plot_weight_distributions(
+    model=network,
+    title="Weight Distributions",
+    save_path="weight_distributions.png",
+    show_plot=True,
+    bins=50
+)
+\end{lstlisting}
+
+\section{Advanced Plotting}
+
+\subsection{Multi-Environment Comparison}
+
+Compare performance across different environments:
+
+\begin{lstlisting}[language=python, caption=Multi-Environment Comparison]
+from toolkit.plotkit import plot_multi_environment_comparison
+import numpy as np
+
+# Generate data for different environments
+episodes = np.arange(1000)
+env1_rewards = np.random.normal(0, 1, 1000).cumsum()
+env2_rewards = np.random.normal(0.5, 1, 1000).cumsum()
+env3_rewards = np.random.normal(-0.5, 1, 1000).cumsum()
+
+# Plot comparison
+plot_multi_environment_comparison(
+    episodes=episodes,
+    environment_data={
+        'Environment 1': env1_rewards,
+        'Environment 2': env2_rewards,
+        'Environment 3': env3_rewards
+    },
+    title="Multi-Environment Performance Comparison",
+    xlabel="Episode",
+    ylabel="Cumulative Reward",
+    save_path="multi_env_comparison.png",
+    show_plot=True
+)
+\end{lstlisting}
+
+\subsection{Algorithm Comparison}
+
+Compare different algorithms on the same environment:
+
+\begin{lstlisting}[language=python, caption=Algorithm Comparison]
+from toolkit.plotkit import plot_algorithm_comparison
+import numpy as np
+
+# Generate data for different algorithms
+episodes = np.arange(1000)
+ppo_rewards = np.random.normal(0, 1, 1000).cumsum()
+dqn_rewards = np.random.normal(0.2, 1, 1000).cumsum()
+a2c_rewards = np.random.normal(-0.1, 1, 1000).cumsum()
+
+# Plot comparison
+plot_algorithm_comparison(
+    episodes=episodes,
+    algorithm_data={
+        'PPO': ppo_rewards,
+        'DQN': dqn_rewards,
+        'A2C': a2c_rewards
+    },
+    title="Algorithm Performance Comparison",
+    xlabel="Episode",
+    ylabel="Cumulative Reward",
+    save_path="algorithm_comparison.png",
+    show_plot=True
+)
+\end{lstlisting}
+
+\subsection{Hyperparameter Analysis}
+
+Analyze the effect of different hyperparameters:
+
+\begin{lstlisting}[language=python, caption=Hyperparameter Analysis]
+from toolkit.plotkit import plot_hyperparameter_analysis
+import numpy as np
+
+# Generate data for different hyperparameters
+episodes = np.arange(1000)
+lr_001_rewards = np.random.normal(0, 1, 1000).cumsum()
+lr_01_rewards = np.random.normal(0.3, 1, 1000).cumsum()
+lr_1_rewards = np.random.normal(-0.2, 1, 1000).cumsum()
+
+# Plot analysis
+plot_hyperparameter_analysis(
+    episodes=episodes,
+    hyperparameter_data={
+        'LR=0.001': lr_001_rewards,
+        'LR=0.01': lr_01_rewards,
+        'LR=0.1': lr_1_rewards
+    },
+    hyperparameter_name="Learning Rate",
+    title="Learning Rate Analysis",
+    xlabel="Episode",
+    ylabel="Cumulative Reward",
+    save_path="hyperparameter_analysis.png",
+    show_plot=True
+)
+\end{lstlisting}
+
+\section{Specialized Plots}
+
+\subsection{Policy Visualization}
+
+Visualize policy distributions and action probabilities:
+
+\begin{lstlisting}[language=python, caption=Policy Visualization]
+from toolkit.plotkit import plot_policy_analysis
+import numpy as np
+
+# Generate sample policy data
+states = np.arange(100)
+action_probs = np.random.dirichlet([1, 1, 1, 1], size=100)
+
+# Plot policy analysis
+plot_policy_analysis(
+    states=states,
+    action_probabilities=action_probs,
+    action_names=['Up', 'Down', 'Left', 'Right'],
+    title="Policy Analysis",
+    xlabel="State",
+    ylabel="Action Probability",
+    save_path="policy_analysis.png",
+    show_plot=True
+)
+\end{lstlisting}
+
+\subsection{Value Function Visualization}
+
+Visualize value function estimates:
+
+\begin{lstlisting}[language=python, caption=Value Function Visualization]
+from toolkit.plotkit import plot_value_function
+import numpy as np
+
+# Generate sample value function data
+states = np.arange(100)
+values = np.sin(states / 10) + 0.1 * np.random.randn(100)
+
+# Plot value function
+plot_value_function(
+    states=states,
+    values=values,
+    title="Value Function",
+    xlabel="State",
+    ylabel="Value",
+    save_path="value_function.png",
+    show_plot=True
+)
+\end{lstlisting}
+
+\subsection{Q-Value Analysis}
+
+Analyze Q-value distributions and action-value functions:
+
+\begin{lstlisting}[language=python, caption=Q-Value Analysis]
+from toolkit.plotkit import plot_q_value_analysis
+import numpy as np
+
+# Generate sample Q-value data
+states = np.arange(50)
+actions = np.arange(4)
+q_values = np.random.randn(50, 4)
+
+# Plot Q-value analysis
+plot_q_value_analysis(
+    states=states,
+    actions=actions,
+    q_values=q_values,
+    action_names=['Up', 'Down', 'Left', 'Right'],
+    title="Q-Value Analysis",
+    xlabel="State",
+    ylabel="Q-Value",
+    save_path="q_value_analysis.png",
+    show_plot=True
+)
+\end{lstlisting}
+
+\section{Command Line Interface}
+
+Plotkit provides a command-line interface for quick plotting:
+
+\subsection{Basic CLI Usage}
+
+\begin{lstlisting}[language=bash, caption=Basic CLI Usage]
+# Plot training curves from CSV file
+python -m toolkit.plotkit --input training_data.csv --type training_curves --output training_plot.png
+
+# Plot performance metrics
+python -m toolkit.plotkit --input metrics.csv --type performance --output performance_plot.png
+
+# Plot network analysis
+python -m toolkit.plotkit --input model.pth --type network_analysis --output network_plot.png
+\end{lstlisting}
+
+\subsection{Advanced CLI Options}
+
+\begin{lstlisting}[language=bash, caption=Advanced CLI Options]
+# Custom plot with specific options
+python -m toolkit.plotkit \
+    --input data.csv \
+    --type training_curves \
+    --output plot.png \
+    --title "Custom Title" \
+    --xlabel "Episodes" \
+    --ylabel "Reward" \
+    --style seaborn \
+    --figsize 12 8 \
+    --dpi 300
+\end{lstlisting}
+
+\section{Configuration}
+
+\subsection{Plot Styles}
+
+Plotkit supports multiple plot styles:
+
+\begin{lstlisting}[language=python, caption=Plot Style Configuration]
+from toolkit.plotkit import set_plot_style
+
+# Set plot style
+set_plot_style('seaborn-v0_8')  # Modern, clean style
+set_plot_style('ggplot')        # R ggplot style
+set_plot_style('classic')       # Classic matplotlib style
+set_plot_style('bmh')           # Bayesian Methods for Hackers style
+\end{lstlisting}
+
+\subsection{Color Schemes}
+
+Customize color schemes for different plot types:
+
+\begin{lstlisting}[language=python, caption=Color Scheme Configuration]
+from toolkit.plotkit import set_color_scheme
+
+# Set color scheme
+set_color_scheme('viridis')     # Perceptually uniform
+set_color_scheme('plasma')      # High contrast
+set_color_scheme('inferno')     # Dark theme
+set_color_scheme('magma')       # Light theme
+\end{lstlisting}
+
+\subsection{Figure Settings}
+
+Configure figure appearance:
+
+\begin{lstlisting}[language=python, caption=Figure Configuration]
+from toolkit.plotkit import configure_figure
+
+# Configure figure settings
+configure_figure(
+    figsize=(12, 8),
+    dpi=300,
+    style='seaborn-v0_8',
+    rc_params={
+        'font.size': 12,
+        'axes.titlesize': 14,
+        'axes.labelsize': 12,
+        'xtick.labelsize': 10,
+        'ytick.labelsize': 10
+    }
+)
+\end{lstlisting}
+
+\section{Export Options}
+
+\subsection{Image Formats}
+
+Plotkit supports multiple image formats:
+
+\begin{lstlisting}[language=python, caption=Export Formats]
+from toolkit.plotkit import save_plot
+
+# Save in different formats
+save_plot('plot.png', dpi=300)      # High-resolution PNG
+save_plot('plot.pdf', dpi=300)      # Vector PDF
+save_plot('plot.svg', dpi=300)      # Scalable SVG
+save_plot('plot.jpg', dpi=300)      # JPEG format
+save_plot('plot.tiff', dpi=300)     # TIFF format
+\end{lstlisting}
+
+\subsection{Batch Export}
+
+Export multiple plots at once:
+
+\begin{lstlisting}[language=python, caption=Batch Export]
+from toolkit.plotkit import batch_export_plots
+
+# Define plots to export
+plots_config = [
+    {
+        'type': 'training_curves',
+        'data': training_data,
+        'output': 'training_curves.png',
+        'title': 'Training Progress'
+    },
+    {
+        'type': 'performance_metrics',
+        'data': metrics_data,
+        'output': 'performance.png',
+        'title': 'Performance Metrics'
+    },
+    {
+        'type': 'network_analysis',
+        'data': network_data,
+        'output': 'network.png',
+        'title': 'Network Analysis'
+    }
+]
+
+# Export all plots
+batch_export_plots(plots_config, output_dir='plots/')
+\end{lstlisting}
+
+\section{Integration with Other Tools}
+
+\subsection{Integration with Neural Toolkit}
+
+Seamless integration with neural network components:
+
+\begin{lstlisting}[language=python, caption=Neural Toolkit Integration]
+from toolkit.neural_toolkit import MLPPolicyNetwork
+from toolkit.plotkit import plot_network_analysis
+
+# Create and analyze network
+network = MLPPolicyNetwork(input_dim=10, output_dim=4)
+plot_network_analysis(network, save_path='network_analysis.png')
+\end{lstlisting}
+
+\subsection{Integration with Environment Library}
+
+Visualize environment interactions:
+
+\begin{lstlisting}[language=python, caption=Environment Integration]
+from env_lib import pistonball_env
+from toolkit.plotkit import plot_environment_analysis
+
+# Create environment
+env = pistonball_env.PistonballEnv()
+
+# Analyze environment
+plot_environment_analysis(
+    env=env,
+    num_episodes=100,
+    save_path='environment_analysis.png'
+)
+\end{lstlisting}
+
+\section{Best Practices}
+
+\subsection{Plot Design}
+
+\begin{enumerate}
+    \item Use clear, descriptive titles and labels
+    \item Choose appropriate color schemes for accessibility
+    \item Use consistent formatting across related plots
+    \item Include error bars and confidence intervals when appropriate
+    \item Use log scales for data spanning multiple orders of magnitude
+\end{enumerate}
+
+\subsection{Data Visualization}
+
+\begin{enumerate}
+    \item Plot raw data alongside smoothed curves
+    \item Use multiple metrics to provide comprehensive analysis
+    \item Include baseline comparisons when possible
+    \item Use appropriate plot types for different data types
+    \item Consider the audience when choosing visualization complexity
+\end{enumerate}
+
+\subsection{Export and Sharing}
+
+\begin{enumerate}
+    \item Use high-resolution formats for publications
+    \item Include source data or code when sharing plots
+    \item Use consistent naming conventions for files
+    \item Document plot generation parameters
+    \item Consider file size for web sharing
+\end{enumerate}
+
+\section{Troubleshooting}
+
+\subsection{Common Issues}
+
+\subsubsection{Memory Issues}
+
+For large datasets, use data sampling:
+
+\begin{lstlisting}[language=python, caption=Memory Management]
+# Sample data for plotting
+sampled_episodes = episodes[::10]  # Every 10th episode
+sampled_rewards = rewards[::10]
+
+plot_training_curves(
+    episodes=sampled_episodes,
+    rewards=sampled_rewards,
+    save_path="training_curves.png"
+)
+\end{lstlisting}
+
+\subsubsection{Style Issues}
+
+Reset plot style if encountering display problems:
+
+\begin{lstlisting}[language=python, caption=Style Reset]
+import matplotlib.pyplot as plt
+
+# Reset to default style
+plt.style.use('default')
+plt.rcParams.update(plt.rcParamsDefault)
+\end{lstlisting}
+
+\subsubsection{Export Issues}
+
+Ensure proper file permissions and paths:
+
+\begin{lstlisting}[language=python, caption=Export Troubleshooting]
+import os
+
+# Create output directory if it doesn't exist
+os.makedirs('plots', exist_ok=True)
+
+# Use absolute paths for reliability
+save_path = os.path.abspath('plots/training_curves.png')
+plot_training_curves(rewards=rewards, save_path=save_path)
+\end{lstlisting} 

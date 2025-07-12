@@ -48,10 +48,10 @@ def test_local_rewards():
             
             # Take random action
             action = env.action_space.sample()
-            obs, local_rewards, total_reward, terminated, truncated, info = env.step(action)
+            obs, reward, terminated, truncated, info = env.step(action)
             
-            print(f"Total reward: {total_reward:.3f}")
-            print(f"Local rewards: {local_rewards}")
+            print(f"Total reward: {reward:.3f}")
+            print(f"Local rewards: {info['local_rewards']}")
             
             # Check which pistons can observe the ball
             observable_pistons = []
@@ -65,7 +65,7 @@ def test_local_rewards():
             # (they should only get time penalty)
             for i in range(env.n_pistons):
                 can_observe = i in observable_pistons
-                reward = local_rewards[i]
+                reward = info['local_rewards'][i]
                 
                 if can_observe:
                     print(f"Piston {i}: observable, reward = {reward:.3f}")
@@ -104,16 +104,16 @@ def test_reward_consistency():
     action = np.zeros(5)  # No movement
     
     for step in range(5):
-        obs, local_rewards, total_reward, terminated, truncated, info = env.step(action)
+        obs, reward, terminated, truncated, info = env.step(action)
         
         print(f"Step {step + 1}:")
-        print(f"  Local rewards: {local_rewards}")
-        print(f"  Total reward: {total_reward:.3f}")
+        print(f"  Local rewards: {info['local_rewards']}")
+        print(f"  Total reward: {reward:.3f}")
         
         # Check that total reward equals sum of local rewards
-        calculated_total = np.sum(local_rewards)
-        if abs(total_reward - calculated_total) > 1e-6:
-            print(f"  ERROR: Total reward mismatch! Expected {calculated_total}, got {total_reward}")
+        calculated_total = np.sum(info['local_rewards'])
+        if abs(reward - calculated_total) > 1e-6:
+            print(f"  ERROR: Total reward mismatch! Expected {calculated_total}, got {reward}")
         
         if terminated or truncated:
             break
@@ -141,18 +141,18 @@ def test_movement_penalty_local():
     action = np.zeros(5)
     action[2] = 1.0  # Move only piston 2
     
-    obs, local_rewards, total_reward, terminated, truncated, info = env.step(action)
+    obs, reward, terminated, truncated, info = env.step(action)
     
     print(f"Action: {action}")
-    print(f"Local rewards: {local_rewards}")
-    print(f"Total reward: {total_reward:.3f}")
+    print(f"Local rewards: {info['local_rewards']}")
+    print(f"Total reward: {reward:.3f}")
     
     # Check that only piston 2 has movement penalty
     for i in range(5):
         if i == 2:
-            print(f"Piston {i}: should have movement penalty, reward = {local_rewards[i]:.3f}")
+            print(f"Piston {i}: should have movement penalty, reward = {info['local_rewards'][i]:.3f}")
         else:
-            print(f"Piston {i}: should not have movement penalty, reward = {local_rewards[i]:.3f}")
+            print(f"Piston {i}: should not have movement penalty, reward = {info['local_rewards'][i]:.3f}")
     
     env.close()
 

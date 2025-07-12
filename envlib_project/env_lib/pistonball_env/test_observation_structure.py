@@ -56,7 +56,7 @@ def test_observation_structure():
     # Take a step and check observation structure
     print("\nTaking a step...")
     action = np.zeros(n_pistons)
-    obs, local_rewards, total_reward, terminated, truncated, info = env.step(action)
+    obs, reward, terminated, truncated, info = env.step(action)
     
     print(f"Step observation shape: {obs.shape}")
     

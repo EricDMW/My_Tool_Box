@@ -13,6 +13,7 @@ if ! ls test_*.png 1> /dev/null 2>&1; then
     exit 0
 fi
 
+
 # Count the number of matching files
 file_count=$(ls test_*.png 2>/dev/null | wc -l)
 echo "Found $file_count file(s) matching pattern 'test_*.png':"

@@ -1,0 +1,616 @@
+\chapter{Troubleshooting}
+
+\section{Common Issues and Solutions}
+
+This chapter provides solutions to common problems encountered when using the My Tool Box. Each section covers specific issues with detailed explanations and step-by-step solutions.
+
+\section{Installation Issues}
+
+\subsection{Package Import Errors}
+
+\subsubsection{Problem: ModuleNotFoundError}
+
+\textbf{Symptoms:}
+\begin{lstlisting}[language=python]
+ModuleNotFoundError: No module named 'toolkit'
+ModuleNotFoundError: No module named 'env_lib'
+\end{lstlisting}
+
+\textbf{Causes:}
+\begin{itemize}
+    \item Package not installed in development mode
+    \item Wrong Python environment activated
+    \item Missing dependencies
+\end{itemize}
+
+\textbf{Solutions:}
+
+\begin{lstlisting}[language=bash, caption=Fix Import Errors]
+# 1. Check current Python environment
+which python
+pip list | grep toolkit
+
+# 2. Install in development mode
+cd toolkit_project
+pip install -e .
+
+cd ../envlib_project
+pip install -e .
+
+# 3. Verify installation
+python -c "import toolkit; print('Toolkit imported successfully')"
+python -c "import env_lib; print('Environment library imported successfully')"
+\end{lstlisting}
+
+\subsubsection{Problem: Version Conflicts}
+
+\textbf{Symptoms:}
+\begin{lstlisting}[language=python]
+ImportError: cannot import name 'X' from 'Y'
+VersionConflict: Package A requires B>=1.0, but C==0.9 is installed
+\end{lstlisting}
+
+\textbf{Solutions:}
+
+\begin{lstlisting}[language=bash, caption=Resolve Version Conflicts]
+# 1. Create fresh virtual environment
+python -m venv fresh_env
+source fresh_env/bin/activate  # Linux/macOS
+# or
+fresh_env\Scripts\activate     # Windows
+
+# 2. Install dependencies in correct order
+pip install torch>=1.9.0
+pip install tensorflow>=2.6.0
+pip install numpy>=1.20.0
+pip install matplotlib>=3.5.0
+pip install gym>=0.21.0
+
+# 3. Install toolkit packages
+cd toolkit_project && pip install -e .
+cd ../envlib_project && pip install -e .
+\end{lstlisting}
+
+\section{Neural Network Issues}
+
+\subsection{Memory Problems}
+
+\subsubsection{Problem: CUDA Out of Memory}
+
+\textbf{Symptoms:}
+\begin{lstlisting}[language=python]
+RuntimeError: CUDA out of memory. Tried to allocate X MiB
+\end{lstlisting}
+
+\textbf{Solutions:}
+
+\begin{lstlisting}[language=python, caption=Fix CUDA Memory Issues]
+# 1. Reduce batch size
+batch_size = 16  # Instead of 32 or 64
+
+# 2. Use gradient accumulation
+accumulation_steps = 4
+for i in range(0, len(data), batch_size):
+    batch = data[i:i+batch_size]
+    loss = model(batch)
+    loss = loss / accumulation_steps
+    loss.backward()
+    
+    if (i // batch_size + 1) % accumulation_steps == 0:
+        optimizer.step()
+        optimizer.zero_grad()
+
+# 3. Clear cache
+import torch
+torch.cuda.empty_cache()
+
+# 4. Use CPU if necessary
+device = 'cpu' if torch.cuda.is_available() else 'cpu'
+model = model.to(device)
+\end{lstlisting}
+
+\subsubsection{Problem: Model Not Learning}
+
+\textbf{Symptoms:}
+\begin{itemize}
+    \item Loss not decreasing
+    \item Rewards not improving
+    \item Gradients are zero or NaN
+\end{itemize}
+
+\textbf{Solutions:}
+
+\begin{lstlisting}[language=python, caption=Fix Learning Issues]
+# 1. Check learning rate
+learning_rate = 0.001  # Try different values: 0.01, 0.0001
+
+# 2. Add gradient clipping
+torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+# 3. Check for NaN values
+def check_nan(model):
+    for name, param in model.named_parameters():
+        if torch.isnan(param).any():
+            print(f"NaN found in {name}")
+            return True
+    return False
+
+# 4. Use proper weight initialization
+def init_weights(m):
+    if isinstance(m, torch.nn.Linear):
+        torch.nn.init.xavier_uniform_(m.weight)
+        m.bias.data.fill_(0.01)
+
+model.apply(init_weights)
+
+# 5. Check reward scaling
+reward_scale = 0.1  # Scale rewards to reasonable range
+\end{lstlisting}
+
+\subsection{Architecture Issues}
+
+\subsubsection{Problem: Input/Output Dimension Mismatch}
+
+\textbf{Symptoms:}
+\begin{lstlisting}[language=python]
+RuntimeError: size mismatch, m1: [batch_size, input_dim], m2: [wrong_dim, hidden_dim]
+\end{lstlisting}
+
+\textbf{Solutions:}
+
+\begin{lstlisting}[language=python, caption=Fix Dimension Issues]
+# 1. Check environment observation space
+print(f"Observation space: {env.observation_space}")
+print(f"Action space: {env.action_space}")
+
+# 2. Create network with correct dimensions
+policy_network = MLPPolicyNetwork(
+    input_dim=env.observation_space.shape[0],  # Use actual observation dim
+    output_dim=env.action_space.n,             # Use actual action dim
+    hidden_dims=[256, 256]
+)
+
+# 3. Debug input shapes
+def debug_shapes(model, input_data):
+    print(f"Input shape: {input_data.shape}")
+    for name, layer in model.named_modules():
+        if hasattr(layer, 'weight'):
+            print(f"{name} weight shape: {layer.weight.shape}")
+\end{lstlisting}
+
+\section{Environment Issues}
+
+\subsection{Rendering Problems}
+
+\subsubsection{Problem: Display/Window Issues}
+
+\textbf{Symptoms:}
+\begin{lstlisting}[language=python]
+pygame.error: No available video device
+SDL_VIDEODRIVER error
+\end{lstlisting}
+
+\textbf{Solutions:}
+
+\begin{lstlisting}[language=python, caption=Fix Rendering Issues]
+# 1. Set display environment variables
+import os
+os.environ['SDL_VIDEODRIVER'] = 'dummy'
+os.environ['DISPLAY'] = ':0'
+
+# 2. Use headless rendering
+env = pistonball_env.PistonballEnv(render_mode='rgb_array')
+
+# 3. Disable rendering for training
+env = pistonball_env.PistonballEnv(render_mode=None)
+
+# 4. Use matplotlib for display
+import matplotlib.pyplot as plt
+frame = env.render()
+plt.imshow(frame)
+plt.axis('off')
+plt.show()
+\end{lstlisting}
+
+\subsubsection{Problem: Environment Not Resetting}
+
+\textbf{Symptoms:}
+\begin{lstlisting}[language=python]
+AttributeError: 'Environment' object has no attribute 'reset'
+TypeError: reset() takes 1 positional argument but 2 were given
+\end{lstlisting}
+
+\textbf{Solutions:}
+
+\begin{lstlisting}[language=python, caption=Fix Reset Issues]
+# 1. Check environment interface
+print(dir(env))  # See available methods
+
+# 2. Use correct reset method
+# For newer gym versions
+observations = env.reset()
+
+# For older gym versions
+observations = env.reset(seed=42)
+
+# 3. Handle multi-agent environments
+if hasattr(env, 'agent_ids'):
+    observations = env.reset()
+    # observations is a dict: {agent_id: observation}
+else:
+    observations = env.reset()
+    # observations is a single array
+\end{lstlisting}
+
+\subsection{Performance Issues}
+
+\subsubsection{Problem: Environment Too Slow}
+
+\textbf{Symptoms:}
+\begin{itemize}
+    \item Training takes too long
+    \item Low steps per second
+    \item High CPU usage
+\end{itemize}
+
+\textbf{Solutions:}
+
+\begin{lstlisting}[language=python, caption=Optimize Performance]
+# 1. Use vectorized environments
+from gym.vector import make
+env = make('Pistonball-v0', num_envs=4)
+
+# 2. Disable unnecessary features
+env = pistonball_env.PistonballEnv(
+    render_mode=None,           # Disable rendering
+    observation_type='vector',  # Use vector instead of image
+    max_steps=500              # Limit episode length
+)
+
+# 3. Use multiprocessing
+import multiprocessing as mp
+from multiprocessing import Pool
+
+def run_episode(env_config):
+    env = pistonball_env.PistonballEnv(**env_config)
+    # Run episode
+    return episode_reward
+
+with Pool(processes=4) as pool:
+    results = pool.map(run_episode, [config] * 4)
+\end{lstlisting}
+
+\section{Training Issues}
+
+\subsection{Convergence Problems}
+
+\subsubsection{Problem: Training Not Converging}
+
+\textbf{Symptoms:}
+\begin{itemize}
+    \item Rewards not increasing
+    \item Loss oscillating
+    \item Policy not improving
+\end{itemize}
+
+\textbf{Solutions:}
+
+\begin{lstlisting}[language=python, caption=Fix Convergence Issues]
+# 1. Adjust hyperparameters
+config = {
+    'learning_rate': 0.0001,    # Try smaller learning rate
+    'batch_size': 64,           # Increase batch size
+    'gamma': 0.99,              # Discount factor
+    'gae_lambda': 0.95,         # GAE parameter
+    'clip_ratio': 0.2,          # PPO clip ratio
+    'value_loss_coef': 0.5,     # Value loss coefficient
+    'entropy_coef': 0.01        # Entropy coefficient
+}
+
+# 2. Use learning rate scheduling
+from torch.optim.lr_scheduler import StepLR
+scheduler = StepLR(optimizer, step_size=1000, gamma=0.9)
+
+# 3. Implement early stopping
+best_reward = -float('inf')
+patience = 100
+no_improvement = 0
+
+for episode in range(num_episodes):
+    episode_reward = train_episode()
+    
+    if episode_reward > best_reward:
+        best_reward = episode_reward
+        no_improvement = 0
+        # Save best model
+        torch.save(model.state_dict(), 'best_model.pth')
+    else:
+        no_improvement += 1
+    
+    if no_improvement >= patience:
+        print("Early stopping triggered")
+        break
+\end{lstlisting}
+
+\subsubsection{Problem: Exploding Gradients}
+
+\textbf{Symptoms:}
+\begin{lstlisting}[language=python]
+RuntimeError: Function 'AddBackward0' returned an invalid gradient at index 0
+ValueError: gradients contain NaN values
+\end{lstlisting}
+
+\textbf{Solutions:}
+
+\begin{lstlisting}[language=python, caption=Fix Gradient Issues]
+# 1. Gradient clipping
+torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+# 2. Check for NaN in gradients
+def check_gradients(model):
+    for name, param in model.named_parameters():
+        if param.grad is not None:
+            if torch.isnan(param.grad).any():
+                print(f"NaN gradient in {name}")
+                return True
+    return False
+
+# 3. Use stable loss functions
+# Instead of MSE for large values, use Huber loss
+loss_fn = torch.nn.HuberLoss()
+
+# 4. Normalize inputs
+def normalize_observations(obs):
+    return (obs - obs.mean()) / (obs.std() + 1e-8)
+\end{lstlisting}
+
+\section{Multi-Agent Issues}
+
+\subsection{Coordination Problems}
+
+\subsubsection{Problem: Agents Not Coordinating}
+
+\textbf{Symptoms:}
+\begin{itemize}
+    \item Individual agents perform well but team performance is poor
+    \item Agents working against each other
+    \item No emergent cooperative behavior
+\end{itemize}
+
+\textbf{Solutions:}
+
+\begin{lstlisting}[language=python, caption=Improve Coordination]
+# 1. Use centralized training with decentralized execution
+def centralized_critic(observations, actions):
+    # Concatenate all observations and actions
+    global_state = torch.cat([obs for obs in observations.values()])
+    global_actions = torch.cat([act for act in actions.values()])
+    return critic(global_state, global_actions)
+
+# 2. Implement parameter sharing
+shared_policy = MLPPolicyNetwork(input_dim, output_dim)
+policies = {agent_id: shared_policy for agent_id in agent_ids}
+
+# 3. Use reward shaping for coordination
+def shaped_reward(individual_reward, team_reward, coordination_metric):
+    return individual_reward + 0.1 * team_reward + 0.05 * coordination_metric
+
+# 4. Implement communication protocols
+def communicate_observations(observations, communication_matrix):
+    communicated_obs = {}
+    for agent_id, obs in observations.items():
+        # Combine own observation with received information
+        received_info = sum(communication_matrix[agent_id][other_id] * observations[other_id] 
+                           for other_id in observations if other_id != agent_id)
+        communicated_obs[agent_id] = torch.cat([obs, received_info])
+    return communicated_obs
+\end{lstlisting}
+
+\subsection{Scaling Issues}
+
+\subsubsection{Problem: Training Slow with Many Agents}
+
+\textbf{Solutions:}
+
+\begin{lstlisting}[language=python, caption=Scale Multi-Agent Training]
+# 1. Use asynchronous training
+import threading
+import queue
+
+def async_training(agent_id, env, policy, queue):
+    for episode in range(episodes_per_agent):
+        # Train agent
+        episode_data = train_episode(env, policy)
+        queue.put((agent_id, episode_data))
+
+# 2. Implement experience replay with priority
+from collections import deque
+import random
+
+class PrioritizedReplayBuffer:
+    def __init__(self, capacity):
+        self.buffer = deque(maxlen=capacity)
+        self.priorities = deque(maxlen=capacity)
+    
+    def add(self, experience, priority):
+        self.buffer.append(experience)
+        self.priorities.append(priority)
+    
+    def sample(self, batch_size):
+        # Sample based on priorities
+        probs = np.array(self.priorities) / sum(self.priorities)
+        indices = np.random.choice(len(self.buffer), batch_size, p=probs)
+        return [self.buffer[i] for i in indices]
+
+# 3. Use hierarchical policies
+class HierarchicalPolicy:
+    def __init__(self, high_level_policy, low_level_policies):
+        self.high_level_policy = high_level_policy
+        self.low_level_policies = low_level_policies
+    
+    def select_action(self, observation, agent_id):
+        # High-level decision
+        high_level_action = self.high_level_policy(observation)
+        # Low-level execution
+        low_level_action = self.low_level_policies[agent_id](observation, high_level_action)
+        return low_level_action
+\end{lstlisting}
+
+\section{Debugging Tools}
+
+\subsection{Logging and Monitoring}
+
+\begin{lstlisting}[language=python, caption=Debugging Setup]
+import logging
+import wandb
+import matplotlib.pyplot as plt
+
+# 1. Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('training.log'),
+        logging.StreamHandler()
+    ]
+)
+
+# 2. Use Weights & Biases for tracking
+wandb.init(project="my-toolbox-experiment")
+wandb.config.update({
+    "learning_rate": 0.001,
+    "batch_size": 32,
+    "num_episodes": 1000
+})
+
+# 3. Monitor key metrics
+def log_metrics(episode, reward, loss, accuracy):
+    wandb.log({
+        "episode": episode,
+        "reward": reward,
+        "loss": loss,
+        "accuracy": accuracy
+    })
+    logging.info(f"Episode {episode}: Reward={reward:.2f}, Loss={loss:.4f}")
+
+# 4. Visualize training progress
+def plot_training_progress(rewards, losses):
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    
+    ax1.plot(rewards)
+    ax1.set_title('Training Rewards')
+    ax1.set_xlabel('Episode')
+    ax1.set_ylabel('Reward')
+    
+    ax2.plot(losses)
+    ax2.set_title('Training Loss')
+    ax2.set_xlabel('Episode')
+    ax2.set_ylabel('Loss')
+    
+    plt.tight_layout()
+    plt.savefig('training_progress.png')
+    plt.show()
+\end{lstlisting}
+
+\subsection{Model Inspection}
+
+\begin{lstlisting}[language=python, caption=Model Debugging]
+# 1. Check model parameters
+def inspect_model(model):
+    total_params = 0
+    for name, param in model.named_parameters():
+        print(f"{name}: {param.shape}, requires_grad={param.requires_grad}")
+        total_params += param.numel()
+    print(f"Total parameters: {total_params:,}")
+
+# 2. Monitor gradients
+def monitor_gradients(model):
+    for name, param in model.named_parameters():
+        if param.grad is not None:
+            grad_norm = param.grad.norm().item()
+            print(f"{name} gradient norm: {grad_norm:.6f}")
+
+# 3. Check for dead neurons
+def check_dead_neurons(model, data_loader):
+    activations = []
+    model.eval()
+    with torch.no_grad():
+        for batch in data_loader:
+            # Get activations from hidden layers
+            hidden_activations = model.get_hidden_activations(batch)
+            activations.append(hidden_activations)
+    
+    activations = torch.cat(activations, dim=0)
+    dead_neurons = (activations == 0).all(dim=0)
+    print(f"Dead neurons: {dead_neurons.sum().item()}/{dead_neurons.numel()}")
+
+# 4. Analyze weight distributions
+def analyze_weights(model):
+    weights = []
+    for name, param in model.named_parameters():
+        if 'weight' in name:
+            weights.extend(param.data.flatten().tolist())
+    
+    plt.figure(figsize=(10, 6))
+    plt.hist(weights, bins=50, alpha=0.7)
+    plt.title('Weight Distribution')
+    plt.xlabel('Weight Value')
+    plt.ylabel('Frequency')
+    plt.show()
+\end{lstlisting}
+
+\section{Getting Help}
+
+\subsection{When to Seek Help}
+
+Seek help when you encounter:
+\begin{itemize}
+    \item Issues not covered in this troubleshooting guide
+    \item Unexpected behavior that persists after trying solutions
+    \item Performance problems that affect research progress
+    \item Bugs in the toolkit or environment code
+\end{itemize}
+
+\subsection{How to Report Issues}
+
+When reporting issues, include:
+
+\begin{lstlisting}[language=python, caption=Issue Report Template]
+# System Information
+import sys
+import torch
+import numpy as np
+
+print(f"Python version: {sys.version}")
+print(f"PyTorch version: {torch.__version__}")
+print(f"NumPy version: {np.__version__}")
+print(f"CUDA available: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    print(f"CUDA version: {torch.version.cuda}")
+
+# Minimal Reproduction Code
+import toolkit
+from env_lib import pistonball_env
+
+# Your code here
+env = pistonball_env.PistonballEnv()
+# ... rest of the code that causes the issue
+
+# Error Message
+# Paste the complete error traceback here
+
+# Expected Behavior
+# Describe what you expected to happen
+
+# Actual Behavior
+# Describe what actually happened
+\end{lstlisting}
+
+\subsection{Resources}
+
+\begin{itemize}
+    \item \textbf{GitHub Issues}: Report bugs and request features
+    \item \textbf{Documentation}: Check the main README files
+    \item \textbf{Examples}: Review the example code in the repository
+    \item \textbf{Community}: Join discussion forums and mailing lists
+\end{itemize} 
