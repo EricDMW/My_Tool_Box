@@ -11,7 +11,41 @@ The pistonball environment has been enhanced to support better multi-agent contr
 
 ## Key Changes Made
 
-### 1. Termination Condition System (New Feature)
+### 1. Visual Piston Numbering System (New Feature)
+
+**New Feature:**
+- Visual display of piston order numbers at the bottom of each piston during rendering
+- Automatic font initialization for text rendering
+- Centered positioning of numbers for optimal visibility
+- Works with any number of pistons
+
+**Implementation:**
+```python
+# Font initialization in __init__ method
+pygame.font.init()
+self.font = pygame.font.Font(None, 24)  # Default font, size 24
+
+# Piston numbering in draw_pistons method
+piston_number = str(idx)
+text_surface = self.font.render(piston_number, True, (255, 255, 255))  # White text
+text_rect = text_surface.get_rect()
+text_x = x_pos + (self.piston_width - text_rect.width) // 2
+text_y = self.screen_height - self.wall_width - self.piston_body_height + 5
+self.screen.blit(text_surface, (text_x, text_y))
+```
+
+**Benefits:**
+- Easy identification of individual pistons during debugging
+- Clear correlation between action indices and visual piston positions
+- Useful for analyzing individual piston behavior in research
+- Helpful teaching tool for understanding multi-agent coordination
+- Works with both human and rgb_array rendering modes
+
+**Files Added:**
+- `test_piston_numbering.py`: Comprehensive test suite for piston numbering feature
+- `demo_piston_numbering.py`: Interactive demonstration of piston numbering
+
+### 2. Termination Condition System (New Feature)
 
 **New Feature:**
 - Configurable termination when ball hits the left wall
@@ -42,7 +76,7 @@ if self.terminated_condition and ball_hit_left_wall and self._can_observe_ball(i
 - Flexible research options (termination vs continuous play)
 - Better performance evaluation metrics
 
-### 2. Leftmost Piston Reward System (New Feature)
+### 3. Leftmost Piston Reward System (New Feature)
 
 **New Feature:**
 - Special reward for the leftmost piston (piston index 0) when ball hits left wall
@@ -65,7 +99,7 @@ if self.terminated_condition and ball_hit_left_wall and i == 0:  # i == 0 is the
 - Research flexibility for spatial reward studies
 - Enhanced coordination incentives
 
-### 3. Multi-Piston Control Enhancement
+### 4. Multi-Piston Control Enhancement
 
 **Before:**
 - Actions were already sequence-based but not well documented
@@ -88,7 +122,7 @@ if action_array.shape != (self.n_pistons,):
 action_val = np.clip(action_val, -1, 1)
 ```
 
-### 4. Movement Penalty System
+### 5. Movement Penalty System
 
 **New Feature:**
 - Configurable penalty for piston movement
@@ -113,7 +147,7 @@ if self.movement_penalty != 0.0:
             movement_penalty_total += self.movement_penalty * (movement / self.pixels_per_position)
 ```
 
-### 5. Enhanced Documentation
+### 6. Enhanced Documentation
 
 **Updated Files:**
 - `README.md`: Comprehensive documentation with new features
@@ -123,9 +157,11 @@ if self.movement_penalty != 0.0:
 **New Files:**
 - `test_movement_penalty.py`: Comprehensive test suite for new features
 - `demo_enhanced_features.py`: Interactive demonstration of all features
+- `test_piston_numbering.py`: Test suite for piston numbering feature
+- `demo_piston_numbering.py`: Demonstration of piston numbering feature
 - `ENHANCEMENT_SUMMARY.md`: This summary document
 
-### 6. Action Space Clarification
+### 7. Action Space Clarification
 
 **Continuous Mode:**
 - `Box(-1, 1, shape=(n_pistons,))` - Sequence of actions for all pistons
@@ -186,6 +222,26 @@ obs, info = env.reset()
 # Control all pistons simultaneously
 action = np.array([1, -1, 0, 0.5, -0.5, 1, -1, 0])  # 8 pistons
 obs, reward, terminated, truncated, info = env.step(action)
+```
+
+### Piston Numbering Visualization
+```python
+from pistonball_env import PistonballEnv
+
+# Create environment with visual rendering to see piston numbers
+env = PistonballEnv(n_pistons=8, render_mode="human")
+obs, info = env.reset()
+
+# The pistons will display numbers 0-7 at their bottoms
+for step in range(100):
+    action = env.action_space.sample()
+    obs, reward, terminated, truncated, info = env.step(action)
+    env.render()  # Numbers will be visible in the rendered window
+    
+    if terminated or truncated:
+        obs, info = env.reset()
+
+env.close()
 ```
 
 ### Movement Penalty Configuration

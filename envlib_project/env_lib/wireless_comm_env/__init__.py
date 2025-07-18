@@ -1,5 +1,6 @@
 from gymnasium.envs.registration import register as gym_register
 from .wireless_comm_env import WirelessCommEnv
+from .example_render_progress import run_and_render_animation
 
 # Register the wireless communication environment
 gym_register(

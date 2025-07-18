@@ -1,43 +1,37 @@
 # Wireless Communication Environment
 
-A standard gym environment for multi-agent wireless communication networks, rewritten as a clean, configurable gym environment.
+A standard gym environment for multi-agent wireless communication simulation. This environment simulates a wireless communication network where agents must coordinate to transmit packets through access points while avoiding interference.
 
-## Overview
-
-The Wireless Communication environment simulates a wireless communication network where multiple agents must coordinate to transmit packets through access points while avoiding interference. Each agent can choose to transmit to one of four neighboring access points or remain idle. The goal is to maximize successful packet transmissions while minimizing interference.
+**Theoretical Foundation**: This implementation is based on the Networked MDP model for wireless communication networks with multiple access points, as described in the research literature. See [THEORETICAL_MODEL.md](THEORETICAL_MODEL.md) for detailed mapping to the theoretical framework.
 
 ## Features
 
-- **Configurable grid size**: Set the number of agents in x and y directions
-- **Flexible network parameters**: Adjust packet arrival and transmission success probabilities
-- **Configurable deadline horizon**: Set how far ahead agents can see packet deadlines
-- **Adjustable observation neighborhood**: Control how much local information agents can observe
-- **Standard gym interface**: Compatible with gymnasium/gym environments
-- **Rendering support**: Both human and rgb_array rendering modes
+- **Multi-agent coordination**: Multiple agents working in a grid-based environment
+- **Realistic wireless simulation**: Packet arrival, transmission success probabilities, and interference modeling
+- **Flexible rendering**: Support for real-time visualization and GIF creation
+- **Standard gym interface**: Compatible with reinforcement learning frameworks
+- **Customizable parameters**: Adjustable grid size, deadlines, probabilities, and more
 
 ## Installation
 
-The environment is self-contained and requires the following dependencies:
-- `gymnasium` (or `gym`)
-- `numpy`
+```bash
+pip install -e .
+```
 
-## Usage
-
-### Basic Usage
+## Quick Start
 
 ```python
-from envs.wireless_comm_new import WirelessCommEnv
+from wireless_comm_env import WirelessCommEnv
 
-# Create environment with default parameters
-env = WirelessCommEnv(grid_x=6, grid_y=6)
-
-# Reset environment
+# Create environment
+env = WirelessCommEnv(grid_x=4, grid_y=4, render_mode="rgb_array")
 obs, info = env.reset()
 
-# Take actions
-for step in range(100):
-    action = env.action_space.sample()  # Random action
+# Run a simple episode
+for step in range(10):
+    action = env.action_space.sample()
     obs, reward, terminated, truncated, info = env.step(action)
+    print(f"Step {step + 1}: Reward = {reward}")
     
     if terminated or truncated:
         obs, info = env.reset()
@@ -45,126 +39,223 @@ for step in range(100):
 env.close()
 ```
 
-### Configuration Parameters
+## Environment Parameters
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `grid_x` | int | 6 | Number of agents in x-direction |
-| `grid_y` | int | 6 | Number of agents in y-direction |
-| `ddl` | int | 2 | Deadline horizon for packet transmission |
-| `packet_arrival_probability` | float | 0.8 | Probability of new packet arrival |
-| `success_transmission_probability` | float | 0.8 | Probability of successful transmission |
-| `n_obs_neighbors` | int | 1 | Number of neighbors to observe |
-| `max_iter` | int | 50 | Maximum number of steps per episode |
-| `render_mode` | str | None | Rendering mode ('human', 'rgb_array', None) |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `grid_x` | 6 | Number of agents in x-direction |
+| `grid_y` | 6 | Number of agents in y-direction |
+| `ddl` | 2 | Deadline horizon for packet transmission |
+| `packet_arrival_probability` | 0.8 | Probability of new packet arrival |
+| `success_transmission_probability` | 0.8 | Probability of successful transmission |
+| `n_obs_neighbors` | 1 | Number of neighbors to observe |
+| `max_iter` | 50 | Maximum number of steps per episode |
+| `render_mode` | None | Rendering mode ('human', 'rgb_array', None) |
 
-### Action Space
+## Action Space
 
-`Discrete(5^n_agents)` where each agent has 5 actions:
-- 0: No transmission (idle)
-- 1: Transmit to upper-left access point
-- 2: Transmit to lower-left access point  
-- 3: Transmit to upper-right access point
-- 4: Transmit to lower-right access point
+Each agent has 5 possible actions:
+- **0**: Idle (no transmission) - **Always legal**
+- **1**: Transmit to Upper-Left access point - **Legal only if agent is not on top or left edge**
+- **2**: Transmit to Lower-Left access point - **Legal only if agent is not on left edge**
+- **3**: Transmit to Upper-Right access point - **Legal only if agent is not on top edge**
+- **4**: Transmit to Lower-Right access point - **Legal only if agent is not on bottom or right edge**
 
-### Observation Space
+### Illegal Action Handling
 
-`Box(0, 2, shape=(n_agents, obs_dim))` where each agent gets:
-- Local state information for the deadline horizon
-- Information about neighboring agents (based on n_obs_neighbors)
-- Packet status and deadline information
+The environment automatically handles illegal actions by returning `None` for access point coordinates when an action would point to an invalid location. This means:
+- Corner agents have only 2 legal actions (Idle + 1 transmission action)
+- Edge agents have 3 legal actions (Idle + 2 transmission actions)
+- Center agents have 5 legal actions (all actions)
 
-### Reward Function
+## Observation Space
 
-The reward is based on successful packet transmissions:
-- +1 for each successful packet transmission
-- 0 for failed transmissions or idle actions
-- Total reward is the sum across all agents
+Each agent observes its local state including:
+- Current packet status (deadline × local grid)
+- Neighbor information (based on `n_obs_neighbors`)
+- Total observation dimension: `ddl × ((n_obs_neighbors × 2 + 1)²)`
 
-## Examples
+## Rendering System
 
-### Different Configurations
+The environment provides comprehensive rendering capabilities:
 
+### Visual Elements
+- **Blue cubes**: Represent agents (numbered 1-N, left-to-right, top-to-bottom)
+- **Green circles**: Access points between agents
+- **Pink arrows**: Successful transmissions (30% probability)
+- **Black arrows**: General transmission attempts
+- **Yellow boxes**: Current action labels
+- **White boxes**: Agent state information
+
+### Rendering Functions
+
+#### Basic Rendering
 ```python
-# Small grid for easier learning
-env = WirelessCommEnv(grid_x=3, grid_y=3)
-
-# Large grid for complex scenarios
-env = WirelessCommEnv(grid_x=8, grid_y=8)
-
-# High traffic scenario
-env = WirelessCommEnv(grid_x=5, grid_y=5, packet_arrival_probability=0.9)
-
-# Low reliability scenario
-env = WirelessCommEnv(grid_x=4, grid_y=4, success_transmission_probability=0.5)
-
-# Long deadline horizon
-env = WirelessCommEnv(grid_x=6, grid_y=6, ddl=4)
-
-# Large observation neighborhood
-env = WirelessCommEnv(grid_x=5, grid_y=5, n_obs_neighbors=2)
+# Standard gym rendering
+frame = env.render()  # Returns RGB array
 ```
 
-### Training with RL Libraries
-
+#### Real-time Rendering
 ```python
-# Compatible with stable-baselines3
-from stable_baselines3 import PPO
-from envs.wireless_comm_new import WirelessCommEnv
-
-env = WirelessCommEnv(grid_x=4, grid_y=4)
-model = PPO("MlpPolicy", env, verbose=1)
-model.learn(total_timesteps=10000)
+# Show current state in real-time
+env.render_realtime(show=True, save_path="current_frame.png")
 ```
 
-## Testing
-
-Run the test script to verify the environment works correctly:
-
-```bash
-cd envs/wireless_comm_new
-python test_env.py
-```
-
-This will run various tests including:
-- Basic environment functionality
-- Different configurations
-- Network parameters
-- Observation neighborhoods
-- Visualization
-
-## Registration
-
-The environment is automatically registered with gymnasium when imported:
-
+#### GIF Creation
 ```python
-import gymnasium as gym
-from envs.wireless_comm_new import WirelessCommEnv
-
-# Can be created using gym.make
-env = gym.make("WirelessComm-v0", grid_x=4, grid_y=4)
+# Collect frames during training
+env.start_frame_collection()
+for step in range(100):
+    action = env.action_space.sample()
+    obs, reward, terminated, truncated, info = env.step(action)
+    env.render()  # Automatically collects frames
+    
+env.stop_frame_collection()
+env.save_gif("training_progress.gif", fps=3)
 ```
 
-## Differences from Original
+## Example Scripts
 
-This version differs from the original PettingZoo implementation in several ways:
+### 1. Simple Usage (`simple_usage_example.py`)
+Demonstrates basic environment usage with different rendering options:
+- Basic usage without rendering
+- Standard rendering
+- Real-time rendering
+- GIF creation
+- Custom parameters
 
-1. **Standard gym interface**: Uses gymnasium/gym instead of PettingZoo
-2. **Single agent perspective**: Treats all agents as a single agent with multi-dimensional actions
-3. **Simplified observation space**: More compact observation representation
-4. **Configurable parameters**: Easy to adjust network and game parameters
-5. **Cleaner code structure**: Better organized and documented
+### 2. Real-time Animation (`example_render_progress.py`)
+Shows real-time animation during environment execution:
+- Live visualization of agent movements
+- Configurable frame delays
+- Optional GIF saving
 
-## Network Dynamics
+### 3. Separate Rendering Control (`example_separate_rendering.py`)
+Demonstrates independent control of rendering modes:
+- Real-time rendering only
+- GIF saving only
+- Both modes combined
+- Custom configurations
 
-The environment simulates realistic wireless communication dynamics:
+## Usage Examples
 
-1. **Packet Arrivals**: New packets arrive probabilistically at each agent
-2. **Access Point Selection**: Agents choose which access point to transmit to
-3. **Interference**: Multiple agents transmitting to the same access point causes interference
-4. **Deadlines**: Packets have deadlines and must be transmitted before expiring
-5. **Success Probability**: Transmissions succeed probabilistically based on interference
+### Basic Training Loop
+```python
+env = WirelessCommEnv(grid_x=4, grid_y=4, render_mode="rgb_array")
+obs, info = env.reset()
+
+total_reward = 0
+for step in range(100):
+    action = env.action_space.sample()  # Replace with your policy
+    obs, reward, terminated, truncated, info = env.step(action)
+    total_reward += reward
+    
+    # Optional: render every N steps
+    if step % 10 == 0:
+        env.render_realtime(show=True)
+    
+    if terminated or truncated:
+        obs, info = env.reset()
+        total_reward = 0
+
+env.close()
+```
+
+### Training with GIF Recording
+```python
+env = WirelessCommEnv(grid_x=4, grid_y=4, render_mode="rgb_array")
+obs, info = env.reset()
+
+# Start collecting frames
+env.start_frame_collection()
+
+for step in range(100):
+    action = env.action_space.sample()
+    obs, reward, terminated, truncated, info = env.step(action)
+    env.render()  # Collects frame automatically
+    
+    if terminated or truncated:
+        obs, info = env.reset()
+
+# Save training progress as GIF
+env.stop_frame_collection()
+env.save_gif("training_progress.gif", fps=3)
+env.close()
+```
+
+### Real-time Visualization
+```python
+env = WirelessCommEnv(grid_x=3, grid_y=3, render_mode="rgb_array")
+obs, info = env.reset()
+
+for step in range(20):
+    action = env.action_space.sample()
+    obs, reward, terminated, truncated, info = env.step(action)
+    
+    # Show real-time progress
+    env.render_realtime(show=True)
+    
+    if terminated or truncated:
+        obs, info = env.reset()
+
+env.close()
+```
+
+## Performance Optimization
+
+The environment has been optimized for:
+- **Efficient rendering**: Backend-agnostic matplotlib usage
+- **Memory management**: Automatic cleanup of rendering resources
+- **Frame collection**: Optimized GIF creation with configurable FPS
+- **Code structure**: Clean, maintainable codebase with proper error handling
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Matplotlib backend errors**: The environment uses 'Agg' backend for compatibility
+2. **Memory usage**: Large GIFs can use significant memory; adjust FPS and frame count
+3. **Display issues**: Real-time rendering requires a display; use `show=False` for headless systems
+
+### Performance Tips
+
+- Use `render_mode=None` for fastest training (no rendering overhead)
+- Collect frames only when needed with `start_frame_collection()`/`stop_frame_collection()`
+- Adjust `frame_delay` in real-time rendering for optimal viewing speed
+- Use appropriate FPS values for GIF creation (2-5 FPS for training progress)
+
+## Theoretical Model
+
+This environment implements a **Networked MDP** model for wireless communication networks, capturing:
+
+- **Multi-user coordination**: Multiple agents competing for shared access points
+- **Packet dynamics**: Queues with deadlines and arrival probabilities  
+- **Interference modeling**: Conflict detection when multiple agents transmit to same access point
+- **Local interactions**: State transitions based on neighborhood structure
+- **Binary state representation**: Packet status encoded as binary tuples
+
+### Key Model Components
+
+- **Users (Agents)**: N = {1, 2, ..., n} where n = grid_x × grid_y
+- **Access Points**: Y = {y₁, y₂, ..., yₘ} at grid intersections
+- **State Space**: Binary tuples sᵢ = (e₁, e₂, ..., e_{dᵢ}) ∈ {0,1}^{dᵢ}
+- **Action Space**: Aᵢ = {null} ∪ Yᵢ (Idle + access point selection)
+- **Reward Function**: rᵢ = 1 for successful transmission, 0 otherwise
+
+For detailed theoretical mapping, see [THEORETICAL_MODEL.md](THEORETICAL_MODEL.md).
+
+## Research Applications
+
+This environment enables research in:
+- **Multi-Agent Reinforcement Learning**: Test coordination algorithms
+- **Network Optimization**: Study interference management strategies  
+- **Protocol Design**: Evaluate wireless communication protocols
+- **Resource Allocation**: Optimize access point utilization
+
+## Contributing
+
+This environment is part of a larger toolkit. For contributions or issues, please refer to the main project documentation.
 
 ## License
 
-This environment is part of the DSDP project and follows the same license terms. 
+This project is part of the My_Tool_Box toolkit. See the main project for license information. 

@@ -67,8 +67,8 @@ def train_transformer_policy():
     print("=" * 40)
     
     # Set random seed for reproducibility
-    torch.manual_seed(42)
-    np.random.seed(42)
+    torch.manual_seed(1997)
+    np.random.seed(1997)
     
     # Configuration
     obs_dim = 4
@@ -115,7 +115,7 @@ def train_transformer_policy():
     optimizer = optim.Adam(policy.parameters(), lr=0.001)
     
     # Training loop
-    num_episodes = 100
+    num_episodes = 10000
     episode_rewards = []
     
     print("🎯 Starting training...")

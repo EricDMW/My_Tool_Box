@@ -243,6 +243,10 @@ class PistonballEnv(Env, EzPickle):
         pygame.init()
         pymunk.pygame_util.positive_y_is_up = False
         
+        # Initialize font for piston numbering
+        pygame.font.init()
+        self.font = pygame.font.Font(None, 24)  # Default font, size 24
+        
         # Rendering setup
         self.renderOn = False
         self.screen = pygame.Surface((self.screen_width, self.screen_height))
@@ -710,6 +714,16 @@ class PistonballEnv(Env, EzPickle):
             )
             color = observable_color if idx in observable_pistons else piston_color
             pygame.draw.rect(self.screen, color, body_rect)
+            
+            # Draw piston order number at the bottom
+            piston_number = str(idx)
+            text_surface = self.font.render(piston_number, True, (255, 255, 255))  # White text
+            text_rect = text_surface.get_rect()
+            # Position text at the bottom center of each piston
+            text_x = x_pos + (self.piston_width - text_rect.width) // 2
+            text_y = self.screen_height - self.wall_width - self.piston_body_height + 5
+            self.screen.blit(text_surface, (text_x, text_y))
+            
             x_pos += self.piston_width
 
     def draw(self):

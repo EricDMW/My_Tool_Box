@@ -16,6 +16,7 @@ The Pistonball environment simulates a physics-based cooperative game where mult
 - **🎨 Human Control**: Manual policy for human interaction and debugging
 - **📊 Standard Gym Interface**: Fully compatible with gymnasium/gym environments
 - **🖼️ Rendering Support**: Both human and rgb_array rendering modes
+- **🔢 Visual Piston Numbering**: Display piston order numbers for easy identification
 - **🔍 Robust Validation**: Comprehensive action validation and error handling
 
 ## 📦 Installation
@@ -637,6 +638,39 @@ for env in envs:
 - **`render_mode=None`**: Fastest, no visualization (recommended for training)
 - **`render_mode="rgb_array"`**: Returns RGB array for logging/recording
 - **`render_mode="human"`**: Interactive window (for debugging/visualization)
+
+### Piston Numbering Feature
+
+The environment includes a visual piston numbering feature that displays the order of each piston at the bottom during rendering:
+
+- **Visual Indicators**: Each piston displays its index number (0, 1, 2, ...) at the bottom
+- **White Text**: Numbers are rendered in white text for good visibility
+- **Centered Positioning**: Numbers are centered at the bottom of each piston
+- **Automatic Scaling**: Works with any number of pistons
+
+**Example Usage**:
+```python
+# Create environment with visual rendering
+env = PistonballEnv(n_pistons=8, render_mode="human")
+obs, info = env.reset()
+
+# The pistons will display numbers 0-7 at their bottoms
+for step in range(100):
+    action = env.action_space.sample()
+    obs, reward, terminated, truncated, info = env.step(action)
+    env.render()  # Numbers will be visible in the rendered window
+    
+    if terminated or truncated:
+        obs, info = env.reset()
+
+env.close()
+```
+
+**Benefits**:
+- **Easy Identification**: Quickly identify specific pistons during debugging
+- **Action Mapping**: Correlate action indices with visual piston positions
+- **Research Aid**: Useful for analyzing individual piston behavior
+- **Teaching Tool**: Helpful for understanding multi-agent coordination
 
 ### Memory Usage
 
