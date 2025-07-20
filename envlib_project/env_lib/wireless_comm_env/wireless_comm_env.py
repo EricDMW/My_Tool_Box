@@ -22,6 +22,7 @@ import gymnasium
 from gymnasium import Env
 from gymnasium.spaces import Box, Discrete, MultiDiscrete
 from gymnasium.utils import EzPickle, seeding
+import torch
 
 
 class WirelessCommEnv(Env, EzPickle):
@@ -48,6 +49,10 @@ class WirelessCommEnv(Env, EzPickle):
         n_obs_neighbors=1,
         max_iter=50,
         render_mode=None,
+        save_gif=False,
+        gif_path=None,
+        debug_info=False,
+        device='cpu',
     ):
         """
         Initialize the Wireless Communication environment.
@@ -61,6 +66,10 @@ class WirelessCommEnv(Env, EzPickle):
             n_obs_neighbors: Number of neighbors to observe
             max_iter: Maximum number of steps per episode
             render_mode: Rendering mode ('human', 'rgb_array', None)
+            save_gif: If True, save a GIF of the animation when env.close() is called.
+            gif_path: Path to save the GIF (default: wireless_comm_run.gif)
+            debug_info: If True, info dict in step() contains neighbors and access_points; otherwise only local_rewards.
+            device: Device to use for torch tensors (e.g., 'cpu', 'cuda')
         """
         EzPickle.__init__(
             self,
@@ -83,6 +92,11 @@ class WirelessCommEnv(Env, EzPickle):
         self.n_obs_nghbr = n_obs_neighbors
         self.max_iter = max_iter
         self.render_mode = render_mode
+        self.save_gif = save_gif
+        self.gif_path = gif_path or os.path.join(os.getcwd(), 'wireless_comm_run.gif')
+        self._mpl_fig = None
+        self._mpl_ax = None
+        self._mpl_im = None
         
         # Agent setup
         self.n_agents = grid_x * grid_y
@@ -110,6 +124,36 @@ class WirelessCommEnv(Env, EzPickle):
         
         self.closed = False
         self.seed()
+        self.debug_info = debug_info
+        self.device = torch.device(device)
+        
+        # Compute neighbors for each agent
+        self.neighbors = []
+        for agent_id in range(self.n_agents):
+            agent_x = agent_id % self.grid_x
+            agent_y = agent_id // self.grid_x
+            nghbrs = []
+            # Only consider up, down, left, right
+            for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nx, ny = agent_x + dx, agent_y + dy
+                if 0 <= nx < self.grid_x and 0 <= ny < self.grid_y:
+                    neighbor_id = ny * self.grid_x + nx
+                    nghbrs.append(neighbor_id)
+            self.neighbors.append(nghbrs)
+
+        # Access points for each agent (as list of possible AP indices)
+        self.access_points = []
+        for agent_id in range(self.n_agents):
+            agent_x = agent_id % self.grid_x
+            agent_y = agent_id // self.grid_x
+            ap_indices = []
+            # Check all four possible APs
+            for action in [1, 2, 3, 4]:  # LL, UL, LR, UR
+                ap_x, ap_y = self.access_point_mapping(agent_x, agent_y, action)
+                if ap_x is not None and ap_y is not None:
+                    ap_id = ap_y * (self.grid_x - 1) + ap_x + 1  # 1-based index
+                    ap_indices.append(ap_id)
+            self.access_points.append(ap_indices)
 
     def seed(self, seed=None):
         """Set the random seed for the environment."""
@@ -120,16 +164,16 @@ class WirelessCommEnv(Env, EzPickle):
         """Map agent action to access point coordinates (UL, LL, UR, LR) for (x, y) with y increasing upwards."""
         if agent_action == 0:
             return None, None
-        # UL: up and left
+        # LL: lower and left
         if agent_action == 1:
             ap_x, ap_y = x - 1, y
-        # LL: left
+        # UL: upper and left
         elif agent_action == 2:
             ap_x, ap_y = x - 1, y - 1
-        # UR: up
+        # LR: lower and right
         elif agent_action == 3:
             ap_x, ap_y = x, y
-        # LR: right
+        # UR: upper and right
         elif agent_action == 4:
             ap_x, ap_y = x, y - 1
         else:
@@ -152,16 +196,21 @@ class WirelessCommEnv(Env, EzPickle):
             self.seed(seed)
             
         # Initialize state - matching original structure
-        self.state = np.full((self.ddl, self.grid_x + 2 * self.n_obs_nghbr, self.grid_y + 2 * self.n_obs_nghbr),
-                             fill_value=2, dtype=np.float32)
+        self.state = torch.full(
+            (self.ddl, self.grid_x + 2 * self.n_obs_nghbr, self.grid_y + 2 * self.n_obs_nghbr),
+            fill_value=2, dtype=torch.float32, device=self.device
+        )
         self.state[:, self.n_obs_nghbr:self.grid_x+self.n_obs_nghbr, self.n_obs_nghbr:self.grid_y+self.n_obs_nghbr] = 0
         
         # Initialize actions
-        self.actions = np.zeros((self.grid_x + 2 * self.n_obs_nghbr, self.grid_y + 2 * self.n_obs_nghbr)).astype(int)
+        self.actions = torch.zeros(
+            (self.grid_x + 2 * self.n_obs_nghbr, self.grid_y + 2 * self.n_obs_nghbr),
+            dtype=torch.int64, device=self.device
+        )
         
         # Initialize packet arrivals - matching original probability
         self.state[:, self.n_obs_nghbr:self.grid_x + self.n_obs_nghbr, self.n_obs_nghbr:self.grid_y + self.n_obs_nghbr] = \
-            self.np_random.choice(2, size=(self.ddl, self.grid_x, self.grid_y))
+            torch.randint(0, 2, (self.ddl, self.grid_x, self.grid_y), device=self.device)
         
         self.num_moves = 0
         
@@ -170,7 +219,7 @@ class WirelessCommEnv(Env, EzPickle):
     def _get_obs(self):
         """Get observations for all agents (row-major order)."""
         assert self.state is not None
-        obs = np.zeros((self.n_agents, self.ddl * ((self.n_obs_nghbr * 2 + 1) ** 2)))
+        obs = torch.zeros((self.n_agents, self.ddl * ((self.n_obs_nghbr * 2 + 1) ** 2)), dtype=torch.float32, device=self.device)
         
         for i in range(self.n_agents):
             agent_x = i % self.grid_x
@@ -179,103 +228,129 @@ class WirelessCommEnv(Env, EzPickle):
                                agent_x: agent_x + self.n_obs_nghbr * 2 + 1,
                                agent_y: agent_y + self.n_obs_nghbr * 2 + 1].reshape(-1)
         
-        return obs
+        return obs.cpu().numpy()
 
     def step(self, action):
-        """Take a step in the environment (row-major order, correct conflict logic)."""
+        """Efficient and consistent step logic."""
         assert self.state is not None
-        action_array = np.asarray(action, dtype=int).flatten()
-        self.actions = np.zeros((self.grid_x + 2 * self.n_obs_nghbr, self.grid_y + 2 * self.n_obs_nghbr)).astype(int)
-        for agent_id in range(self.n_agents):
-            agent_x = agent_id % self.grid_x
-            agent_y = agent_id // self.grid_x
-            self.actions[agent_x + self.n_obs_nghbr, agent_y + self.n_obs_nghbr] = action_array[agent_id]
+        action_tensor = torch.as_tensor(action, dtype=torch.int64, device=self.device).flatten()
+        self.actions = torch.zeros(
+            (self.grid_x + 2 * self.n_obs_nghbr, self.grid_y + 2 * self.n_obs_nghbr),
+            dtype=torch.int64, device=self.device
+        )
+        agent_xs = torch.arange(self.n_agents, device=self.device) % self.grid_x
+        agent_ys = torch.arange(self.n_agents, device=self.device) // self.grid_x
+        self.actions[agent_xs + self.n_obs_nghbr, agent_ys + self.n_obs_nghbr] = action_tensor
 
-        # Build mapping from access point to list of agents transmitting to it
-        ap_to_agents = {}
+        # Build access point profile and agent-to-ap mapping
+        access_point_profile = torch.zeros((self.grid_x - 1, self.grid_y - 1), dtype=torch.int64, device=self.device)
         agent_ap = [None] * self.n_agents
         for agent_id in range(self.n_agents):
             agent_x = agent_id % self.grid_x
             agent_y = agent_id // self.grid_x
-            agent_action = action_array[agent_id]
+            agent_action = action_tensor[agent_id]
             ap_x, ap_y = self.access_point_mapping(agent_x, agent_y, agent_action)
             if agent_action > 0 and ap_x is not None and ap_y is not None:
-                ap_key = (ap_x, ap_y)
-                if ap_key not in ap_to_agents:
-                    ap_to_agents[ap_key] = []
-                ap_to_agents[ap_key].append(agent_id)
-                agent_ap[agent_id] = ap_key
-            else:
-                agent_ap[agent_id] = None
+                access_point_profile[ap_x, ap_y] += 1
+                agent_ap[agent_id] = (ap_x, ap_y)
 
-        rewards = np.zeros(self.n_agents)
-        # Update state and calculate rewards for each agent
+        rewards = torch.zeros(self.n_agents, dtype=torch.float32, device=self.device)
         for agent_id in range(self.n_agents):
             agent_x = agent_id % self.grid_x
             agent_y = agent_id // self.grid_x
-            agent_action = action_array[agent_id]
-            ap_key = agent_ap[agent_id]
-            # Only one agent can succeed per access point
-            if agent_action > 0 and ap_key is not None and len(ap_to_agents[ap_key]) == 1:
-                # Check if agent has a packet to send
-                if self.state[:, agent_x + self.n_obs_nghbr, agent_y + self.n_obs_nghbr].max() > 0:
-                    # Find the leftmost "1" in the agent's state
-                    idx = 0
-                    while self.state[idx, agent_x + self.n_obs_nghbr, agent_y + self.n_obs_nghbr] == 0:
-                        idx += 1
-                    # Attempt transmission (with success probability)
+            agent_action = action_tensor[agent_id]
+            ap = agent_ap[agent_id]
+            if agent_action > 0 and ap is not None and access_point_profile[ap[0], ap[1]] == 1:
+                # Only one agent to this AP, check for packet and process
+                agent_state = self.state[:, agent_x + self.n_obs_nghbr, agent_y + self.n_obs_nghbr]
+                if agent_state.max() > 0:
+                    idx = torch.argmax((agent_state > 0).to(torch.float32))
                     if self.np_random.random() <= self.q:
                         self.state[idx, agent_x + self.n_obs_nghbr, agent_y + self.n_obs_nghbr] = 0
                         rewards[agent_id] = 1
-        # Update state: left shift and append new packets (matching original logic)
+
+
+        # Update state: left shift and append new packets
         self.state[:-1, self.n_obs_nghbr:self.grid_x+self.n_obs_nghbr, self.n_obs_nghbr:self.grid_y+self.n_obs_nghbr] = \
-            copy.deepcopy(self.state[1:, self.n_obs_nghbr:self.grid_x+self.n_obs_nghbr, self.n_obs_nghbr:self.grid_y+self.n_obs_nghbr])
+            self.state[1:, self.n_obs_nghbr:self.grid_x+self.n_obs_nghbr, self.n_obs_nghbr:self.grid_y+self.n_obs_nghbr]
         self.state[-1, self.n_obs_nghbr:self.grid_x+self.n_obs_nghbr, self.n_obs_nghbr:self.grid_y+self.n_obs_nghbr] = \
-            self.np_random.random((self.grid_x, self.grid_y)) <= self.p
+            (torch.rand((self.grid_x, self.grid_y), device=self.device) <= self.p).float()
         self.num_moves += 1
+        self._last_rewards = rewards.cpu().numpy()
         terminated = False
         truncated = self.num_moves >= self.max_iter
-        total_reward = np.sum(rewards)
-        return self._get_obs(), total_reward, terminated, truncated, {}
+        total_reward = rewards.sum().item()
+        # Compute local_obs for each agent: agent's own state for all deadlines
+        local_obs = []
+        for agent_id in range(self.n_agents):
+            agent_x = agent_id % self.grid_x
+            agent_y = agent_id // self.grid_x
+            # Extract the agent's own state for all deadlines
+            agent_state = self.state[:, agent_x + self.n_obs_nghbr, agent_y + self.n_obs_nghbr]
+            local_obs.append(agent_state.cpu().numpy())
+        if self.debug_info:
+            info = {
+                "local_rewards": self._last_rewards.copy(),
+                "neighbors": self.neighbors,
+                "access_points": self.access_points,
+                "local_obs": local_obs.copy()
+            }
+        else:
+            info = {"local_rewards": self._last_rewards.copy(), "local_obs": local_obs}
+        return self._get_obs(), total_reward, terminated, truncated, info
 
-    def render(self):
+    def render(self, show=True):
         """
-        Render the environment. If frame collection is active, also collect the frame.
+        Render the environment. If show=True, display the current frame in a persistent matplotlib window for animation.
+        If save_gif is True, collect frames for GIF saving on close().
         """
-        if self.render_mode == "human":
-            string = "Current state: \n"
-            for i, agent in enumerate(self.agents):
-                agent_x = i % self.grid_x
-                agent_y = i // self.grid_x
-                string += f"Agent {i}: action = {self.actions[agent_x + self.n_obs_nghbr, agent_y + self.n_obs_nghbr]}, " \
-                          f"state = {self.state[:, agent_x + self.n_obs_nghbr, agent_y + self.n_obs_nghbr]}\n"
-            print(string)
-            return string
-        elif self.render_mode == "rgb_array":
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        if show:
+            if self._mpl_fig is None or self._mpl_ax is None or self._mpl_im is None:
+                plt.ion()
+                self._mpl_fig, self._mpl_ax = plt.subplots(figsize=(10, 10))
+                self._mpl_ax.axis('off')
+                # Initialize with a dummy image
+                dummy_img = np.zeros((10, 10, 3), dtype=np.uint8)
+                self._mpl_im = self._mpl_ax.imshow(dummy_img)
+                self._mpl_fig.tight_layout()
+            # Draw on the persistent axes
+            rgb_array = self._render_rgb_array(ax=self._mpl_ax)
+            self._mpl_im.set_data(rgb_array)
+            self._mpl_ax.set_title(f'Wireless Communication Environment - Step {self.num_moves}', fontsize=14, fontweight='bold')
+            self._mpl_fig.canvas.draw_idle()
+            plt.pause(0.001)
+        else:
             rgb_array = self._render_rgb_array()
-            
-            # Collect frame if collection is active
-            if self.collecting_frames:
-                self.frames.append(rgb_array)
-            
-            return rgb_array
+        if self.save_gif:
+            self.frames.append(rgb_array.copy())
+        return rgb_array
 
-    def _render_rgb_array(self):
+    def _render_rgb_array(self, ax=None):
         """Create a detailed RGB array visualization of the environment."""
         import matplotlib
-        matplotlib.use('Agg')  # Use non-interactive backend
         import matplotlib.pyplot as plt
         import matplotlib.patches as patches
         from matplotlib.patches import FancyArrowPatch
         import numpy as np
-        
-        # Create figure with explicit backend
-        fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+        import io
+        from PIL import Image
+
+        own_fig = False
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+            own_fig = True
+        else:
+            fig = None
+            ax.clear()
         ax.set_xlim(-0.5, self.grid_x)
-        ax.set_ylim(-0.5, self.grid_y)
+        ax.set_ylim(-0.5, self.grid_y - .4)  # Adds 1 unit of space at the bottom
         ax.set_aspect('equal')
         ax.axis('off')
-        fig.patch.set_facecolor('white')
+        if own_fig:
+            fig.patch.set_facecolor('white')
         ax.set_facecolor('white')
 
         # Colors
@@ -311,7 +386,7 @@ class WirelessCommEnv(Env, EzPickle):
                    fontsize=11, fontweight='bold', color='black')
             # Action (positioned above with more space)
             current_action = self.actions[agent_x + self.n_obs_nghbr, agent_y + self.n_obs_nghbr]
-            action_names = ['Idle', 'LL', 'UL',  'LR', 'UR']
+            action_names = ['Idle', 'LL', 'UL',  'LR', 'UR' ]
             ap_x, ap_y = self.access_point_mapping(agent_x, agent_y, current_action)
             if current_action > 0 and (ap_x is None or ap_y is None):
                 # Illegal action: show red box and label as Idle
@@ -324,7 +399,7 @@ class WirelessCommEnv(Env, EzPickle):
                         bbox=dict(boxstyle="round,pad=0.2", facecolor='yellow', alpha=0.7))
             # State (positioned below with more space)
             agent_state = self.state[:, agent_x + self.n_obs_nghbr, agent_y + self.n_obs_nghbr]
-            state_str = '[' + ', '.join([f'{s:.1f}' for s in agent_state]) + ']'
+            state_str = '[' + ', '.join([f'{s:.1f}' for s in agent_state.cpu().numpy()]) + ']'
             ax.text(agent_x, display_y - 0.4, state_str, ha='center', va='top',
                    fontsize=7, color='black',
                    bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8))
@@ -337,17 +412,15 @@ class WirelessCommEnv(Env, EzPickle):
             current_action = self.actions[agent_x + self.n_obs_nghbr, agent_y + self.n_obs_nghbr]
             agent_state = self.state[:, agent_x + self.n_obs_nghbr, agent_y + self.n_obs_nghbr]
             ap_x, ap_y = self.access_point_mapping(agent_x, agent_y, current_action)
+            rewards = getattr(self, '_last_rewards', np.zeros(self.n_agents))
             if current_action > 0 and ap_x is not None and ap_y is not None:
                 ap_display_y = self.grid_y - 2 - ap_y
-                has_packet = np.any(agent_state == 1)
-                # Determine arrow color
-                if has_packet and np.random.random() < 0.3:
+                if rewards[agent_id] == 1:
                     arrow_color = transmission_color
                     arrow_width = 3
                 else:
                     arrow_color = general_transmission_color
                     arrow_width = 2
-                # Adjust arrow start and end points - start from agent, point to access point
                 start_x = agent_x
                 start_y = display_y
                 end_x = ap_x + 0.5
@@ -365,16 +438,22 @@ class WirelessCommEnv(Env, EzPickle):
                 ax.add_patch(arrow)
 
         # Convert to RGB array using savefig method
-        import io
-        from PIL import Image
-        buf = io.BytesIO()
-        fig.savefig(buf, format='png', bbox_inches='tight', pad_inches=0, dpi=100)
-        buf.seek(0)
-        img = Image.open(buf)
-        data = np.array(img)[..., :3]  # Remove alpha channel if present
-        
-        plt.close(fig)
-        return data
+        if own_fig:
+            buf = io.BytesIO()
+            fig.savefig(buf, format='png', bbox_inches='tight', pad_inches=0, dpi=100)
+            buf.seek(0)
+            img = Image.open(buf)
+            data = np.array(img)[..., :3]  # Remove alpha channel if present
+            plt.close(fig)
+            return data
+        else:
+            # For interactive, render to the persistent axes and return the RGB array from the canvas
+            self._mpl_fig.canvas.draw()
+            width, height = self._mpl_fig.canvas.get_width_height()
+            buf = self._mpl_fig.canvas.buffer_rgba()
+            img = np.frombuffer(buf, dtype=np.uint8).reshape((height, width, 4))
+            img = img[..., :3]  # Convert RGBA to RGB
+            return img
 
     def render_realtime(self, show=True, save_path=None):
         """
@@ -396,7 +475,7 @@ class WirelessCommEnv(Env, EzPickle):
             plt.figure(figsize=(10, 10))
             plt.imshow(rgb_array)
             plt.axis('off')
-            plt.title(f'Wireless Communication Environment - Step {self.num_moves}')
+            plt.title(f'Wireless Communication Environment - Step {self.num_moves}', fontsize=14, fontweight='bold')
             plt.tight_layout()
             plt.draw()
             plt.pause(0.1)  # Brief pause to show the frame
@@ -407,7 +486,7 @@ class WirelessCommEnv(Env, EzPickle):
             plt.figure(figsize=(10, 10))
             plt.imshow(rgb_array)
             plt.axis('off')
-            plt.title(f'Wireless Communication Environment - Step {self.num_moves}')
+            plt.title(f'Wireless Communication Environment - Step {self.num_moves}', fontsize=14, fontweight='bold')
             plt.tight_layout()
             plt.savefig(save_path, dpi=150, bbox_inches='tight')
             plt.close()
@@ -425,7 +504,7 @@ class WirelessCommEnv(Env, EzPickle):
         self.collecting_frames = False
         print(f"Frame collection stopped. Collected {len(self.frames)} frames.")
 
-    def save_gif(self, gif_path=None, fps=3, dpi=100):
+    def _save_gif(self, gif_path=None, fps=3, dpi=100):
         """
         Save collected frames as a GIF.
         
@@ -452,18 +531,30 @@ class WirelessCommEnv(Env, EzPickle):
         
         def update(i):
             im.set_data(self.frames[i])
-            ax.set_title(f'Wireless Communication Environment - Step {i + 1}', fontsize=14, fontweight='bold')
+            # ax.set_title(f'Wireless Communication Environment - Step {i + 1}', fontsize=14, fontweight='bold')
             return [im]
         
         anim = animation.FuncAnimation(fig, update, frames=len(self.frames), 
                                      interval=int(1000/fps), blit=True, repeat=True)
         anim.save(gif_path, writer='pillow', fps=fps, dpi=dpi)
         plt.close(fig)
-        
+         
         print(f"GIF saved successfully!")
         return gif_path
 
     def close(self):
-        """Close the environment."""
-        if not self.closed:
-            self.closed = True 
+        """Close the environment. If save_gif is True, save the collected frames as a GIF."""
+        if self.save_gif:
+            if not self.frames:
+                print("Warning: save_gif is True but no frames were collected. No GIF will be saved.")
+            else:
+                # print(f"Saving {len(self.frames)} frames as GIF to {self.gif_path}...")
+                self._save_gif(self.gif_path)
+        # Close the matplotlib window if open
+        if self._mpl_fig is not None:
+            import matplotlib.pyplot as plt
+            plt.close(self._mpl_fig)
+            self._mpl_fig = None
+            self._mpl_ax = None
+            self._mpl_im = None
+        self.closed = True 

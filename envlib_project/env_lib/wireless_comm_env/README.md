@@ -75,6 +75,137 @@ Each agent observes its local state including:
 - Neighbor information (based on `n_obs_neighbors`)
 - Total observation dimension: `ddl × ((n_obs_neighbors × 2 + 1)²)`
 
+## Detailed Observation and Info Structure
+
+### Observation Array
+- For each agent, the observation is a flattened array of shape `(ddl * ((2 * n_obs_neighbors + 1) ** 2),)`.
+- `ddl` is the deadline horizon for packet transmission.
+- `n_obs_neighbors` determines the local neighborhood size (e.g., 1 means a 3x3 grid centered on the agent).
+- The observation encodes the packet status for each cell in the agent's local neighborhood for each deadline slot.
+- Values in the observation:
+  - `0`: No packet
+  - `1`: Packet present
+  - `2`: Out-of-bounds (padding)
+
+#### Detailed Structure of the Observation Array
+Each digit in the observation array corresponds to a specific deadline slot and a specific cell in the agent's local neighborhood grid. The array is constructed by flattening the 3D array with axes:
+- Deadline slot (from 0 to ddl-1)
+- Local grid row (from -n_obs_neighbors to +n_obs_neighbors, relative to agent)
+- Local grid column (from -n_obs_neighbors to +n_obs_neighbors, relative to agent)
+
+The flattening order is: for each deadline slot, scan the local grid row by row (top to bottom, then left to right within each row).
+
+##### Example: ddl=2, n_obs_neighbors=1
+- The local grid is 3x3 (centered on the agent), and there are 2 deadline slots.
+- The observation array has 18 elements: `obs[0]` to `obs[17]`.
+- The mapping is as follows:
+
+| Obs Index | Deadline | d_row | d_col | Meaning (relative to agent) |
+|-----------|----------|-------|-------|-----------------------------|
+| 0         | 0        | -1    | -1    | Top-left neighbor, earliest deadline |
+| 1         | 0        | -1    |  0    | Top-center neighbor, earliest deadline |
+| 2         | 0        | -1    | +1    | Top-right neighbor, earliest deadline |
+| 3         | 0        |  0    | -1    | Center-left neighbor, earliest deadline |
+| 4         | 0        |  0    |  0    | Agent itself, earliest deadline |
+| 5         | 0        |  0    | +1    | Center-right neighbor, earliest deadline |
+| 6         | 0        | +1    | -1    | Bottom-left neighbor, earliest deadline |
+| 7         | 0        | +1    |  0    | Bottom-center neighbor, earliest deadline |
+| 8         | 0        | +1    | +1    | Bottom-right neighbor, earliest deadline |
+| 9         | 1        | -1    | -1    | Top-left neighbor, next deadline |
+| 10        | 1        | -1    |  0    | Top-center neighbor, next deadline |
+| 11        | 1        | -1    | +1    | Top-right neighbor, next deadline |
+| 12        | 1        |  0    | -1    | Center-left neighbor, next deadline |
+| 13        | 1        |  0    |  0    | Agent itself, next deadline |
+| 14        | 1        |  0    | +1    | Center-right neighbor, next deadline |
+| 15        | 1        | +1    | -1    | Bottom-left neighbor, next deadline |
+| 16        | 1        | +1    |  0    | Bottom-center neighbor, next deadline |
+| 17        | 1        | +1    | +1    | Bottom-right neighbor, next deadline |
+
+- For each deadline slot, the 3x3 grid is flattened row by row, then the next deadline slot is appended.
+- For larger `n_obs_neighbors` or `ddl`, the pattern generalizes accordingly.
+
+### Agent and Access Point Layout
+- Agents are arranged in a 2D grid of size `grid_x` by `grid_y`.
+- Each agent is indexed in row-major order (left-to-right, top-to-bottom), starting from 0.
+- Access points (APs) are located between agents, forming a grid of size `(grid_x-1)` by `(grid_y-1)`.
+- Each AP is indexed in row-major order (top-to-bottom, left-to-right), starting from 1.
+- For an AP at coordinates `(ap_x, ap_y)`, its index is: `ap_id = ap_y * (grid_x - 1) + ap_x + 1`.
+
+## GPU and Torch Support
+
+This environment supports both CPU and GPU computation using PyTorch tensors. You can specify the device with the `device` parameter (e.g., `'cpu'` or `'cuda'`).
+
+- **All state, actions, and random sampling are performed on the specified device.**
+- **Data is only moved to CPU (with `.cpu().numpy()`) when returning observations, info, or for rendering/saving frames.**
+- **The environment is compatible with both NumPy and PyTorch workflows.**
+
+### Example: Running on GPU
+```python
+import torch
+from wireless_comm_env import WirelessCommEnv
+
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+env = WirelessCommEnv(grid_x=6, grid_y=6, device=device)
+obs, info = env.reset()
+for _ in range(10):
+    action = env.action_space.sample()
+    obs, total_reward, terminated, truncated, info = env.step(action)
+    print('Agent 0 local_obs:', info['local_obs'][0])
+    if terminated or truncated:
+        break
+```
+
+## Info Dictionary (Returned by `step`)
+The `info` dictionary returned by `env.step(action)` contains additional information about the environment state. Its contents depend on the `debug_info` parameter:
+
+- If `debug_info=False` (default):
+  - `info['local_rewards']`: A numpy array of shape `(n_agents,)` with the reward for each agent in the current step.
+  - `info['local_obs']`: A list of numpy arrays, where `info['local_obs'][i]` is a 1D array of length `ddl` containing the agent's own state (packet status for all deadlines) for agent `i`.
+
+- If `debug_info=True`:
+  - `info['local_rewards']`: As above.
+  - `info['neighbors']`: A list of lists, where `info['neighbors'][i]` contains the indices of the four direct neighbors (up, down, left, right) of agent `i`.
+  - `info['access_points']`: A list of lists, where `info['access_points'][i]` contains the indices (order) of all access points adjacent to agent `i` (i.e., all APs the agent could possibly access, not just the one chosen by its action).
+  - `info['local_obs']`: As above.
+
+### Example Usage
+```python
+obs, total_reward, terminated, truncated, info = env.step(action)
+
+# For agent i:
+local_reward = info['local_rewards'][i]
+local_obs = info['local_obs'][i]  # 1D array of length ddl
+neighbors = info['neighbors'][i]  # Only if debug_info=True
+possible_ap_indices = info['access_points'][i]  # Only if debug_info=True
+```
+
+## Best Practices for Efficiency
+- **Keep all computation on the GPU** by setting `device='cuda'` if available. Only move data to CPU for logging, rendering, or numpy compatibility.
+- **Batch multiple environments** for large-scale RL to maximize GPU utilization.
+- **Use efficient data types** (e.g., `torch.uint8` for binary state) to save memory and bandwidth.
+- **Minimize Python loops** and use vectorized torch operations wherever possible.
+- **Profile your code** to identify bottlenecks, especially in the `step` and `render` methods.
+- **Avoid unnecessary data transfers** between CPU and GPU.
+- **Downsample or skip frames** when saving GIFs to reduce memory and I/O overhead.
+
+## Troubleshooting GPU/CPU Performance
+- For small environments, CPU may be faster due to lower overhead. GPU shines with large, batched workloads.
+- Data transfer between CPU and GPU is slow; keep as much computation as possible on the GPU.
+- Use `torch.cuda.synchronize()` and profilers to measure true GPU time.
+- If you see only the first/last frame in GIFs, check that all frames are the same size and type.
+- Printing/logging in tight loops can slow down training.
+
+## Data Types and Conversion
+- **State, actions, and rewards are torch tensors on the specified device.**
+- **Observations and info dicts are converted to numpy arrays (on CPU) before being returned to the user.**
+- **Rendering always uses CPU numpy arrays.**
+
+## Example: Extracting Local Observations
+```python
+obs, total_reward, terminated, truncated, info = env.step(action)
+print('Agent 0 local_obs:', info['local_obs'][0])  # e.g., [0. 1.] for ddl=2
+```
+
 ## Rendering System
 
 The environment provides comprehensive rendering capabilities:

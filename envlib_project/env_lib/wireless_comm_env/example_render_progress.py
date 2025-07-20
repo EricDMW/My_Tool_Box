@@ -1,7 +1,7 @@
 import os
 import time
 import numpy as np
-from wireless_comm_env import WirelessCommEnv
+# from wireless_comm_env import WirelessCommEnv
 import matplotlib.pyplot as plt
 from matplotlib import animation
 

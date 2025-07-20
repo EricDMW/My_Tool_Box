@@ -125,7 +125,7 @@ def run_both_modes():
         grid_y=4,
         steps=15,
         enable_realtime=True,
-        enable_gif=True,
+        enable_gif=True, 
         gif_path="wireless_comm_both_modes.gif",
         frame_delay=0.6
     )
