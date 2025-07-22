@@ -1,0 +1,13 @@
+prefix=/home/dongmingwang/project/My_Tool_Box/.conda
+exec_prefix=/home/dongmingwang/project/My_Tool_Box/.conda
+libdir=/home/dongmingwang/project/My_Tool_Box/.conda/lib
+sharedlibdir=/home/dongmingwang/project/My_Tool_Box/.conda/lib
+includedir=/home/dongmingwang/project/My_Tool_Box/.conda/include
+
+Name: zlib
+Description: zlib compression library
+Version: 1.2.13
+
+Requires:
+Libs: -L${libdir} -L${sharedlibdir} -lz
+Cflags: -I${includedir}

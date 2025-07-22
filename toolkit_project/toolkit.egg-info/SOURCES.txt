@@ -19,6 +19,11 @@ toolkit/neural_toolkit/networks/q_networks.py
 toolkit/neural_toolkit/networks/value_networks.py
 toolkit/neural_toolkit/utils/__init__.py
 toolkit/neural_toolkit/utils/network_utils.py
+toolkit/parakit/__init__.py
+toolkit/parakit/example_usage.py
+toolkit/parakit/test_parakit.py
+toolkit/parakit/test_save_paths.py
+toolkit/parakit/tune_para.py
 toolkit/plotkit/__init__.py
 toolkit/plotkit/__main__.py
 toolkit/plotkit/core.py

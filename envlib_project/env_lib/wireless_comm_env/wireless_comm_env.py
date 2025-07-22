@@ -133,8 +133,8 @@ class WirelessCommEnv(Env, EzPickle):
             agent_x = agent_id % self.grid_x
             agent_y = agent_id // self.grid_x
             nghbrs = []
-            # Only consider up, down, left, right
-            for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            # Only consider up, down, left, right, and diagonals
+            for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]:
                 nx, ny = agent_x + dx, agent_y + dy
                 if 0 <= nx < self.grid_x and 0 <= ny < self.grid_y:
                     neighbor_id = ny * self.grid_x + nx
