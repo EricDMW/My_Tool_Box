@@ -19,7 +19,7 @@ still emits it; it can be ignored).
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import gymnasium as gym
@@ -52,6 +52,10 @@ class EnvSpec:
     vector_entry_point:
         ``"module:Class"`` of the native batched implementation used by
         :func:`make_vec`, or ``None``.
+    limit_kwarg:
+        Name of the constructor argument that sets the episode length
+        (``max_steps``, ``max_iter``, ...). :func:`make` and :func:`make_vec`
+        translate ``max_episode_steps`` into it.
     disable_env_checker:
         Skip Gymnasium's single-agent passive checker (for environments that
         return per-agent reward arrays).
@@ -66,6 +70,7 @@ class EnvSpec:
     action_type: str = "continuous"
     requires: str | None = None
     vector_entry_point: str | None = None
+    limit_kwarg: str = "max_steps"
     disable_env_checker: bool = False
 
 
@@ -166,6 +171,7 @@ ENV_SPECS: list[EnvSpec] = [
         {},
         "message passing on a line",
         family="linemsg",
+        limit_kwarg="max_iter",
         **_DISCRETE,
     ),
     _Spec(
@@ -174,6 +180,7 @@ ENV_SPECS: list[EnvSpec] = [
         {},
         "6x6 wireless access grid",
         family="wireless_comm",
+        limit_kwarg="max_iter",
         **_DISCRETE,
     ),
     _Spec(
@@ -182,6 +189,7 @@ ENV_SPECS: list[EnvSpec] = [
         {"grid_x": 4, "grid_y": 4},
         "4x4 wireless access grid",
         family="wireless_comm",
+        limit_kwarg="max_iter",
         **_DISCRETE,
     ),
     _Spec(
@@ -191,6 +199,7 @@ ENV_SPECS: list[EnvSpec] = [
         "cooperative physics game (requires pygame, pymunk)",
         family="pistonball",
         action_type="continuous|discrete",
+        limit_kwarg="max_cycles",
         requires="pistonball",
     ),
     # Networked control with continuous states and actions.
@@ -235,6 +244,7 @@ ENV_SPECS: list[EnvSpec] = [
         {},
         "multi-robot target tracking",
         family="ajlatt",
+        limit_kwarg="max_episode_steps",
         disable_env_checker=True,
     ),
 ]
@@ -267,6 +277,34 @@ def get_spec(env_id: str) -> EnvSpec:
     raise KeyError(f"unknown env_lib environment {env_id!r}; see env_lib.list_envs()")
 
 
+def _resolve(env_id: str, kwargs: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+    """Route ``max_episode_steps`` to the environment's own limit argument.
+
+    Returns the id (or a Gymnasium spec carrying the limit) and the remaining
+    keyword arguments. Without this, ``gymnasium.make`` would consume
+    ``max_episode_steps`` and add a ``TimeLimit`` wrapper on top of the
+    environment's own limit.
+    """
+    if "max_episode_steps" not in kwargs:
+        return env_id, kwargs
+    kwargs = dict(kwargs)
+    limit = kwargs.pop("max_episode_steps")
+    if limit is None:
+        return env_id, kwargs
+    try:
+        target = get_spec(env_id).limit_kwarg
+    except KeyError:  # not an env_lib id: let Gymnasium handle it
+        kwargs["max_episode_steps"] = limit
+        return env_id, kwargs
+    if target in kwargs and kwargs[target] != limit:
+        raise ValueError(
+            f"max_episode_steps={limit!r} conflicts with {target}={kwargs[target]!r}; pass only one"
+        )
+    kwargs.pop(target, None)
+    gym_spec = gym.spec(env_id)
+    return replace(gym_spec, kwargs={**gym_spec.kwargs, target: limit}), kwargs
+
+
 def make(env_id: str, **kwargs: Any) -> gym.Env:
     """Create a registered environment.
 
@@ -279,14 +317,17 @@ def make(env_id: str, **kwargs: Any) -> gym.Env:
         One of :func:`list_envs`.
     **kwargs:
         Forwarded to the environment constructor (and to ``gymnasium.make``
-        for options such as ``render_mode``).
+        for options such as ``render_mode``). ``max_episode_steps`` sets the
+        environment's own episode limit (``max_steps``, ``max_iter``, ...; see
+        :attr:`EnvSpec.limit_kwarg`) instead of adding a ``TimeLimit`` wrapper.
     """
     register_envs()
+    target, kwargs = _resolve(env_id, kwargs)
     with warnings.catch_warnings():
         # Version suffixes of env_lib ids denote configurations, not revisions;
         # Gymnasium's "out of date" notice for -v0 ids is therefore misleading.
         warnings.filterwarnings("ignore", message=r".*is out of date", category=DeprecationWarning)
-        return gym.make(env_id, **kwargs)
+        return gym.make(target, **kwargs)
 
 
 def make_vec(
@@ -317,7 +358,8 @@ def make_vec(
     wrappers:
         Wrappers applied to every single environment (Sync/Async only).
     **kwargs:
-        Environment constructor arguments.
+        Environment constructor arguments (``max_episode_steps`` as in
+        :func:`make`).
 
     Examples
     --------
@@ -327,10 +369,11 @@ def make_vec(
     >>> obs.shape                                                   # (256, 8, 16)
     """
     register_envs()
+    target, kwargs = _resolve(env_id, kwargs)
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message=r".*is out of date", category=DeprecationWarning)
         return gym.make_vec(
-            env_id,
+            target,
             num_envs=num_envs,
             vectorization_mode=vectorization_mode,
             vector_kwargs=vector_kwargs,

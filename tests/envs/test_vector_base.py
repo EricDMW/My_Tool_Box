@@ -81,7 +81,8 @@ def test_same_step_autoreset():
     assert obs[:, 0].tolist() == [0.0, 1.0]
     assert info["_final_obs"].tolist() == [True, False]
     assert info["final_obs"][0].tolist() == [2.0]
-    assert info["final_info"][0]["count"] == 2.0
+    assert info["final_info"]["count"][0] == 2.0
+    assert info["final_info"]["_count"].tolist() == [True, False]
 
 
 def test_disabled_autoreset_and_partial_reset():

@@ -220,13 +220,19 @@ class BatchedVectorEnv(VectorEnv):
             observations = self._observe()
         elif self.autoreset_mode == "same_step":
             if done.any():
+                # Same layout as gymnasium.vector.SyncVectorEnv: "final_obs" is an
+                # object array, "final_info" a batched info dict masked by `done`.
                 final_obs = self._observe()
                 infos = self._with_masks(infos)
                 final = np.full(self.num_envs, None, dtype=object)
-                final_info = np.full(self.num_envs, None, dtype=object)
                 for index in np.flatnonzero(done):
                     final[index] = final_obs[index].copy()
-                    final_info[index] = _info_at(infos, index)
+                final_info: dict[str, Any] = {}
+                for key, value in infos.items():
+                    if key.startswith("_"):
+                        continue
+                    final_info[key] = value.copy() if isinstance(value, np.ndarray) else value
+                    final_info[f"_{key}"] = infos[f"_{key}"] & done
                 self._reset_envs(done, None)
                 infos["final_obs"], infos["_final_obs"] = final, done.copy()
                 infos["final_info"], infos["_final_info"] = final_info, done.copy()
@@ -273,16 +279,3 @@ class BatchedVectorEnv(VectorEnv):
             if f"_{key}" not in infos:
                 out[f"_{key}"] = np.ones(self.num_envs, dtype=bool)
         return out
-
-
-def _info_at(infos: dict[str, Any], index: int) -> dict[str, Any]:
-    """Info dictionary of one copy, extracted from batched infos."""
-    single: dict[str, Any] = {}
-    for key, value in infos.items():
-        if key.startswith("_"):
-            continue
-        mask = infos.get(f"_{key}")
-        if mask is not None and not mask[index]:
-            continue
-        single[key] = value[index] if isinstance(value, np.ndarray) else value
-    return single

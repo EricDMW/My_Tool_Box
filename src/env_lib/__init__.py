@@ -45,7 +45,6 @@ _LAZY_ATTRIBUTES: dict[str, tuple[str, str]] = {
     "KuramotoOscillatorVectorEnv": ("env_lib.kos_env.vector", "KuramotoOscillatorVectorEnv"),
     # Convenience API.
     "EnvInfo": ("env_lib.catalog", "EnvInfo"),
-    "catalog": ("env_lib.catalog", "catalog"),
     "describe": ("env_lib.catalog", "describe"),
     "baseline_policy": ("env_lib.baselines", "baseline_policy"),
     "evaluate": ("env_lib.utils.evaluation", "evaluate"),

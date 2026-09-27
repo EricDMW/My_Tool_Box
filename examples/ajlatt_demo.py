@@ -1,9 +1,11 @@
-"""AJLATT demo: cooperative target tracking with a simple heuristic team.
+"""AJLATT demo: cooperative target tracking with the packaged baseline.
 
-Each robot steers towards a slot on a circle around its current belief of the
-target position (slots are spread evenly around the target, so the team views
-it from several directions). The script compares this heuristic with random
-actions, prints per-episode metrics and can record a GIF of the heuristic.
+The baseline (``env_lib.baseline_policy``, implemented by
+``env_lib.baselines.ajlatt_encircle``) drives each robot towards a slot on a
+circle around its current belief of the target position; the slots are spread
+evenly, so the team views the target from several directions. It is computed
+from the observation alone. The script compares it with random actions, prints
+per-episode metrics and can record a GIF of the baseline.
 
 Run::
 
@@ -19,29 +21,8 @@ from pathlib import Path
 
 import numpy as np
 
-from env_lib import AJLATTEnv
+from env_lib import AJLATTEnv, baseline_policy
 from env_lib.utils import record_episode, set_theme
-
-
-def encircle_policy(env: AJLATTEnv, radius: float = 1.8, gain: float = 1.2) -> np.ndarray:
-    """Drive robot ``i`` towards the ``i``-th slot of a circle around its target belief."""
-    actions = np.zeros((env.num_robots, 2))
-    v_max = env.config.max_linear_velocity
-    w_max = env.config.max_angular_velocity
-    for i in range(env.num_robots):
-        x, y, theta = env.robot_est[i].state
-        target = env.target_est[i][0].state[:2]
-        angle = 2 * np.pi * i / env.num_robots
-        goal = target + radius * np.array([np.cos(angle), np.sin(angle)])
-        delta = goal - np.array([x, y])
-        heading = np.arctan2(delta[1], delta[0])
-        # Face the target when close to the slot, otherwise face the slot.
-        if np.linalg.norm(delta) < 0.3:
-            heading = np.arctan2(target[1] - y, target[0] - x)
-        error = (heading - theta + np.pi) % (2 * np.pi) - np.pi
-        speed = min(v_max, 0.5 * np.linalg.norm(delta)) * max(0.0, np.cos(error))
-        actions[i] = (speed, np.clip(gain * error, -w_max, w_max))
-    return actions
 
 
 def run_episode(env: AJLATTEnv, policy: str, seed: int) -> dict:
@@ -49,9 +30,10 @@ def run_episode(env: AJLATTEnv, policy: str, seed: int) -> dict:
     env.action_space.seed(seed)
     total = np.zeros(env.num_robots)
     collisions = 0
+    controller = baseline_policy(env)
     while True:
         if policy == "heuristic":
-            action = encircle_policy(env)
+            action = controller(obs)
         else:
             action = env.action_space.sample()
         obs, reward, terminated, truncated, info = env.step(action)
@@ -109,9 +91,7 @@ def main() -> None:
             max_episode_steps=args.steps,
             render_mode="rgb_array",
         )
-        frames = record_episode(
-            video_env, lambda _obs: encircle_policy(video_env), path, seed=args.seed
-        )
+        frames = record_episode(video_env, baseline_policy(video_env), path, seed=args.seed)
         print(f"saved {len(frames)} frames to {path}")
         video_env.close()
     elif args.render_mode == "human":
@@ -121,9 +101,10 @@ def main() -> None:
             max_episode_steps=args.steps,
             render_mode="human",
         )
-        human_env.reset(seed=args.seed)
+        obs, _ = human_env.reset(seed=args.seed)
+        controller = baseline_policy(human_env)
         for _ in range(args.steps):
-            human_env.step(encircle_policy(human_env))
+            obs, *_ = human_env.step(controller(obs))
         human_env.close()
 
 
