@@ -21,7 +21,10 @@ from typing import Any
 
 import numpy as np
 
-__all__ = ["DEFAULT_ROBOT_POSES", "DEFAULT_TARGET_POSES", "AJLATTConfig"]
+__all__ = ["DEFAULT_ROBOT_POSES", "DEFAULT_TARGET_POSES", "REWARD_MODES", "AJLATTConfig"]
+
+#: Values of :attr:`AJLATTConfig.reward_mode`.
+REWARD_MODES: tuple[str, ...] = ("cost", "bounded")
 
 DEFAULT_ROBOT_POSES: tuple[tuple[float, float, float], ...] = (
     (7.5, 12.5, 0.0),
@@ -134,13 +137,34 @@ class AJLATTConfig:
 
     Rewards
     -------
+    Robot ``i`` has the tracking cost
+    ``c_i = target_cov_weight * tr(P_target,i) + robot_cov_weight * tr(P_robot,i)``
+    and the penalty ``p_i`` (sum of the boundary, obstacle and mutual-collision
+    penalties it incurs in the step).
+
     target_cov_weight, robot_cov_weight: Weights of ``trace`` of the target and
         self-localisation covariances.
     boundary_penalty: Penalty when the estimated pose leaves the map (0.1 m margin).
     obstacle_penalty, obstacle_collision_distance: Penalty (and per-agent
         termination) when an obstacle is closer than the distance.
     mutual_collision_penalty, mutual_collision_distance: Robot-robot proximity penalty.
-    terminate_on_collision: Report obstacle collisions in ``terminated``.
+    terminate_on_collision: End a robot's episode (``terminated[i]``) when it
+        collides with an obstacle (default). With ``False`` a collision is only
+        penalised and the episode continues.
+    reward_mode: How the per-step reward is built:
+        ``"cost"`` (default, the original reward) pays ``-c_i - p_i``;
+        ``"bounded"`` pays ``exp(-c_i / cost_scale) - p_i / cost_scale``, at
+        most 1 and positive while tracking well, so that a collision that ends
+        the episode forfeits the rewards of the remaining steps. With
+        ``"cost"`` and ``terminate_on_collision`` every reward is negative, and
+        a robot (or, when the first collision ends the team's episode, the
+        team) can raise its return by colliding early.
+    cost_scale: Scale of the ``"bounded"`` reward (default 20).
+    collision_termination_penalty: Extra penalty on the step a collision ends a
+        robot's episode (any mode; default 0).
+    team_reward_weight: Mixes individual and team rewards,
+        ``(1 - w) r_i + w mean_j r_j`` (0: individual, the default; 1: every robot
+        receives the team mean). The team sum is unchanged.
     obstacle_sensing_margin: Robots closer than this to the map border report a
         zero obstacle reading (original behaviour).
 
@@ -203,6 +227,10 @@ class AJLATTConfig:
     mutual_collision_penalty: float = 0.5
     mutual_collision_distance: float = 0.4
     terminate_on_collision: bool = True
+    reward_mode: str = "cost"
+    cost_scale: float = 20.0
+    collision_termination_penalty: float = 0.0
+    team_reward_weight: float = 0.0
     obstacle_sensing_margin: float = 1.0
 
     # Misc
@@ -241,6 +269,14 @@ class AJLATTConfig:
             raise ValueError("commu_r_max must be >= 0")
         if self.ci_solver not in ("newton", "slsqp"):
             raise ValueError("ci_solver must be 'newton' or 'slsqp'")
+        if self.reward_mode not in REWARD_MODES:
+            raise ValueError(f"reward_mode must be one of {REWARD_MODES}, got {self.reward_mode!r}")
+        if not self.cost_scale > 0:
+            raise ValueError("cost_scale must be positive")
+        if not self.collision_termination_penalty >= 0:
+            raise ValueError("collision_termination_penalty must be >= 0")
+        if not 0 <= self.team_reward_weight <= 1:
+            raise ValueError("team_reward_weight must be in [0, 1]")
         for name in (
             "sigma_p",
             "sigma_r",
@@ -338,7 +374,12 @@ class AJLATTConfig:
                 raise TypeError(f"Unknown AJLATT parameter {key!r}")
             else:
                 warnings.warn(f"Ignoring unknown AJLATT parameter {key!r}", stacklevel=_stacklevel)
-        for key in ("range_noise_proportional", "use_update", "process_noise_fixed"):
+        for key in (
+            "range_noise_proportional",
+            "use_update",
+            "process_noise_fixed",
+            "terminate_on_collision",
+        ):
             if key in values:
                 values[key] = bool(values[key])
         if fix_seed is not None:

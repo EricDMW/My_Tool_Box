@@ -517,20 +517,25 @@ learning curve of \code{TrainingLog.curve} before increasing
 \code{warmup\_steps} warns that it takes no gradient step at all.
 
 \paragraph{The agent learns to end episodes early (Kuramoto, AJLATT).} Two
-families reward a behaviour other than the intended one if a learner maximises
-the return literally. The Kuramoto ids other than the \code{FreqSync} ones pay
-the order parameter $r \in [0, 1]$ at every step and end the episode with
+families reward a behaviour other than the intended one, in their default
+reward settings, if a learner maximises the return literally. The Kuramoto ids
+other than the \code{FreqSync} ones pay the order parameter $r \in [0, 1]$ at
+every step (\code{reward\_mode="dense"}) and end the episode with
 \code{sync\_bonus} (10) once $r$ exceeds \code{sync\_threshold} (0.99), so an
 agent that stays just below the threshold for the whole episode (up to
 \code{max\_steps}, 1000) earns far more than one that synchronises. AJLATT
-pays negative rewards and ends the episode at the first collision, so an
-agent can avoid further penalties by colliding. The registered ids keep this
-design for compatibility; \code{env-lib describe} prints it as a caution. For
-training, raise \code{sync\_bonus} or use
-\code{reward\_type="frequency\_synchronization"} and report
-\code{info["order\_parameter"]}, and create AJLATT with
-\code{terminate\_on\_collision=False}, which keeps the collision penalties;
-evaluate with the metric you care about rather than the return alone.
+pays negative rewards (\code{reward\_mode="cost"}) and ends the episode at the
+first collision, so an agent can avoid further penalties by colliding. The
+registered ids keep these defaults for compatibility; \code{env-lib describe}
+prints a caution. For training, choose another reward mode: for Kuramoto
+\code{reward\_mode="penalty"} (synchronising sooner earns more),
+\code{"progress"} or \code{"terminal"}, or \code{terminate\_on\_sync=False}
+(Section~\ref{sec:kuramoto-reward}); for AJLATT \code{reward\_mode="bounded"}
+or \code{terminate\_on\_collision=False}, which keeps the collision penalties
+(Section~\ref{sec:ajlatt-reward}). With \pkg{marl\_algorithms}, pass them as
+\code{env\_kwargs}. Evaluate with the metric you care about
+(\code{info["synchronized"]}, \code{info["tracking\_cost"]}) rather than the
+return alone.
 
 \paragraph{\code{ValueError} when evaluating or loading an algorithm.}
 \code{algo.evaluate} and \code{marl-train evaluate} check that the

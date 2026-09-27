@@ -514,21 +514,31 @@ def _wrap(label: str, text: str, width: int = 88) -> list[str]:
 
 
 def _caution(spec: EnvSpec) -> str | None:
-    """Reward-design pitfall of a configuration that learning code should know about."""
+    """Reward-design pitfall of a registered configuration, and the settings that avoid it."""
+    kwargs = spec.kwargs
     if spec.family == "kuramoto":
-        if spec.kwargs.get("reward_type", "order_parameter") == "frequency_synchronization":
+        if (
+            kwargs.get("reward_type", "order_parameter") == "frequency_synchronization"
+            or kwargs.get("reward_mode", "dense") != "dense"
+            or not kwargs.get("terminate_on_sync", True)
+        ):
             return None
         return (
-            "the reward (order parameter r in [0, 1]) is paid every step and the episode "
-            "ends once r > sync_threshold (with sync_bonus), so staying just below the "
-            "threshold can earn more than synchronising; to train, raise sync_bonus or use "
-            "reward_type='frequency_synchronization', and report info['order_parameter']"
+            "reward_mode='dense' pays the order parameter r at every step and the episode "
+            "ends once r > sync_threshold, so staying just below the threshold can earn more "
+            "than synchronising; to train, use reward_mode='penalty' (synchronising sooner "
+            "earns more), 'progress' or 'terminal', or terminate_on_sync=False"
         )
     if spec.family == "ajlatt":
+        if kwargs.get("reward_mode", "cost") != "cost" or not kwargs.get(
+            "terminate_on_collision", True
+        ):
+            return None
         return (
-            "rewards are negative and a collision ends the episode "
+            "reward_mode='cost' pays only negative rewards and a collision ends the episode "
             "(terminate_on_collision=True), so colliding early can earn more than tracking; "
-            "to train, pass terminate_on_collision=False (collisions are still penalised)"
+            "to train, use reward_mode='bounded' or terminate_on_collision=False "
+            "(collisions are still penalised)"
         )
     return None
 

@@ -4,9 +4,12 @@ For every id of ``env_lib.list_envs()`` (default configuration) the script
 creates ``env_lib.make_vec(id, EPISODES)`` (native batch where available,
 ``SyncVectorEnv`` otherwise), resets it with seed 0 and evaluates uniformly
 random actions and ``env_lib.baseline_policy`` on the first episode of every
-copy, so both policies meet the same initial conditions. AJLATT is also run
-with ``terminate_on_collision=False``: its default episodes end on the first
-collision, which rewards random robots for colliding early.
+copy, so both policies meet the same initial conditions. Two default reward
+designs reward ending episodes early: the Kuramoto order-parameter ids pay a
+positive reward per step until synchronisation ends the episode, and AJLATT
+episodes end on the first collision with only negative rewards. The script
+therefore also runs ``KuramotoOscillator-v0`` with ``reward_mode="penalty"``
+and AJLATT without collision termination and with ``reward_mode="bounded"``.
 
 Run::
 
@@ -28,7 +31,11 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import env_lib
 from env_lib.utils.evaluation import evaluate
 
-EXTRA_CASES = [("AJLATT-v0", {"terminate_on_collision": False})]
+EXTRA_CASES = [
+    ("KuramotoOscillator-v0", {"reward_mode": "penalty"}),
+    ("AJLATT-v0", {"terminate_on_collision": False}),
+    ("AJLATT-v0", {"reward_mode": "bounded"}),
+]
 
 
 def run_case(env_id: str, kwargs: dict, episodes: int, seed: int) -> dict:

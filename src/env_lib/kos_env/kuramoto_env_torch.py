@@ -27,7 +27,13 @@ except ImportError as exc:  # pragma: no cover - depends on the installation
     ) from exc
 
 from env_lib.errors import ResetNeededError
-from env_lib.kos_env._common import KuramotoEnvBase, check_int, combine_reward, wrap_phases
+from env_lib.kos_env._common import (
+    KuramotoEnvBase,
+    check_int,
+    combine_reward,
+    shape_reward,
+    wrap_phases,
+)
 
 __all__ = ["KuramotoOscillatorEnvTorch"]
 
@@ -78,9 +84,14 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
     * The returned observation, scalar reward and ``terminated`` flag refer to
       system 0; ``truncated`` is set when ``max_steps`` is reached.
     * ``info["agent_rewards"]`` holds the per-system rewards (shape ``(n_agents,)``,
-      including the synchronisation bonus of each system); ``order_parameter``,
-      ``phase_coherence``, ``phases``, ``natural_frequencies``, ``dphases_dt`` and
+      following ``reward_mode``, including the synchronisation bonus of each
+      system); ``order_parameter``, ``phase_coherence``, ``synchronized``,
+      ``phases``, ``natural_frequencies``, ``dphases_dt`` and
       ``coupling_matrix`` are per-system NumPy arrays.
+    * Only system 0 ends the episode. The other systems are rewarded with the
+      same per-step rule: with ``terminate_on_sync`` a synchronised system
+      earns the bonus (and, in ``"terminal"`` mode, its final reward) on every
+      step it is synchronised, as if its own episode ended there.
 
     Parameters
     ----------
@@ -90,8 +101,9 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
         ``integration_method``, ``reward_type``, ``noise_std``, ``topology``,
         ``adj_matrix``, ``target_frequency``, ``coupling_mode``,
         ``constant_coupling_matrix``, ``coupling_strength``, ``normalize_coupling``,
-        ``topology_seed``, ``sync_threshold`` and ``sync_bonus`` have the meaning and
-        defaults documented in :class:`~env_lib.kos_env.kuramoto_env.KuramotoOscillatorEnv`.
+        ``topology_seed``, ``sync_threshold``, ``sync_bonus``, ``reward_mode``,
+        ``terminate_on_sync`` and ``control_cost`` have the meaning and defaults
+        documented in :class:`~env_lib.kos_env.kuramoto_env.KuramotoOscillatorEnv`.
         ``adj_matrix`` and ``constant_coupling_matrix`` may be NumPy arrays or tensors.
     n_agents:
         Number of independent systems simulated in parallel.
@@ -141,6 +153,9 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
         sync_threshold: float = 0.99,
         sync_bonus: float = 10.0,
         render_agent: int = 0,
+        reward_mode: str = "dense",
+        terminate_on_sync: bool = True,
+        control_cost: float = 0.0,
     ):
         super().__init__()
         self._init_common(
@@ -165,6 +180,9 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
             topology_seed=topology_seed,
             sync_threshold=sync_threshold,
             sync_bonus=sync_bonus,
+            reward_mode=reward_mode,
+            terminate_on_sync=terminate_on_sync,
+            control_cost=control_cost,
         )
         self.device = _resolve_device(device)
         self.render_agent = self._check_render_agent(render_agent)
@@ -204,6 +222,7 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
         self._current_coupling: torch.Tensor | None = None
         self._last_dphases_dt: torch.Tensor | None = None
         self._last_agent_rewards: np.ndarray | None = None
+        self._previous_signal: torch.Tensor | None = None  # reward_mode="progress"
 
     def _coupling_buffer(self) -> torch.Tensor:
         """Persistent ``(n_agents, N * N)`` buffer for the dynamic coupling matrices.
@@ -314,6 +333,28 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
             return rewards
         return torch.where(r > self.sync_threshold, rewards + self.sync_bonus, rewards)
 
+    def _step_rewards(
+        self, signal: torch.Tensor, r: torch.Tensor, control: torch.Tensor, truncated: bool
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Per-system rewards of a step following ``reward_mode``, and the sync mask."""
+        synchronized = r > self.sync_threshold
+        if self.reward_type == "frequency_synchronization":
+            bonus = torch.zeros_like(signal)
+        else:
+            bonus = synchronized * self.sync_bonus
+        final = (synchronized & self.terminate_on_sync) | truncated
+        rewards = shape_reward(
+            self.reward_mode,
+            signal,
+            bonus=bonus,
+            previous=self._previous_signal,
+            final=final,
+            maximum=self._signal_max,
+        )
+        if self.control_cost:
+            rewards = rewards - self.control_cost * torch.mean(control * control, dim=-1)
+        return rewards, synchronized
+
     # ------------------------------------------------------------------ gym API
     @torch.no_grad()
     def reset(
@@ -383,6 +424,9 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
         self.step_count = 0
         self._last_dphases_dt = None
         self._last_agent_rewards = None
+        self._previous_signal = None
+        if self.reward_mode == "progress":
+            self._previous_signal = self._base_rewards(phases, None)[0]
         self.phase_history = [_to_numpy(phases)]
         self._reset_renderer()
 
@@ -415,8 +459,9 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
         -------
         observation, reward, terminated, truncated, info
             Observation, reward and ``terminated`` (order parameter above
-            ``sync_threshold``) of system 0; ``truncated`` once ``max_steps`` steps
-            have been taken; per-system arrays in ``info``.
+            ``sync_threshold``, with ``terminate_on_sync``) of system 0;
+            ``truncated`` once ``max_steps`` steps have been taken; per-system
+            arrays in ``info``.
         """
         if self.phases is None:
             raise ResetNeededError("Call reset() before step().")
@@ -451,24 +496,29 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
         self._last_dphases_dt = dphases_dt
         self.step_count += 1
 
-        base, r, coherence = self._base_rewards(self.phases, dphases_dt)
+        signal, r, coherence = self._base_rewards(self.phases, dphases_dt)
+        truncated = bool(self.step_count >= self.max_steps)
+        rewards, synchronized = self._step_rewards(signal, r, control_inputs, truncated)
+        if self.reward_mode == "progress":
+            self._previous_signal = signal
         # Two device-to-host transfers for all per-system and per-oscillator info.
-        r_np, coherence_np, rewards_np = _to_numpy(
-            torch.stack((r, coherence, self._apply_bonus(base, r)))
+        r_np, coherence_np, rewards_np, synchronized_np = _to_numpy(
+            torch.stack((r, coherence, rewards, synchronized.to(r.dtype)))
         )
+        synchronized_np = synchronized_np.astype(bool)
         phases_np, frequencies_np, dphases_np = _to_numpy(
             torch.stack((self.phases, self.natural_frequencies, dphases_dt))
         )
         agent_rewards = rewards_np.astype(np.float64)
         reward = float(agent_rewards[0])
-        terminated = bool(r_np[0] > self.sync_threshold)
-        truncated = bool(self.step_count >= self.max_steps)
+        terminated = bool(synchronized_np[0]) and self.terminate_on_sync
         self._last_agent_rewards = agent_rewards
 
         self._append_history(phases_np.copy())
         info = {
             "order_parameter": r_np,
             "phase_coherence": coherence_np,
+            "synchronized": synchronized_np,
             "step_count": self.step_count,
             "natural_frequencies": frequencies_np,
             "phases": phases_np,
@@ -506,7 +556,11 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
         dphases_dt: torch.Tensor | None = None,
         include_bonus: bool = False,
     ) -> torch.Tensor:
-        """Per-system rewards of the current state, shape ``(n_agents,)``.
+        """Per-system reward signal of the current state, shape ``(n_agents,)``.
+
+        This is the ``reward_type`` signal of the current state; with
+        ``include_bonus=True`` it equals ``info["agent_rewards"]`` of the default
+        ``"dense"`` mode without ``control_cost``.
 
         Parameters
         ----------

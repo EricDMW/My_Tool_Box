@@ -27,6 +27,7 @@ if TYPE_CHECKING:  # pragma: no cover
 __all__ = [
     "COUPLING_MODES",
     "INTEGRATION_METHODS",
+    "REWARD_MODES",
     "REWARD_TYPES",
     "TOPOLOGIES",
     "KuramotoEnvBase",
@@ -35,6 +36,8 @@ __all__ = [
     "mean_field",
     "order_parameter",
     "phase_coherence",
+    "shape_reward",
+    "signal_max",
     "topology_edges",
     "wrap_phases",
 ]
@@ -47,6 +50,8 @@ REWARD_TYPES: tuple[str, ...] = (
     "combined",
     "frequency_synchronization",
 )
+#: How the reward signal is paid over an episode (see :func:`shape_reward`).
+REWARD_MODES: tuple[str, ...] = ("dense", "penalty", "progress", "terminal", "sparse")
 COUPLING_MODES: tuple[str, ...] = ("dynamic", "constant")
 RESET_OPTION_KEYS: tuple[str, ...] = ("phases", "natural_frequencies", "coupling_strengths")
 
@@ -244,6 +249,66 @@ def combine_reward(
     return -frequency_error
 
 
+def signal_max(reward_type: str) -> float:
+    """Largest value of the reward signal of ``reward_type`` (perfect synchronisation)."""
+    return {
+        "order_parameter": 1.0,
+        "phase_coherence": 1.0,
+        "combined": 2.0,
+        "frequency_synchronization": 0.0,
+    }[reward_type]
+
+
+def shape_reward(
+    reward_mode: str,
+    signal: Any,
+    *,
+    bonus: Any,
+    previous: Any = None,
+    final: Any = None,
+    maximum: float = 1.0,
+) -> Any:
+    """Reward of one step from the reward signal; backend agnostic.
+
+    Works element-wise for Python floats, NumPy arrays and torch tensors.
+
+    Parameters
+    ----------
+    reward_mode:
+        One of :data:`REWARD_MODES`:
+
+        * ``"dense"``: ``signal + bonus`` at every step (the original reward);
+        * ``"penalty"``: ``signal - maximum + bonus``, never positive before
+          the bonus, so that reaching synchronisation sooner earns more;
+        * ``"progress"``: ``signal - previous + bonus``, the change of the
+          signal (potential-based shaping; the undiscounted return is
+          ``signal_T - signal_0`` plus the bonuses);
+        * ``"terminal"``: ``signal + bonus`` on the last step of the episode
+          (``final``), zero before;
+        * ``"sparse"``: ``bonus`` alone.
+    signal:
+        Reward signal of the new state (:func:`combine_reward`).
+    bonus:
+        Synchronisation bonus of the step (``sync_bonus`` where it is paid,
+        else zero).
+    previous:
+        Signal of the previous state (``"progress"``).
+    final:
+        Whether the step ends the episode (``"terminal"``).
+    maximum:
+        :func:`signal_max` of the reward type (``"penalty"``).
+    """
+    if reward_mode == "dense":
+        return signal + bonus
+    if reward_mode == "penalty":
+        return (signal - maximum) + bonus
+    if reward_mode == "progress":
+        return (signal - previous) + bonus
+    if reward_mode == "terminal":
+        return (signal + bonus) * final + 0.0  # + 0.0 turns -0.0 into 0.0
+    return bonus + 0.0 * signal  # sparse (keeps the dtype and shape of the signal)
+
+
 # ---------------------------------------------------------------------------
 # Shared environment logic
 # ---------------------------------------------------------------------------
@@ -286,6 +351,9 @@ class KuramotoEnvBase(gym.Env):
         topology_seed: int,
         sync_threshold: float,
         sync_bonus: float,
+        reward_mode: str = "dense",
+        terminate_on_sync: bool = True,
+        control_cost: float = 0.0,
     ) -> None:
         validate_render_mode(render_mode, self.metadata["render_modes"])
         self.render_mode = render_mode
@@ -314,6 +382,19 @@ class KuramotoEnvBase(gym.Env):
             "sync_threshold", sync_threshold, low=0.0, strict=True, allow_inf=True
         )
         self.sync_bonus = check_real("sync_bonus", sync_bonus)
+        self.reward_mode = check_choice("reward_mode", reward_mode, REWARD_MODES)
+        if not isinstance(terminate_on_sync, (bool, np.bool_)):
+            raise TypeError(
+                f"terminate_on_sync must be a bool, got {type(terminate_on_sync).__name__}"
+            )
+        self.terminate_on_sync = bool(terminate_on_sync)
+        self.control_cost = check_real("control_cost", control_cost, low=0.0)
+        if self.reward_mode == "sparse" and self.reward_type == "frequency_synchronization":
+            raise ValueError(
+                "reward_mode='sparse' pays only sync_bonus, which the "
+                "'frequency_synchronization' reward does not use; choose another reward_mode"
+            )
+        self._signal_max = signal_max(self.reward_type)
         # Kept verbatim for backward compatibility (the validated copies live below).
         self.adj_matrix = adj_matrix
         self.constant_coupling_matrix = constant_coupling_matrix

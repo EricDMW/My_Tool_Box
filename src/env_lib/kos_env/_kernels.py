@@ -18,7 +18,13 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from env_lib.kos_env._common import combine_reward, order_parameter, phase_coherence, wrap_phases
+from env_lib.kos_env._common import (
+    combine_reward,
+    order_parameter,
+    phase_coherence,
+    shape_reward,
+    wrap_phases,
+)
 
 if TYPE_CHECKING:  # pragma: no cover
     from env_lib.kos_env._common import KuramotoEnvBase
@@ -50,6 +56,10 @@ class KuramotoKernel:
         self.target_frequency = env.target_frequency
         self.sync_threshold = env.sync_threshold
         self.sync_bonus = env.sync_bonus
+        self.reward_mode = env.reward_mode
+        self.terminate_on_sync = env.terminate_on_sync
+        self.control_cost = env.control_cost
+        self.signal_max = env._signal_max
         self.noise_std = env.noise_std
         self.natural_freq_range = env.natural_freq_range
         self.coupling_range = env.coupling_range
@@ -146,33 +156,64 @@ class KuramotoKernel:
         return wrap_phases(phases)
 
     # ------------------------------------------------------------------ reward
-    def rewards(
+    def signal(
         self, phases: np.ndarray, dphases_dt: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Rewards and synchronisation measures of the new state.
-
-        Returns
-        -------
-        tuple
-            ``(rewards, order_parameter, coherence, terminated)``, each of the
-            leading shape;
-            rewards include ``sync_bonus`` where the copy synchronised (not for
-            ``"frequency_synchronization"``).
-        """
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Reward signal (``reward_type``), order parameter and coherence of a state."""
         r = order_parameter(phases)
         coherence = phase_coherence(phases)
         if self.frequency_reward:
             frequency_error = np.mean(np.abs(dphases_dt - self.target_frequency), axis=-1)
         else:
             frequency_error = 0.0
-        rewards = combine_reward(self.reward_type, r, coherence, frequency_error)
-        terminated = r > self.sync_threshold
-        if not self.frequency_reward:
-            if np.ndim(rewards) == 0:  # one system
-                rewards = rewards + self.sync_bonus if terminated else rewards
-            else:
-                rewards = np.where(terminated, rewards + self.sync_bonus, rewards)
-        return rewards, r, coherence, terminated
+        return combine_reward(self.reward_type, r, coherence, frequency_error), r, coherence
+
+    def rewards(
+        self,
+        phases: np.ndarray,
+        dphases_dt: np.ndarray,
+        *,
+        control: np.ndarray,
+        previous: np.ndarray | None,
+        truncated: np.ndarray | bool,
+    ) -> tuple[np.ndarray, ...]:
+        """Rewards, termination and synchronisation measures of the new state.
+
+        Parameters
+        ----------
+        phases, dphases_dt:
+            New phases and the phase velocities at the start of the step.
+        control:
+            Control inputs of the step (for ``control_cost``).
+        previous:
+            Reward signal of the previous state (``reward_mode="progress"``).
+        truncated:
+            Whether the step reaches the episode limit (``"terminal"``).
+
+        Returns
+        -------
+        tuple
+            ``(rewards, signal, order_parameter, coherence, synchronized,
+            terminated)``, each of the leading shape. ``synchronized`` is
+            ``r > sync_threshold``; ``terminated`` is ``synchronized`` when
+            ``terminate_on_sync``. ``sync_bonus`` is paid on synchronised steps
+            (never for ``"frequency_synchronization"``).
+        """
+        signal, r, coherence = self.signal(phases, dphases_dt)
+        synchronized = r > self.sync_threshold
+        terminated = synchronized & self.terminate_on_sync
+        bonus = 0.0 if self.frequency_reward else synchronized * self.sync_bonus
+        rewards = shape_reward(
+            self.reward_mode,
+            signal,
+            bonus=bonus,
+            previous=previous,
+            final=terminated | truncated,
+            maximum=self.signal_max,
+        )
+        if self.control_cost:
+            rewards = rewards - self.control_cost * np.mean(control * control, axis=-1)
+        return rewards, signal, r, coherence, synchronized, terminated
 
     # ------------------------------------------------------------------ observation
     def observe(

@@ -49,9 +49,27 @@ public name was removed and results are unchanged.
   not hold one value per agent (Kuramoto with several systems).
 - `env-lib run`, `evaluate` and `bench` turn invalid environment arguments
   into an `env-lib: error:` message with exit status 2.
-- `env-lib describe` prints a caution for the reward design of the Kuramoto
-  order-parameter ids and AJLATT, where a learner can raise its return by
-  ending episodes early (see the handbook's troubleshooting chapter).
+- Reward modes. The defaults keep the original rewards of every registered id.
+  - Kuramoto (NumPy, native vector and PyTorch backends, identical results):
+    `reward_mode` selects how the signal of `reward_type` is paid: `"dense"`
+    (default, every step), `"penalty"` (signal minus its maximum, so
+    synchronising sooner earns more), `"progress"` (change of the signal),
+    `"terminal"` (final signal only) or `"sparse"` (synchronisation bonus
+    only); `terminate_on_sync=False` holds synchronisation to the step limit
+    (the bonus is paid on every synchronised step); `control_cost` penalises
+    the control effort. `info["synchronized"]` reports synchronisation.
+  - AJLATT: `reward_mode="bounded"` pays `exp(-cost / cost_scale)` (positive
+    while tracking well) instead of the negative cost of `"cost"`;
+    `terminate_on_collision=False` penalises collisions without ending the
+    episode; `collision_termination_penalty` adds a penalty when a collision
+    ends it; `team_reward_weight` mixes individual and team rewards.
+    `info["tracking_cost"]` reports the weighted covariance traces.
+- `env-lib describe` prints a caution for the default reward design of the
+  Kuramoto order-parameter ids and AJLATT, where a learner can raise its
+  return by ending episodes early, and names the settings that avoid it.
+  `benchmarks/benchmark_baselines.py` also runs `reward_mode="penalty"`
+  (Kuramoto) and `reward_mode="bounded"` (AJLATT): the classical controllers
+  lead random actions under both.
 
 ### marl_algorithms
 

@@ -467,7 +467,10 @@ env-lib bench LineMsg-v0 --num-envs 64 --async     # no native implementation
 
 \paragraph{Controllers.} \code{benchmarks/benchmark\_baselines.py} evaluates
 uniformly random actions and the classical controller on every registered id
-(and on AJLATT without collision termination) on the same seeded episodes: the
+(and on \envid{KuramotoOscillator-v0} with \code{reward\_mode="penalty"} and
+AJLATT without collision termination and with \code{reward\_mode="bounded"},
+Sections~\ref{sec:kuramoto-reward} and~\ref{sec:ajlatt-reward}) on the same
+seeded episodes: the
 first episode of every copy of a vector environment with \code{-{}-episodes}
 copies (64 by default) reset with \code{-{}-seed} (0); \code{-{}-only} selects
 ids and \code{-{}-markdown} prints a table.

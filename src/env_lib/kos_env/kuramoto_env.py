@@ -51,12 +51,31 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
         :attr:`coupling_indices` (row-major upper triangle).
 
     Reward
-        ``"order_parameter"``: ``r = |mean_j exp(i theta_j)|``;
-        ``"phase_coherence"``: ``exp(-Var(theta))``; ``"combined"``: their sum;
-        ``"frequency_synchronization"``: ``-mean_i |dtheta_i/dt - target_frequency|``
-        (derivative at the start of the step). When ``r > sync_threshold`` the episode
-        terminates and ``sync_bonus`` is added, except for
-        ``"frequency_synchronization"``.
+        The *signal* ``s`` is chosen by ``reward_type``: ``"order_parameter"``,
+        ``r = |mean_j exp(i theta_j)|`` in ``[0, 1]``; ``"phase_coherence"``,
+        ``exp(-Var(theta))`` in ``(0, 1]``; ``"combined"``, their sum; or
+        ``"frequency_synchronization"``,
+        ``-mean_i |dtheta_i/dt - target_frequency|`` (derivative at the start of
+        the step). The state is *synchronised* when ``r > sync_threshold``; then
+        ``sync_bonus`` is paid (not with ``"frequency_synchronization"``) and,
+        with ``terminate_on_sync``, the episode terminates. ``reward_mode``
+        decides how the signal is paid (``b`` is the bonus of the step):
+
+        ============  ==========================================================
+        ``dense``     ``s + b`` at every step (default, the original reward)
+        ``penalty``   ``s - s_max + b`` (``s_max`` = 1, 1, 2 or 0): never
+                      positive before the bonus, so synchronising sooner earns more
+        ``progress``  ``s - s_prev + b``: the change of the signal
+        ``terminal``  zero, except on the last step of the episode: ``s + b``
+        ``sparse``    ``b`` only
+        ============  ==========================================================
+
+        ``control_cost`` subtracts ``control_cost * mean_i a_i^2`` at every step
+        in every mode. With the default ``dense`` mode and ``terminate_on_sync``,
+        staying just below ``sync_threshold`` for the whole episode earns more
+        than synchronising (the signal is paid at every step); for learning,
+        prefer ``penalty``, ``progress`` or ``terminal``, or
+        ``terminate_on_sync=False``.
 
     Parameters
     ----------
@@ -106,10 +125,21 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
     topology_seed:
         Seed of the local random generator that builds the ``"random"`` topology.
     sync_threshold:
-        The episode terminates when the order parameter exceeds this value
-        (values above 1 disable synchronisation termination).
+        The state is synchronised when the order parameter exceeds this value
+        (values above 1 disable synchronisation).
     sync_bonus:
-        Reward bonus on synchronisation (not applied to ``"frequency_synchronization"``).
+        Reward bonus of a synchronised step (not applied to
+        ``"frequency_synchronization"``).
+    reward_mode:
+        ``"dense"`` (default), ``"penalty"``, ``"progress"``, ``"terminal"`` or
+        ``"sparse"``; see *Reward* above. ``"sparse"`` cannot be combined with
+        ``"frequency_synchronization"``.
+    terminate_on_sync:
+        End the episode (``terminated=True``) when the state synchronises
+        (default). With ``False`` the episode runs to ``max_steps`` and the bonus
+        is paid on every synchronised step (in ``"terminal"`` mode on the last).
+    control_cost:
+        Weight of the control-effort penalty ``mean_i a_i^2`` (default 0).
 
     Raises
     ------
@@ -151,6 +181,9 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
         topology_seed: int = 42,
         sync_threshold: float = 0.99,
         sync_bonus: float = 10.0,
+        reward_mode: str = "dense",
+        terminate_on_sync: bool = True,
+        control_cost: float = 0.0,
     ):
         super().__init__()
         self._init_common(
@@ -175,6 +208,9 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
             topology_seed=topology_seed,
             sync_threshold=sync_threshold,
             sync_bonus=sync_bonus,
+            reward_mode=reward_mode,
+            terminate_on_sync=terminate_on_sync,
+            control_cost=control_cost,
         )
         self.device = device  # ignored; kept for API compatibility with the torch backend
         self.topology_matrix: np.ndarray = self._topology_np
@@ -186,6 +222,7 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
         self.control_inputs: np.ndarray | None = None
         self._current_coupling: np.ndarray | None = None
         self._last_reward: float | None = None
+        self._previous_signal: float | None = None  # reward_mode="progress"
         # Batch-first array kernels, shared with KuramotoOscillatorVectorEnv (called with B = 1).
         self._kernel = KuramotoKernel(self)
 
@@ -289,6 +326,11 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
             self._current_coupling = self.coupling_matrix
         self.phase_history = [phases.copy()]
         self._reset_renderer()
+        if self.reward_mode == "progress":
+            dphases_dt = self._kernel.dynamics(
+                phases, natural_frequencies, self._current_coupling, self.control_inputs
+            )
+            self._previous_signal = float(self._kernel.signal(phases, dphases_dt)[0])
 
         info = {
             "order_parameter": self._compute_order_parameter(phases),
@@ -311,9 +353,10 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
         -------
         observation, reward, terminated, truncated, info
             ``terminated`` is ``True`` when the order parameter exceeds
-            ``sync_threshold``; ``truncated`` is ``True`` once ``max_steps`` steps
-            have been taken. ``info`` contains ``order_parameter``,
-            ``phase_coherence``, ``step_count``, ``natural_frequencies``, ``phases``,
+            ``sync_threshold`` (with ``terminate_on_sync``); ``truncated`` is
+            ``True`` once ``max_steps`` steps have been taken. ``info`` contains
+            ``order_parameter``, ``phase_coherence``, ``synchronized``,
+            ``step_count``, ``natural_frequencies``, ``phases``,
             ``coupling_matrix``, ``dphases_dt``, ``device``, ``n_agents`` and
             ``agent_rewards`` (shape ``(n_agents,)``).
         """
@@ -345,15 +388,24 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
         self._append_history(self.phases.copy())
         self.step_count += 1
 
-        rewards, r, coherence, terminated = kernel.rewards(self.phases, dphases_dt)
+        truncated = bool(self.step_count >= self.max_steps)
+        rewards, signal, r, coherence, synchronized, terminated = kernel.rewards(
+            self.phases,
+            dphases_dt,
+            control=self.control_inputs,
+            previous=self._previous_signal,
+            truncated=truncated,
+        )
         reward = float(rewards)
         r, coherence, terminated = float(r), float(coherence), bool(terminated)
-        truncated = bool(self.step_count >= self.max_steps)
         self._last_reward = reward
+        if self.reward_mode == "progress":
+            self._previous_signal = float(signal)
 
         info = {
             "order_parameter": r,
             "phase_coherence": coherence,
+            "synchronized": bool(synchronized),
             "step_count": self.step_count,
             "natural_frequencies": self.natural_frequencies.copy(),
             "phases": self.phases.copy(),

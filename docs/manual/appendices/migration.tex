@@ -53,7 +53,11 @@ and \code{compare} take \code{threads=1} and restore the previous PyTorch
 thread count when they return, where version 1.2 left the setting to the
 caller. Environments can be pickled and deep-copied after rendering, and
 several errors that were raised late or without a useful message are now
-reported early (Chapter~\ref{chap:troubleshooting}).
+reported early (Chapter~\ref{chap:troubleshooting}). The Kuramoto and AJLATT
+environments gain reward settings (\code{reward\_mode} and others,
+Sections~\ref{sec:kuramoto-reward} and~\ref{sec:ajlatt-reward}) whose
+defaults reproduce the rewards of version 1.2 exactly; their step infos gain
+the keys \code{"synchronized"} and \code{"tracking\_cost"}.
 
 \section{From 1.0 to 1.1}\label{sec:migration-11}
 

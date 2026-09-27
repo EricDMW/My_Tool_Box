@@ -169,6 +169,29 @@ per agent as `(n_agents, obs_dim)`; the table lists the default configuration.
 | `LineMsg-v0` | relay a message along a line of lossy links | relay or not | 10 |
 | `WirelessComm-v0`, `-v1` | deliver packets through shared access points | idle or one of four access points | 36 / 16 |
 
+**Reward modes.** Two families let you choose how the reward is paid; the
+defaults keep the original rewards of the registered ids.
+
+| Setting | Values (default first) |
+|---|---|
+| Kuramoto `reward_mode` | `"dense"`: signal every step; `"penalty"`: signal minus its maximum, so synchronising sooner earns more; `"progress"`: change of the signal; `"terminal"`: final signal only; `"sparse"`: synchronisation bonus only |
+| Kuramoto `terminate_on_sync`, `control_cost` | end the episode on synchronisation (`True`); penalty on control effort (`0`) |
+| AJLATT `reward_mode` | `"cost"`: negative tracking cost and penalties; `"bounded"`: `exp(-cost / cost_scale)`, positive while tracking well |
+| AJLATT `terminate_on_collision`, `collision_termination_penalty`, `team_reward_weight` | a collision ends the robot's episode (`True`); extra penalty when it does (`0`); mix of individual and team reward (`0`) |
+
+```python
+env = env_lib.make("KuramotoOscillator-v0", reward_mode="terminal")      # terminal reward only
+env = env_lib.make("AJLATT-v0", terminate_on_collision=False)            # penalised, not stopped
+env = env_lib.make("AJLATT-v0", reward_mode="bounded", team_reward_weight=0.5)
+```
+
+With the defaults, a learner can raise its return by ending episodes early
+(the Kuramoto signal is paid every step until synchronisation ends the
+episode; AJLATT pays only negative rewards until a collision ends it);
+`env-lib describe` flags both. For training, prefer `reward_mode="penalty"`
+(Kuramoto) and `reward_mode="bounded"` or `terminate_on_collision=False`
+(AJLATT).
+
 | Power grid (`PowerGrid-v0`) | Vehicle platoon (`Platoon-v0`) |
 |---|---|
 | ![PowerGrid](https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/manual/figures/power_grid.png) | ![Platoon](https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/manual/figures/platoon.png) |
@@ -186,8 +209,10 @@ Every environment ships a decentralised baseline, returned by
 | `Platoon-v0` | CACC, u_i = k_p e_i + k_d dv_i + k_a a_(i-1) | -5,604 | -46.3 |
 | `Consensus-v0` | Laplacian protocol | -17,327 | -1,414 |
 | `Formation-v0` | Laplacian protocol on formation offsets | -18,166 | -1,608 |
+| `KuramotoOscillator-v0` (`reward_mode="penalty"`) | frequency compensation and phase feedback | 3.22 | 6.86 |
 | `KuramotoOscillator-FreqSync-Constant-v0` | frequency compensation and phase feedback | -128.1 | -112.0 |
 | `AJLATT-v0` (no collision termination) | encircle the target belief | -34,273 | -7,415 |
+| `AJLATT-v0` (`reward_mode="bounded"`) | encircle the target belief | 39.9 | 223.6 |
 | `Pistonball-v0` | ramp towards the ball | -253.7 | 801.3 |
 | `LineMsg-v0` | always relay | 42.7 | 95.0 |
 | `WirelessComm-v0` | collision-free access schedule | 388.0 | 923.8 |
@@ -326,12 +351,11 @@ A few rules of thumb:
   several times faster for these small networks, and restore the previous
   setting afterwards; wrap your own `algo.learn(...)` calls in
   `with marl_algorithms.torch_threads(1):`.
-- On the Kuramoto ids (except `FreqSync`) and AJLATT a learner can raise its
-  return by ending episodes early: the Kuramoto reward is paid every step
-  until synchronisation ends the episode, and AJLATT's negative rewards stop
-  at the first collision. `env-lib describe` shows a caution; train with a
-  larger `sync_bonus` or `reward_type="frequency_synchronization"`, and with
-  `terminate_on_collision=False` for AJLATT.
+- On the Kuramoto ids (except `FreqSync`) and AJLATT the default rewards let
+  a learner raise its return by ending episodes early (see
+  [reward modes](#environments)); pass `env_kwargs={"reward_mode": "penalty"}`
+  (Kuramoto) or `{"reward_mode": "bounded"}` (AJLATT) to `train` or
+  `compare`.
 
 The handbook section "Using the algorithms as baselines" has more recipes.
 

@@ -299,9 +299,11 @@ follow the controlled Kuramoto model
 $\dot\theta_i = \omega_i + a_i + c\sum_j K_{ij}\sin(\theta_j-\theta_i)$
 \citep{kuramoto1984chemical,dorfler2014survey}, integrated with Euler or
 Runge--Kutta steps. The controller sets the inputs $a_i$ and, in the dynamic
-coupling mode, the coupling gains; rewards are the order parameter, the phase
-coherence or the frequency-tracking error. A PyTorch backend simulates batches
-of systems on a CPU or GPU.
+coupling mode, the coupling gains. The reward signal is the order parameter,
+the phase coherence or the frequency-tracking error; synchronisation earns a
+bonus and, optionally, ends the episode, and a reward mode decides how the
+signal is paid (\cref{sec:rewards}). A PyTorch backend simulates batches of
+systems on a CPU or GPU.
 
 \paragraph{Multi-robot localisation and target tracking.} In
 \envid{AJLATT-v0}, four unicycle robots without absolute positioning estimate their own poses
@@ -310,7 +312,9 @@ range--bearing measurements that obstacles on an occupancy map can block, and
 fuse neighbours' estimates by covariance intersection
 \citep{julier1997ci}. The reward penalises the traces of the robots' own and
 target covariances and collisions, so the team must move to keep the target
-observed while staying localised.
+observed while staying localised; a collision either ends the robot's episode
+or is only penalised, and a bounded reward mode turns the cost into a
+positive tracking reward (\cref{sec:rewards}).
 
 \paragraph{Pistonball.} Twenty pistons move a ball to
 the left wall in a rigid-body simulation (pymunk), a cooperative game
@@ -370,6 +374,49 @@ seeded copy of the action space. On a vector environment every copy
 contributes the first episodes it finishes, handling all autoreset modes, so
 random actions, a controller and a learned policy evaluated with the same seed
 meet the same initial conditions and disturbances.
+
+\subsection{Choosing the Reward}\label{sec:rewards}
+
+Two families expose their reward design as settings, because a literal
+maximiser of the original rewards can prefer to end episodes early: the
+Kuramoto signal is paid at every step until synchronisation ends the episode,
+and AJLATT pays only negative rewards until a collision ends it. The
+registered ids keep the original rewards, \code{env-lib describe} flags the
+issue, and keyword arguments select the alternatives
+(\cref{tab:rewards}): for example
+\code{make("KuramotoOscillator-v0", reward\_mode="penalty")} or
+\code{make("AJLATT-v0", terminate\_on\_collision=False)}.
+
+\begin{table}[t]
+  \caption{Reward settings (defaults first). $S$: reward signal with maximum
+    $S_{\max}$; $b$: synchronisation bonus; $c_i$, $p_i$: tracking cost and
+    collision penalties of robot $i$.}
+  \label{tab:rewards}
+  \centering\footnotesize
+  \setlength{\tabcolsep}{3pt}
+  \begin{tabular}{@{}>{\raggedright}p{2.55cm}>{\raggedright\arraybackslash}p{5.25cm}@{}}
+    \toprule
+    Setting & Reward or effect \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{Kuramoto} \code{reward\_mode}} \\
+    \code{dense} & $S_t + b_t$ at every step \\
+    \code{penalty} & $S_t - S_{\max} + b_t$: synchronising sooner earns more \\
+    \code{progress} & $S_t - S_{t-1} + b_t$ (potential-based) \\
+    \code{terminal} & $S_T + b_T$ at the last step only \\
+    \code{sparse} & $b_t$ only \\
+    \code{terminate\_on\_}\allowbreak\code{sync} & synchronisation ends the episode, or is held to the limit \\
+    \code{control\_cost} & $-c \cdot \mathrm{mean}_i\, a_i^2$ at every step \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{AJLATT} \code{reward\_mode}} \\
+    \code{cost} & $-c_i - p_i$ \\
+    \code{bounded} & $e^{-c_i/\sigma} - p_i/\sigma \le 1$ \\
+    \midrule
+    \code{terminate\_on\_}\allowbreak\code{collision} & a collision ends the robot's episode, or is only penalised \\
+    \code{collision\_}\allowbreak\code{termination\_}\allowbreak\code{penalty} & extra penalty when a collision ends it \\
+    \code{team\_reward\_}\allowbreak\code{weight} & $w$: $(1-w)\,r_i + w\,\bar r$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
 
 \subsection{Interoperability and Command Line}
 
@@ -461,26 +508,23 @@ feedback for the oscillators, a formation around the target belief for
 AJLATT, a ramp towards the ball for Pistonball, ``always relay'' for LineMsg
 (the optimal policy) and a collision-free access schedule for WirelessComm.
 
-\Cref{tab:controllers} compares them with random actions. Two tasks need care
-when reading returns. The Kuramoto environments with an order-parameter reward
-pay a positive reward per step and end on synchronisation, so the controller,
-which synchronises in half the steps, collects less; their task metric is the
-time to synchronise. The default AJLATT episode ends at the first collision,
-which rewards random robots for colliding early, so the table uses the variant
-without collision termination. A learner can exploit both designs by ending
-episodes early; \code{env-lib describe} flags them, and for training we
-recommend a larger synchronisation bonus or the frequency-tracking reward,
-and AJLATT with \code{terminate\_on\_collision=False}.
+\Cref{tab:controllers} compares them with random actions. The two reward
+designs of \cref{sec:rewards} show in the returns: with the original
+Kuramoto reward the controller, which synchronises in half the steps,
+collects less than random actions, and in the original AJLATT episode random
+robots end their negative rewards by colliding early. With
+\code{reward\_mode="penalty"} for Kuramoto and without collision termination
+or with the bounded reward for AJLATT, the controller is clearly ahead; we
+recommend these settings for training.
 
 \begin{table}[t]
   \caption{Mean return of uniformly random actions and the classical
     controller on the same 64 seeded episodes (one per copy of a
     64-copy vector environment, seed 0; \file{benchmarks/benchmark_baselines.py}).
-    Higher is better. $^\dagger$Episode length in parentheses; the episode ends on
-    synchronisation. $^\ddagger$Without collision termination.}
+    Higher is better. $^\dagger$Original reward; episode length in parentheses.}
   \label{tab:controllers}
   \centering\small
-  \setlength{\tabcolsep}{3pt}
+  \setlength{\tabcolsep}{2.5pt}
   \begin{tabular}{@{}llrr@{}}
     \toprule
     Environment & Controller & Random & Controller \\
@@ -490,8 +534,11 @@ and AJLATT with \code{terminate\_on\_collision=False}.
     Consensus & Laplacian & $-17{,}327$ & $-1{,}414$ \\
     Formation & Laplacian & $-18{,}166$ & $-1{,}608$ \\
     Kuramoto-v0$^\dagger$ & phase feedback & 24.0 (21) & 17.2 (10) \\
+    \quad \code{penalty} mode & phase feedback & 3.22 & 6.86 \\
     Kuramoto freq.\ sync & phase feedback & $-128.1$ & $-112.0$ \\
-    AJLATT$^\ddagger$ & encircle & $-34{,}273$ & $-7{,}415$ \\
+    AJLATT$^\dagger$ & encircle & $-627$ (16) & $-7{,}090$ (115) \\
+    \quad no termination & encircle & $-34{,}273$ & $-7{,}415$ \\
+    \quad \code{bounded} mode & encircle & 39.9 & 223.6 \\
     Pistonball & ramp & $-253.7$ & 801.3 \\
     LineMsg & always relay & 42.7 & 95.0 \\
     WirelessComm-v0 & schedule & 388.0 & 923.8 \\
