@@ -1,0 +1,145 @@
+% My Tool Box -- User Manual
+% Build with:  latexmk -pdf -outdir=output main.tex   (or ./build.sh)
+\documentclass[11pt,a4paper,oneside]{book}
+
+% ---------------------------------------------------------------------------
+% Packages
+% ---------------------------------------------------------------------------
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage[a4paper,margin=2.5cm,headheight=14pt]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage[table]{xcolor}
+\usepackage{listings}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{fancyhdr}
+\usepackage[hidelinks]{hyperref}
+\usepackage{bookmark}
+
+\graphicspath{{figures/}}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt plus 1pt}
+\setlist{itemsep=2pt,topsep=4pt}
+\captionsetup{font=small,labelfont=bf}
+\renewcommand{\arraystretch}{1.15}
+
+% ---------------------------------------------------------------------------
+% Colours and code listings
+% ---------------------------------------------------------------------------
+\definecolor{codebg}{HTML}{F6F8FA}
+\definecolor{codeframe}{HTML}{D0D7DE}
+\definecolor{codekw}{HTML}{1F4E9E}
+\definecolor{codestr}{HTML}{0A6B3D}
+\definecolor{codecom}{HTML}{6A737D}
+\definecolor{linkblue}{HTML}{1F4E9E}
+\hypersetup{colorlinks=true,linkcolor=linkblue,urlcolor=linkblue,citecolor=linkblue}
+
+\lstdefinestyle{base}{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codebg},
+  frame=single,
+  rulecolor=\color{codeframe},
+  framesep=4pt,
+  xleftmargin=6pt,
+  xrightmargin=6pt,
+  aboveskip=8pt,
+  belowskip=8pt,
+  breaklines=true,
+  breakatwhitespace=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  upquote=true,
+  tabsize=4,
+}
+\lstdefinestyle{python}{
+  style=base,
+  language=Python,
+  keywordstyle=\color{codekw}\bfseries,
+  stringstyle=\color{codestr},
+  commentstyle=\color{codecom}\itshape,
+  morekeywords={True,False,None,self,as,with,yield,lambda},
+}
+\lstdefinestyle{shell}{
+  style=base,
+  language=bash,
+  keywordstyle=\color{codekw},
+  commentstyle=\color{codecom}\itshape,
+}
+\lstnewenvironment{pycode}{\lstset{style=python}}{}
+\lstnewenvironment{shellcode}{\lstset{style=shell}}{}
+\lstnewenvironment{textcode}{\lstset{style=base}}{}
+
+% ---------------------------------------------------------------------------
+% Inline markup
+% ---------------------------------------------------------------------------
+% \code{...}   inline code; use \_ for underscores inside the argument.
+% \pkg{...}    package or module name.
+% \envid{...}  registered Gymnasium id.
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\pkg}[1]{\textsf{#1}}
+\newcommand{\envid}[1]{\texttt{#1}}
+\newcommand{\figwidth}{0.95\textwidth}
+
+% ---------------------------------------------------------------------------
+% Headers
+% ---------------------------------------------------------------------------
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\nouppercase{\leftmark}}
+\fancyhead[R]{\small My Tool Box 1.0}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[C]{\small\thepage}\renewcommand{\headrulewidth}{0pt}}
+
+% ---------------------------------------------------------------------------
+% Title
+% ---------------------------------------------------------------------------
+\title{%
+  {\Huge\bfseries My Tool Box}\\[0.6cm]
+  {\Large Multi-Agent Reinforcement Learning Environments\\ and Research Utilities}\\[0.8cm]
+  {\large User Manual, version 1.0}
+}
+\author{Dongming Wang}
+\date{\today}
+
+\begin{document}
+
+\frontmatter
+\maketitle
+\tableofcontents
+
+\mainmatter
+\include{chapters/introduction}
+\include{chapters/installation}
+
+\part{Environments}
+\include{chapters/envlib_overview}
+\include{chapters/kos_env}
+\include{chapters/networked_envs}
+\include{chapters/pistonball_env}
+\include{chapters/consensus_env}
+\include{chapters/ajlatt_env}
+
+\part{Toolkit}
+\include{chapters/toolkit_overview}
+\include{chapters/plotkit}
+\include{chapters/neural_toolkit}
+
+\part{Practice}
+\include{chapters/examples}
+\include{chapters/troubleshooting}
+
+\appendix
+\include{appendices/api_reference}
+\include{appendices/migration}
+
+\end{document}

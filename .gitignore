@@ -205,3 +205,32 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ---------------------------------------------------------------------------
+# Project-specific
+# ---------------------------------------------------------------------------
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# LaTeX build products (the manual is built into docs/manual/output/)
+docs/manual/output/
+*.aux
+*.fdb_latexmk
+*.fls
+*.idx
+*.ilg
+*.ind
+*.lof
+*.lot
+*.synctex.gz
+*.toc
+
+# Experiment and rendering outputs
+parameters_*.json
+renders/
+*.gif
+*.mp4
+!docs/images/*.gif
