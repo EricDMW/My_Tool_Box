@@ -53,6 +53,7 @@ Repository = "https://github.com/EricDMW/My_Tool_Box"
 Issues = "https://github.com/EricDMW/My_Tool_Box/issues"
 
 [project.scripts]
+env-lib = "env_lib.__main__:main"
 ajlatt-build-map = "env_lib.ajlatt_env.maps.builder:main"
 ajlatt-plot-map = "env_lib.ajlatt_env.maps.plotting:main"
 plotkit-gallery = "toolkit.plotkit.__main__:main"
