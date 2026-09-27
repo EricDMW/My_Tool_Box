@@ -6,15 +6,19 @@
 % extra inter-word stretch in this chapter (the group keeps it local).
 \begingroup\setlength{\emergencystretch}{3em}% chapter-local
 
-My Tool Box is a Python package for research on multi-agent reinforcement
-learning (MARL) and networked control. It is distributed as a single
+My Tool Box is a Python package for research on networked multi-agent control
+and multi-agent reinforcement learning (MARL). It is distributed as a single
 installable project, \pkg{my-tool-box}, that provides two import packages:
 
 \begin{description}[leftmargin=1.6cm,style=nextline]
-  \item[\pkg{env\_lib}] A collection of multi-agent environments that follow
-    the Gymnasium API: coupled oscillators, message passing and wireless
-    access on graphs, a cooperative physics game, consensus and formation
-    control, and multi-robot localisation and target tracking.
+  \item[\pkg{env\_lib}] Multi-agent environments that follow the Gymnasium
+    API: eight environment families registered under 18 ids, among them
+    coupled oscillators, consensus and formation control, power-grid
+    frequency control, vehicle platoons and multi-robot target tracking.
+    Around the environments it provides natively batched vector
+    environments, a searchable catalogue and the \code{env-lib} command line,
+    adapters for other interfaces, a classical baseline controller for every
+    environment, evaluation tools and shared graph utilities.
   \item[\pkg{toolkit}] Research utilities that do not depend on the
     environments: \pkg{plotkit} creates publication-quality figures,
     \pkg{neural\_toolkit} provides PyTorch network building blocks and
@@ -22,10 +26,52 @@ installable project, \pkg{my-tool-box}, that provides two import packages:
     \pkg{argparse} parameters, with an optional graphical editor.
 \end{description}
 
-This manual describes version 1.0 of the package. It explains how to install
-it, documents every environment and toolkit module, collects practical recipes
-and troubleshooting advice, and ends with an API reference and a migration
-guide for code written against earlier versions.
+This manual describes version 1.1 of the package. It explains how to install
+it, documents every environment and toolkit module and the workflow layer that
+connects them to experiments, collects practical recipes and troubleshooting
+advice, and ends with an API reference and a migration guide for code written
+against earlier versions.
+
+\section{What the package is built for}\label{sec:intro-audience}
+
+The package is built for research on control and learning in networks of
+interacting agents. Its environments share five characteristics.
+
+\begin{itemize}
+  \item \emph{Networked agents.} Agents interact through an explicit graph:
+    a communication topology, the lines of a transmission network or the
+    radio links of a platoon. Each agent observes its own state and its
+    neighbourhood, so the environments pose decentralised problems in which
+    the graph matters.
+  \item \emph{Continuous physical dynamics.} Most environments have
+    continuous states and actions in physical units, with dynamics that come
+    from established models: phase oscillators, single and double
+    integrators, the swing equations of a power system, the longitudinal
+    dynamics of vehicles with actuator lag, and robot kinematics with
+    estimation. Models, observations, rewards and parameters are documented
+    precisely enough to be cited in a paper.
+  \item \emph{Many agents.} Team sizes are constructor arguments, and
+    dynamics, observations and rewards are computed with array expressions
+    rather than loops over agents, so an environment with a hundred agents
+    remains practical.
+  \item \emph{Large-batch simulation.} The networked continuous-control
+    environments (Kuramoto, Consensus and Formation, PowerGrid, Platoon) have
+    native vector implementations that advance thousands of copies with one
+    set of array operations per step, which suits on-policy learning with
+    large batches, Monte-Carlo evaluation and parameter sweeps.
+  \item \emph{Reproducibility.} All randomness is seeded, benchmark systems
+    such as a power network or a heterogeneous platoon are fixed by their own
+    seeds, a single environment and copy~0 of its vector environment share
+    their code, and every environment ships a classical baseline controller
+    that provides a reference result.
+\end{itemize}
+
+Two discrete networked benchmarks (message relaying and wireless access) and a
+cooperative physics game complement the continuous-control environments. The
+environments do not depend on any particular learning library; any algorithm
+that can drive a Gymnasium environment can use them, and the adapters of
+Chapter~\ref{chap:workflow} provide flat single-agent and per-agent dictionary
+views of the same environments.
 
 \section{What the package provides}\label{sec:intro-provides}
 
@@ -33,40 +79,55 @@ Table~\ref{tab:intro-envs} lists the environments. Each one is available as a
 class in \pkg{env\_lib} and under one or more registered Gymnasium ids; the
 version suffix of an id selects a preset configuration (for example
 \envid{WirelessComm-v1} is the $4\times 4$ grid), not a newer revision.
-Figure~\ref{fig:intro-gallery} shows the built-in visualisations.
+\code{env\_lib.list\_envs()} returns all 18 ids, and \code{env-lib list} prints
+them as a table. Figure~\ref{fig:intro-gallery} shows the built-in
+visualisations.
 
 \begin{table}[htbp]
   \centering
   \small
-  \caption{Environments provided by \pkg{env\_lib}. The last column names the
-    optional dependency group (see Chapter~\ref{chap:install}) required in
-    addition to the core installation.}
+  \caption{Environments provided by \pkg{env\_lib}. ``Batch'' marks the
+    environments with a native vector implementation
+    (Chapter~\ref{chap:workflow}); the last column names the optional
+    dependency group (Chapter~\ref{chap:install}) required in addition to the
+    core installation.}
   \label{tab:intro-envs}
-  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{4.6cm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{1.7cm}c@{}}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{4.8cm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{0.7cm}cc@{}}
     \toprule
-    Registered ids & Task & Chapter & Extra \\
+    Registered ids & Task & Ch. & Batch & Extra \\
     \midrule
-    \envid{KuramotoOscillator-*} &
+    \multicolumn{5}{@{}l}{\emph{Continuous states and actions}} \\
+    \envid{KuramotoOscillator-*} (4 ids) &
       Drive a network of coupled phase oscillators to synchronisation (NumPy). &
-      \ref{chap:kuramoto} & -- \\
-    \envid{KuramotoOscillatorTorch-*} &
+      \ref{chap:kuramoto} & yes & -- \\
+    \envid{KuramotoOscillatorTorch-*} (5 ids) &
       The same model on PyTorch tensors, with many systems simulated in a batch. &
-      \ref{chap:kuramoto} & \code{torch} \\
-    \envid{LineMsg-v0} &
-      Relay a message along a line of agents with unreliable links. &
-      \ref{chap:networked} & -- \\
-    \envid{WirelessComm-v0}, \envid{-v1} &
-      Share wireless access points on a grid without collisions. &
-      \ref{chap:networked} & -- \\
-    \envid{Pistonball-v0} &
-      Pistons cooperate to roll a ball to the goal (2-D physics). &
-      \ref{chap:pistonball} & \code{pistonball} \\
+      \ref{chap:kuramoto} & -- & \code{torch} \\
     \envid{Consensus-v0}, \envid{Formation-v0} &
       Rendezvous or form a shape over a communication graph. &
-      \ref{chap:consensus} & -- \\
+      \ref{chap:consensus} & yes & -- \\
+    \envid{PowerGrid-v0} &
+      Arrest and damp frequency deviations of a power network after load
+      changes. &
+      \ref{chap:power_grid} & yes & -- \\
+    \envid{Platoon-v0} &
+      Keep a vehicle platoon at safe, string-stable spacing behind a leader. &
+      \ref{chap:platoon} & yes & -- \\
     \envid{AJLATT-v0} &
       Robots localise themselves and jointly track a moving target. &
-      \ref{chap:ajlatt} & -- \\
+      \ref{chap:ajlatt} & -- & -- \\
+    \envid{Pistonball-v0} &
+      Pistons cooperate to roll a ball to the goal (2-D physics; continuous or
+      discrete actions). &
+      \ref{chap:pistonball} & -- & \code{pistonball} \\
+    \midrule
+    \multicolumn{5}{@{}l}{\emph{Discrete states and actions}} \\
+    \envid{LineMsg-v0} &
+      Relay a message along a line of agents with unreliable links. &
+      \ref{chap:networked} & -- & -- \\
+    \envid{WirelessComm-v0}, \envid{-v1} &
+      Share wireless access points on a grid without collisions. &
+      \ref{chap:networked} & -- & -- \\
     \bottomrule
   \end{tabularx}
 \end{table}
@@ -79,17 +140,32 @@ Figure~\ref{fig:intro-gallery} shows the built-in visualisations.
       {\footnotesize #2}
     \end{minipage}}%
   \galleryimg{kuramoto.png}{(a) Kuramoto oscillators}\hfill
-  \galleryimg{linemsg.png}{(b) LineMsg}\hfill
-  \galleryimg{wireless.png}{(c) WirelessComm}\\[8pt]
-  \galleryimg{pistonball.png}{(d) Pistonball}\hfill
-  \galleryimg{formation.png}{(e) Formation control}\hfill
-  \galleryimg{ajlatt.png}{(f) AJLATT target tracking}
+  \galleryimg{formation.png}{(b) Formation control}\hfill
+  \galleryimg{power_grid.png}{(c) PowerGrid}\\[8pt]
+  \galleryimg{platoon.png}{(d) Platoon}\hfill
+  \galleryimg{ajlatt.png}{(e) AJLATT target tracking}\hfill
+  \galleryimg{pistonball.png}{(f) Pistonball}\\[8pt]
+  \galleryimg{linemsg.png}{(g) LineMsg}\hspace{0.02\textwidth}%
+  \galleryimg{wireless.png}{(h) WirelessComm}
   \caption{Frames rendered in \code{"rgb\_array"} mode by the environments of
     \pkg{env\_lib}. Each renderer is a dashboard that combines the scene with
     the quantities that matter for the task, such as the order parameter of the
-    oscillators, per-agent outcomes or covariance traces.}
+    oscillators, the frequency nadir of a power grid, the spacing errors along
+    a platoon, per-agent outcomes or covariance traces.}
   \label{fig:intro-gallery}
 \end{figure}
+
+Beyond the environments, \pkg{env\_lib} provides the workflow layer of
+Chapter~\ref{chap:workflow}: \code{env\_lib.make\_vec} for batched simulation,
+\code{env\_lib.catalog} and \code{env\_lib.describe} to discover environments,
+the \code{env-lib} command line to list, run, record, evaluate and benchmark
+them without writing code, wrappers that flatten the joint spaces or expose
+per-agent dictionaries, \code{env\_lib.baseline\_policy} for the baseline
+controllers, and \code{env\_lib.evaluate} and \code{env\_lib.rollout} for
+evaluation and trajectory recording. The graph utilities of
+\pkg{env\_lib.utils.graphs} (Section~\ref{sec:envlib-graphs}) build
+topologies and compute Laplacians, algebraic connectivity and $k$-hop
+neighbourhoods.
 
 The \pkg{toolkit} package contains three independent subpackages:
 
@@ -108,51 +184,74 @@ The \pkg{toolkit} package contains three independent subpackages:
     and a Tk window for editing them.
 \end{itemize}
 
-\section{Who this package is for}\label{sec:intro-audience}
-
-The package is written for researchers and students who
-\begin{itemize}
-  \item need small, fast and well-specified multi-agent benchmarks with a
-    standard interface, in particular for networked systems where agents
-    observe only their neighbourhood;
-  \item study synchronisation, consensus, distributed estimation or
-    cooperative control and want environments whose dynamics and rewards are
-    documented precisely enough to be cited in a paper;
-  \item want consistent, reproducible figures and reusable network components
-    without adopting a large framework.
-\end{itemize}
-The environments do not depend on any particular learning library; any
-algorithm that can drive a Gymnasium environment can use them.
-
 \section{Design principles}\label{sec:intro-principles}
 
-\paragraph{Gymnasium compatibility.}
+\paragraph{One Gymnasium contract.}
 Every environment subclasses \code{gymnasium.Env}. The method \code{reset}
 accepts a \code{seed} and an \code{options} dictionary as keyword arguments
 and returns the pair \code{(observation, info)}. The method \code{step}
 returns the observation, the reward, the flags \code{terminated} and
 \code{truncated}, and the \code{info} dictionary, where \code{terminated}
 signals a task-defined end (success or failure) and \code{truncated} the
-episode limit. Observations are
-\code{float32} arrays contained in \code{observation\_space}. Multi-agent
-environments expose the whole team through joint spaces whose leading axis
-indexes the agents, and every environment reports per-agent rewards in
+episode limit. The whole team is exposed through \emph{joint} spaces whose
+leading axis indexes the agents: observations are \code{float32} arrays of
+shape \code{(n\_agents, obs\_dim)} contained in \code{observation\_space}, and
+the action covers all agents at once. \code{step} returns the team reward, and
+every environment reports the per-agent rewards in
 \code{info["agent\_rewards"]}. Each environment enforces its own episode limit
-through a constructor argument; the registry does not add a \code{TimeLimit}
-wrapper that could silently override it. Chapter~\ref{chap:envlib} describes
-these conventions in detail.
+through a constructor argument, and \code{env\_lib.make(...,
+max\_episode\_steps=N)} sets that argument instead of adding a second limit.
+Chapter~\ref{chap:envlib} describes these conventions in detail.
 
-\paragraph{Vectorised implementations.}
-Dynamics, observations and rewards are computed with NumPy array expressions
-rather than Python loops over agents. The Kuramoto model additionally has a
-PyTorch backend that simulates many independent systems in one batch, on the
-CPU or a GPU. The networks of \pkg{neural\_toolkit} are batch-first PyTorch
-modules. Section~\ref{sec:examples-benchmarks} reports measured step times.
+\paragraph{Batch-first kernels shared by single and vector environments.}
+The dynamics of the environments with a native vector implementation are
+written once, as array operations on a leading batch dimension $B$. The single
+environment runs them with $B = 1$ and the native vector environment with
+$B$ = \code{num\_envs}, so both follow exactly the same model, and copy~0 of a
+vector environment reproduces a single environment started from the same state
+(the test suite checks this). Their steps contain no Python loop over agents or
+copies. The Kuramoto model additionally has a PyTorch backend that simulates many systems
+on the CPU or a GPU. Section~\ref{sec:examples-benchmarks} and
+Chapter~\ref{chap:workflow} report measured step times and throughput.
+
+\paragraph{The interaction graph as data.}
+Who observes, communicates with or is coupled to whom is explicit data rather
+than a hidden detail of the code. The networked continuous-control
+environments expose the graph as a matrix (\code{adjacency} of Consensus,
+PowerGrid and Platoon, \code{topology\_matrix} and \code{coupling\_matrix} of
+the Kuramoto environments), together with the Laplacian or the line
+susceptances where they matter, and document the layout of the observation in
+an \code{observation\_layout} property. The shared functions of
+\pkg{env\_lib.utils.graphs} build standard topologies (PowerGrid draws its
+transmission network with them) and compute Laplacians, algebraic
+connectivity and $k$-hop neighbourhoods of any of these matrices.
+
+\paragraph{Baselines as functions of the observation.}
+Every environment ships a classical controller, decentralised wherever the
+environment has several agents: Laplacian consensus, droop control,
+cooperative adaptive cruise control and others
+(Section~\ref{sec:workflow-baselines}). Each controller is a pure function of
+the observation that accepts any leading batch shape, so the same object
+drives a single environment and all copies of a vector environment, and a
+decentralised controller computes the action of an agent from that agent's
+row of the observation only.
+\code{env\_lib.baseline\_policy(env)} returns the controller for any
+environment, which makes a reference result one line of code.
+
+\paragraph{Light core, lazy extras.}
+\code{import env\_lib} and \code{import toolkit} load only the core
+dependencies (NumPy, SciPy, matplotlib, Gymnasium and PyYAML). Environment
+classes, renderers and toolkit subpackages are imported on first use, and
+PyTorch, pygame, pymunk, imageio and Tk are imported only when a feature that
+needs them is used; a missing dependency produces an error message that names
+the package extra to install. Other packages are optional integrations, never
+requirements: the parallel adapter of Section~\ref{sec:workflow-wrappers},
+for example, works without the library whose interface it implements.
 
 \paragraph{Reproducibility.}
 All randomness of an environment comes from its own random generator
-(\code{self.np\_random}), which is seeded by \code{reset(seed=...)}. No library code
-seeds or draws from the global NumPy, Python or PyTorch random state, and
+(\code{self.np\_random}), which is seeded by \code{reset(seed=...)}. No library
+code seeds or draws from the global NumPy, Python or PyTorch random state, and
 plotting functions never modify the global matplotlib configuration unless
 asked to. Section~\ref{sec:trouble-seeding} lists everything that must be
 seeded for an experiment to be repeatable.
@@ -165,13 +264,6 @@ on machines without a display, for example on a compute cluster or in
 continuous integration. In \code{"human"} mode an environment renders itself
 at the end of every \code{reset()} and \code{step()}, as Gymnasium prescribes.
 
-\paragraph{Lazy optional dependencies.}
-\code{import env\_lib} and \code{import toolkit} load only the core
-dependencies (NumPy, SciPy, matplotlib, Gymnasium and PyYAML). PyTorch,
-pygame, pymunk, imageio and Tk are imported only when a feature that needs
-them is used, and a missing dependency produces an error message that names
-the package extra to install.
-
 \section{Package layout}\label{sec:intro-layout}
 
 The repository uses the standard \code{src} layout:
@@ -183,14 +275,22 @@ My_Tool_Box/
   LICENSE                  MIT licence
   src/
     env_lib/               environments (import name env_lib)
-      registration.py      Gymnasium ids, env_lib.make(), env_lib.list_envs()
-      utils/               themes, renderers, GIF/MP4 recording
-      kos_env/             Kuramoto oscillators (NumPy and PyTorch)
+      registration.py      ids and metadata, make(), make_vec(), get_spec()
+      catalog.py           catalog(), describe()
+      baselines.py         baseline controllers, baseline_policy()
+      __main__.py          the env-lib command line
+      errors.py            ResetNeededError
+      wrappers/            FlattenJointSpaces, TeamReward, ParallelEnvAdapter
+      utils/               rendering, recording, graphs, vector base class,
+                           evaluate() and rollout()
+      kos_env/             Kuramoto oscillators (NumPy, PyTorch, vector)
+      consensus_env/       Consensus and Formation (single and vector)
+      power_grid_env/      PowerGrid (single and vector)
+      platoon_env/         Platoon (single and vector)
+      ajlatt_env/          AJLATT (configuration, estimation, maps, rendering)
+      pistonball_env/      Pistonball
       linemsg_env/         LineMsg
       wireless_comm_env/   WirelessComm
-      pistonball_env/      Pistonball
-      consensus_env/       Consensus and Formation
-      ajlatt_env/          AJLATT (configuration, estimation, maps, rendering)
     toolkit/               research utilities (import name toolkit)
       plotkit/             plotting
       neural_toolkit/      PyTorch networks and tabular tools
@@ -201,24 +301,31 @@ My_Tool_Box/
   docs/manual/             this manual (LaTeX sources)
 \end{textcode}
 
-A first program creates an environment through the registry, runs the
-distributed controller that ships with the consensus environment and renders
-the final state:
+A first program creates an environment through the registry, runs its
+baseline controller for one episode, and then evaluates the same controller on
+256 copies of the environment simulated as one batch:
 
 \begin{pycode}
 import env_lib
 
-env = env_lib.make("Consensus-v0", render_mode="rgb_array")
-obs, info = env.reset(seed=0)
-for _ in range(200):
-    action = env.unwrapped.laplacian_policy()   # baseline controller
-    obs, reward, terminated, truncated, info = env.step(action)
+env = env_lib.make("PowerGrid-v0")              # 16 buses, one agent per bus
+policy = env_lib.baseline_policy(env)           # decentralised droop control
+obs, info = env.reset(seed=0)                   # obs: (16, 10) float32
+while True:
+    obs, reward, terminated, truncated, info = env.step(policy(obs))
     if terminated or truncated:
         break
-frame = env.render()                            # (H, W, 3) uint8 image
-print(info["error"], info["agent_rewards"].shape, frame.shape)
-env.close()
+print(info["peak_abs_omega"], info["agent_rewards"].shape)   # rad/s, (16,)
+
+envs = env_lib.make_vec("PowerGrid-v0", num_envs=256)       # native batch
+result = env_lib.evaluate(envs, env_lib.baseline_policy(envs),
+                          n_episodes=256, seed=0)
+print(result.mean_return, result.ci95)          # mean return, 95% CI half-width
 \end{pycode}
+
+The same can be done without code: \code{env-lib run PowerGrid-v0} runs one
+episode of the baseline and \code{env-lib evaluate PowerGrid-v0 -{}-num-envs 64}
+compares it with random actions (Section~\ref{sec:workflow-cli}).
 
 \section{Conventions used in this manual}\label{sec:intro-conventions}
 
@@ -227,21 +334,27 @@ Python identifiers are set in \code{monospace}, package and module names in
 Shell commands are meant to be run from the repository root in a POSIX shell;
 on Windows, replace \code{export VAR=value} by \code{set VAR=value}
 (\code{cmd}) or \code{\$env:VAR="value"} (PowerShell). Code examples use the
-public API of version 1.0 and were executed with it. Array shapes are written
+public API of version 1.1 and were executed with it. Array shapes are written
 as tuples, for example \code{(n\_agents, obs\_dim)}; \code{B} denotes a batch
-size and \code{T} a sequence length.
+size (the number of copies of a vector environment) and \code{T} a sequence
+length.
 
 \section{How this manual is organised}\label{sec:intro-organisation}
 
 \begin{itemize}
   \item Chapter~\ref{chap:install} covers requirements, installation with
     optional extras, verification and building this manual.
-  \item Part~I documents the environments: the common interface
-    (Chapter~\ref{chap:envlib}), the Kuramoto oscillators
-    (Chapter~\ref{chap:kuramoto}), LineMsg and WirelessComm
-    (Chapter~\ref{chap:networked}), Pistonball (Chapter~\ref{chap:pistonball}),
-    consensus and formation control (Chapter~\ref{chap:consensus}) and AJLATT
-    (Chapter~\ref{chap:ajlatt}).
+  \item Part~I documents the environments: the common interface, the
+    registry and the graph utilities (Chapter~\ref{chap:envlib}), the
+    Kuramoto oscillators (Chapter~\ref{chap:kuramoto}), LineMsg and
+    WirelessComm (Chapter~\ref{chap:networked}), Pistonball
+    (Chapter~\ref{chap:pistonball}), consensus and formation control
+    (Chapter~\ref{chap:consensus}), power-grid frequency control
+    (Chapter~\ref{chap:power_grid}), vehicle platoons
+    (Chapter~\ref{chap:platoon}) and AJLATT (Chapter~\ref{chap:ajlatt}). It
+    closes with the workflow layer: vectorised simulation, the catalogue and
+    the command line, adapters, baseline controllers and evaluation
+    (Chapter~\ref{chap:workflow}).
   \item Part~II documents the toolkit: its structure and \pkg{parakit}
     (Chapter~\ref{chap:toolkit}), \pkg{plotkit} (Chapter~\ref{chap:plotkit})
     and \pkg{neural\_toolkit} (Chapter~\ref{chap:neural}).
@@ -250,7 +363,7 @@ size and \code{T} a sequence length.
     troubleshooting (Chapter~\ref{chap:troubleshooting}).
   \item Appendix~\ref{app:api} is a compact API reference and
     Appendix~\ref{app:migration} explains how to migrate code written for
-    versions before 1.0.
+    version 1.0 and for the versions before it.
 \end{itemize}
 
 \section{Licence and citation}\label{sec:intro-licence}
@@ -267,7 +380,7 @@ If the package contributes to published work, please cite it as follows:
   author  = {Wang, Dongming},
   title   = {My Tool Box: Multi-Agent Reinforcement Learning
              Environments and Research Utilities},
-  version = {1.0.0},
+  version = {1.1.0},
   year    = {2026},
   url     = {https://github.com/EricDMW/My_Tool_Box}
 }

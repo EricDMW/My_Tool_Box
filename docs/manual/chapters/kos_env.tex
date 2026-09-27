@@ -408,6 +408,32 @@ python examples/kuramoto_demo.py --mode constant --topology two_clusters \
 \end{shellcode}
 
 % ---------------------------------------------------------------------------
+\section{Native vector environment}\label{sec:kuramoto-vector}
+
+The NumPy ids (\envid{KuramotoOscillator-*}) have a native batched
+implementation, \code{KuramotoOscillatorVectorEnv}, which
+\code{env\_lib.make\_vec(id, B)} returns. It shares the array kernels of
+\code{KuramotoOscillatorEnv}, takes the same constructor arguments plus
+\code{num\_envs} and \code{autoreset\_mode}, and every copy reproduces a single
+environment started from the same state bit for bit, for both coupling modes,
+all reward types and both integrators. \code{reset(options=...)} accepts
+\code{"phases"}, \code{"natural\_frequencies"} and, in the dynamic coupling
+mode, \code{"coupling\_strengths"}, either for all copies or with a leading
+$B$ axis, and combines with \code{"reset\_mask"}; the batched state is
+available as \code{envs.unwrapped.phases} of shape $(B, N)$. The PyTorch
+backend of Section~\ref{sec:kuramoto-torch} is an alternative when the batch
+should live on a GPU. Chapter~\ref{chap:workflow} covers autoreset modes,
+seeding and throughput.
+
+\begin{pycode}
+import env_lib
+
+envs = env_lib.make_vec("KuramotoOscillator-v0", num_envs=256)
+obs, _ = envs.reset(seed=0)                     # (256, 75)
+obs, reward, terminated, truncated, info = envs.step(envs.action_space.sample())
+reward.shape, envs.unwrapped.phases.shape       # (256,), (256, 10)
+\end{pycode}
+
 \section{Reproducibility and performance}\label{sec:kuramoto-perf}
 
 \paragraph{Seeding.} \code{reset(seed=s)} seeds \code{self.np\_random}, from

@@ -1,0 +1,560 @@
+% ---------------------------------------------------------------------------
+% Vehicle platoon (cooperative adaptive cruise control) environment
+% ---------------------------------------------------------------------------
+\begingroup
+% Line breaking for paragraphs with long, unbreakable identifiers (local to
+% this chapter): allow looser lines instead of overfull ones.
+\setlength{\emergencystretch}{3em}\tolerance=1000
+\chapter{Vehicle Platoon Control}\label{chap:platoon}
+
+\code{env\_lib.platoon\_env.PlatoonEnv} (registered as \envid{Platoon-v0}, new in
+version 1.1) is a benchmark for cooperative adaptive cruise control (CACC). A
+leader vehicle is followed by $n$ follower vehicles on a single lane. The
+followers are the agents: each commands its own acceleration and must keep a
+speed-dependent distance to its predecessor while the leader drives an
+exogenous speed profile with cruising phases, stop-and-go waves and random
+speed changes. The vehicles have heterogeneous drivetrain lags and exchange data
+over a vehicle-to-vehicle (V2V) communication topology, which determines what
+each agent observes.
+
+The environment reproduces the central phenomenon of platoon control,
+\emph{string stability}: with sensor-only adaptive cruise control (ACC) and a
+short time headway, spacing errors grow from vehicle to vehicle along the
+platoon until vehicles collide, while cooperative ACC, which also uses the
+acceleration communicated by the predecessor, attenuates them.
+Section~\ref{sec:platoon-baseline} demonstrates this numerically. Typical
+research uses are learning decentralised controllers that are safe, comfortable
+and string stable, comparing communication topologies, and studying robustness
+to heterogeneous vehicles. The dynamics are written once for a batch of
+platoons, so \code{PlatoonVectorEnv} simulates thousands of platoons at once
+(Section~\ref{sec:platoon-vector}).
+
+% ---------------------------------------------------------------------------
+\section{Model}\label{sec:platoon-model}
+
+\paragraph{Vehicles.} Vehicle $0$ is the leader and vehicles $i = 1, \dots, n$
+are the followers (agent index $k = i - 1$ in all arrays). Vehicle $i$ has the
+position $p_i$ of its front bumper, speed $v_i$, acceleration $a_i$, length
+$L_i$ and a first-order actuator (drivetrain) lag with time constant $\tau_i$:
+\begin{equation}
+  \dot p_i = v_i, \qquad \dot v_i = a_i, \qquad
+  \dot a_i = \frac{u_i - a_i}{\tau_i},
+  \label{eq:platoon-dynamics}
+\end{equation}
+where $u_i$ is the commanded acceleration, the action of follower $i$, clipped
+to $[a_{\min}, a_{\max}]$. The command is held constant over a step of length
+$\Delta t$ and \eqref{eq:platoon-dynamics} is discretised exactly (zero-order
+hold). With $\alpha_i = e^{-\Delta t/\tau_i}$ and
+$c_i = \tau_i \Delta t - \tau_i^2 (1 - \alpha_i)$,
+\begin{align}
+  a_i^{+} &= \alpha_i a_i + (1 - \alpha_i)\, u_i, \\
+  v_i^{+} &= v_i + \tau_i (1 - \alpha_i)\, a_i
+             + \bigl(\Delta t - \tau_i (1 - \alpha_i)\bigr)\, u_i, \\
+  p_i^{+} &= p_i + \Delta t\, v_i + c_i\, a_i + \bigl(\tfrac12 \Delta t^2 - c_i\bigr)\, u_i .
+\end{align}
+The update is vectorised over vehicles and platoons. Vehicles do not reverse: a
+vehicle whose speed would become negative within a step is held at standstill
+($v = 0$, $a = \max(a, 0)$, position not decreased); the position error of this
+approximation is below $v \Delta t / 2$ at the moment of stopping. The lags and
+lengths are drawn uniformly from \code{tau\_range} and \code{length\_range} with a
+generator seeded by \code{vehicle\_seed}, so every episode uses the same
+heterogeneous platoon, or from \code{self.np\_random} at every reset when
+\code{randomize\_vehicles=True}.
+
+\paragraph{Spacing policy.} Follower $i$ keeps a constant \emph{time headway}
+$h$ to its predecessor. With the gap $g_i$ (rear bumper of the predecessor to
+front bumper of follower $i$), the standstill distance $r$ and the desired gap
+$d_i^{*}$,
+\begin{equation}
+  g_i = p_{i-1} - p_i - L_{i-1}, \qquad d_i^{*} = r + h\, v_i, \qquad
+  e_i = g_i - d_i^{*}, \qquad \Delta v_i = v_{i-1} - v_i,
+  \label{eq:platoon-spacing}
+\end{equation}
+where $e_i$ is the spacing error and $\Delta v_i$ the relative speed. Note that
+$\dot e_i = \Delta v_i - h\, a_i$: a platoon that tracks the spacing policy
+exactly has $\Delta v_i = h\, a_i \neq 0$ while it accelerates or brakes.
+
+\paragraph{Leader.} The leader has the same dynamics; its command follows a
+speed profile drawn per episode from \code{self.np\_random}. The profile starts
+at the initial cruise speed $v_c \sim U[16, 25]$\,m/s, which is held for
+2--5\,s, and continues with a sequence of events. Every event has two segments,
+each of which ramps the reference speed to a target with constant acceleration
+and then holds it (Table~\ref{tab:platoon-scenarios}); segment boundaries are
+aligned with the time grid, and after the last event the speed is held. The
+commands are stored per step ($8 \times$ \code{max\_steps} bytes per platoon).
+Because of the lag, the leader's speed approaches every target from one side,
+without overshoot.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Event types of the leader profile (uniform ranges).}
+  \label{tab:platoon-scenarios}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Event & Segments (target speed, rate, hold time) \\
+    \midrule
+    cruise & twice: $v_c \pm 2$\,m/s at 0.3--0.8\,m/s$^2$, hold 4--10\,s \\
+    stop-and-go & brake at 2--4\,m/s$^2$ to 0--4\,m/s, hold 1--5\,s; accelerate at
+      1--2\,m/s$^2$ to $v_c \pm 3$\,m/s, hold 4--10\,s \\
+    random & twice: target in $[5, 30]$\,m/s at 0.5--2.5\,m/s$^2$, hold 1--6\,s \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\code{scenario="cruise"}, \code{"stop\_and\_go"} and \code{"random"} use one event
+type throughout. The default \code{"mixed"} starts with a stop-and-go wave and
+draws every further event uniformly from the three types, so that every episode
+contains a hard braking manoeuvre in which the string instability of naive
+controllers becomes visible.
+
+\paragraph{Initial state.} The platoon starts near equilibrium at $v_c$: zero
+accelerations, the leader at $p_0 = 0$, follower speeds $v_c + \sigma_v \xi_i$
+and gaps $r + h v_c + \sigma_g \xi'_i$ with standard normal $\xi_i, \xi'_i$
+truncated at three standard deviations ($\sigma_v$ =
+\code{init\_speed\_noise}, $\sigma_g$ = \code{init\_spacing\_noise}; gaps are
+kept above half the desired gap).
+\code{reset(options=...)} overrides parts of the episode; all arrays list the
+leader first:
+\code{"positions"} and \code{"velocities"} (shape \code{(n+1,)}, given
+together), \code{"accelerations"} (default zeros), \code{"leader\_command"}
+(shape \code{(max\_steps,)}, commanded accelerations of the leader, clipped to
+the action bounds), \code{"time\_constants"} and \code{"lengths"} (this episode
+only). Values of these keys are validated strictly; unknown keys are ignored with
+a \code{UserWarning} (PettingZoo's API test passes a dummy option).
+
+% ---------------------------------------------------------------------------
+\section{Communication topologies}\label{sec:platoon-topologies}
+
+\code{topology} selects the V2V links (Table~\ref{tab:platoon-topologies}).
+\code{env.adjacency} is a boolean \code{(n, n)} matrix over the followers:
+\code{adjacency[i, j]} is \code{True} when follower $i$ receives data from
+follower $j$ (rows are receivers, agent indices). The links from the leader are
+reported separately by \code{env.leader\_links}, a boolean vector of length $n$.
+\code{platoon\_adjacency(topology, n)} returns both.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Communication topologies and the observation channels they provide.}
+  \label{tab:platoon-topologies}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    \code{topology} & Links & Channels \\
+    \midrule
+    \code{"predecessor"} (PF) & $i-1 \to i$; the leader sends to follower 1 & predecessor \\
+    \code{"predecessor\_leader"} (PLF) & PF plus the leader to every follower & predecessor, leader \\
+    \code{"bidirectional"} (BD) & $i-1 \to i$ and $i+1 \to i$ & predecessor, follower (not for the last one) \\
+    \code{"none"} & no V2V; radar only & none \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Spaces}\label{sec:platoon-spaces}
+
+\paragraph{Action.} \code{Box(accel\_min, accel\_max, (n,), float32)}, the
+commanded accelerations in m/s$^2$ (default $[-6, 3]$). Any array with $n$
+entries is accepted; it is cast to \code{float32} like the action space and
+clipped to the bounds; NaN or infinite values raise \code{ValueError}.
+
+\paragraph{Observation.} An unbounded \code{Box} of shape \code{(n, 13)},
+\code{float32}; row $k$ belongs to follower $i = k + 1$
+(Table~\ref{tab:platoon-obs}). Every feature is a physical quantity divided by
+a fixed scale (\code{FEATURE\_SCALES}). Radar measurements and the own state
+are always present. Communicated channels that the topology does not provide
+are zero with availability flag 0, so the observation size does not depend on
+the topology. \code{env.observation\_layout} maps every feature name
+(\code{OBSERVATION\_FEATURES}) to its column slice.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Platoon observation (row of follower $i$).}
+  \label{tab:platoon-obs}
+  \begin{tabularx}{\textwidth}{@{}rl>{\raggedright\arraybackslash}Xr@{}}
+    \toprule
+    Col. & Layout key & Content & Scale \\
+    \midrule
+    0 & \code{spacing\_error} & $e_i$ (radar) & 5\,m \\
+    1 & \code{relative\_speed} & $v_{i-1} - v_i$ (radar) & 5\,m/s \\
+    2 & \code{speed} & $v_i$ & 30\,m/s \\
+    3 & \code{acceleration} & $a_i$ & 3\,m/s$^2$ \\
+    4 & \code{predecessor\_available} & 1 for PF, PLF and BD & -- \\
+    5 & \code{predecessor\_acceleration} & $a_{i-1}$ (V2V) & 3\,m/s$^2$ \\
+    6 & \code{predecessor\_command} & $u_{i-1}$ applied in the last step (V2V) & 3\,m/s$^2$ \\
+    7 & \code{leader\_available} & 1 for PLF & -- \\
+    8 & \code{leader\_speed\_error} & $v_0 - v_i$ (V2V) & 5\,m/s \\
+    9 & \code{leader\_acceleration\_error} & $a_0 - a_i$ (V2V) & 3\,m/s$^2$ \\
+    10 & \code{follower\_available} & 1 for BD, except for the last follower & -- \\
+    11 & \code{follower\_spacing\_error} & $e_{i+1}$ (V2V) & 5\,m \\
+    12 & \code{follower\_relative\_speed} & $v_i - v_{i+1}$ (V2V) & 5\,m/s \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Reward and episode end}\label{sec:platoon-reward}
+
+Follower $i$ receives, after the step,
+\begin{equation}
+  r_i = -\bigl(w_e e_i^2 + w_v \Delta v_i^2 + w_u u_i^2 + w_j j_i^2\bigr)\,\Delta t
+        \;-\; P_c\, [g_i \le 0] \;-\; P_b\, [g_i > g_{\max}],
+  \label{eq:platoon-reward}
+\end{equation}
+with the clipped command $u_i$, the jerk $j_i = (a_i^{+} - a_i)/\Delta t$, the
+weights $w_e$ = \code{spacing\_weight} (1.0), $w_v$ = \code{speed\_weight} (0.1),
+$w_u$ = \code{control\_weight} (0.02) and $w_j$ = \code{jerk\_weight} (0.01), the
+collision penalty $P_c$ = \code{collision\_penalty} (500), the break-up penalty
+$P_b$ = \code{breakup\_penalty} (250) and the break-up distance $g_{\max}$ =
+\code{breakup\_distance} (100\,m). The team reward returned by \code{step()} is
+$R = \sum_i r_i$.
+
+The weights make tracking dominate while keeping comfort relevant. The
+relative-speed weight is small because $\Delta v_i \ne 0$ is inherent to the
+time-headway policy during manoeuvres (Section~\ref{sec:platoon-model}); the
+control and jerk terms mainly penalise aggressive or oscillating commands. Over
+20 episodes of the default scenario, the four terms make up 5, 60, 33 and
+2\,\% of the cost of the CACC baseline (which tracks almost perfectly) and 65,
+31, 4 and 0.2\,\% of the cost of ACC with $h = 1.2$\,s, whose cost is eight
+times higher. The collision penalty exceeds the cost of a whole ACC episode of
+the entire team (about 400), so for controllers of that quality ending an
+episode early by a collision does not pay off.
+
+\code{terminated} is \code{True} after a collision ($g_i \le 0$) or a break-up
+($g_i > g_{\max}$) of any follower; \code{truncated} is \code{True} after
+\code{max\_steps} steps.
+
+% ---------------------------------------------------------------------------
+\section{Parameters}\label{sec:platoon-params}
+
+All constructor arguments are keyword-only; \code{env.config} returns them as
+an immutable \code{PlatoonConfig}.
+
+\begingroup\small
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.25\textwidth}>{\raggedright\arraybackslash}p{0.15\textwidth}>{\raggedright\arraybackslash}p{0.54\textwidth}@{}}
+  \caption{Constructor parameters of \code{PlatoonEnv}.}\label{tab:platoon-params}\\
+  \toprule
+  Parameter & Default & Description \\
+  \midrule
+  \endfirsthead
+  \toprule
+  Parameter & Default & Description \\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  \code{n\_followers} & \code{8} & Number of followers (agents), $\ge 1$. \\
+  \code{topology} & \code{"predecessor"} & \code{"predecessor"}, \code{"predecessor\_leader"}, \code{"bidirectional"} or \code{"none"}. \\
+  \code{scenario} & \code{"mixed"} & Leader profile: \code{"mixed"}, \code{"cruise"}, \code{"stop\_and\_go"} or \code{"random"}. \\
+  \code{dt} & \code{0.1} & Time step in seconds. \\
+  \code{max\_steps} & \code{600} & Episode length (60\,s). \\
+  \code{headway} & \code{0.6} & Time headway $h$ in seconds ($\ge 0$). \\
+  \code{standstill\_distance} & \code{2.0} & Standstill distance $r$ in metres ($> 0$). \\
+  \code{accel\_min}, \code{accel\_max} & \code{-6.0}, \code{3.0} & Command bounds in m/s$^2$ ($a_{\min} < 0 < a_{\max}$). \\
+  \code{tau\_range} & \code{(0.2, 0.4)} & Range of the actuator lags $\tau_i$ in seconds. \\
+  \code{length\_range} & \code{(4.0, 5.0)} & Range of the vehicle lengths in metres. \\
+  \code{vehicle\_seed} & \code{0} & Seed of the fixed vehicle parameters (\code{None}: fresh entropy). \\
+  \code{randomize\_vehicles} & \code{False} & Resample lags and lengths from \code{self.np\_random} at every reset. \\
+  \code{init\_spacing\_noise} & \code{0.1} & Standard deviation $\sigma_g$ of the initial gap perturbation (m). \\
+  \code{init\_speed\_noise} & \code{0.05} & Standard deviation $\sigma_v$ of the initial speed perturbation (m/s). \\
+  \code{spacing\_weight} & \code{1.0} & $w_e$ in \eqref{eq:platoon-reward}. \\
+  \code{speed\_weight} & \code{0.1} & $w_v$. \\
+  \code{control\_weight} & \code{0.02} & $w_u$. \\
+  \code{jerk\_weight} & \code{0.01} & $w_j$. \\
+  \code{collision\_penalty} & \code{500.0} & $P_c$, per colliding follower. \\
+  \code{breakup\_distance} & \code{100.0} & Gap $g_{\max}$ (m) above which the platoon counts as broken up. \\
+  \code{breakup\_penalty} & \code{250.0} & $P_b$, per follower beyond $g_{\max}$. \\
+  \code{render\_mode} & \code{None} & \code{None}, \code{"human"} or \code{"rgb\_array"}. \\
+\end{longtable}
+\endgroup
+
+The defaults were chosen as follows. A headway of 0.6\,s is a typical CACC
+setting and short enough that sensor-only ACC is string unstable. Lags of
+0.2--0.4\,s are heterogeneous yet within the range for which the CACC
+baseline is string stable (up to 0.43\,s, Section~\ref{sec:platoon-baseline}).
+The command bounds allow emergency braking at twice the leader's hardest
+braking (4\,m/s$^2$). The initial perturbations are small compared with the
+errors caused by the leader, so that the peak-error statistics measure the
+propagation of disturbances rather than the initial condition.
+
+% ---------------------------------------------------------------------------
+\section{Info dictionary and properties}\label{sec:platoon-info}
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Platoon info dictionary (per-follower arrays have shape \code{(n,)}, \code{float64}).}
+  \label{tab:platoon-info}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Key & Content \\
+    \midrule
+    \code{agent\_rewards} & rewards $r_i$ (zeros at reset) \\
+    \code{spacing\_errors}, \code{gaps}, \code{relative\_speeds} & $e_i$, $g_i$ and $\Delta v_i$ \\
+    \code{speeds}, \code{accelerations} & $v_i$ and $a_i$ of the followers \\
+    \code{commands} & applied (clipped) commands $u_i$ \\
+    \code{peak\_spacing\_errors} & $\max |e_i|$ since the reset \\
+    \code{error\_amplification} & peak error of the last follower divided by that of the
+      first (the latter floored at 0.01\,m); values above one indicate amplification
+      along the platoon \\
+    \code{leader\_speed}, \code{leader\_acceleration} & $v_0$ and $a_0$ \\
+    \code{min\_gap} & $\min_i g_i$ \\
+    \code{collision}, \code{breakup} & termination causes \\
+    \code{step}, \code{time} & steps taken and simulated time in seconds \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Read-only properties give the parameters (\code{n\_followers}, \code{n\_agents},
+\code{topology}, \code{scenario}, \code{dt}, \code{max\_steps}, \code{headway},
+\code{standstill\_distance}, \code{obs\_dim}, \code{config}), the graph
+(\code{adjacency}, \code{leader\_links}, \code{observation\_layout}) and copies of
+the state with the leader first (\code{positions}, \code{velocities},
+\code{accelerations}, \code{time\_constants}, \code{lengths},
+\code{leader\_command}) or per follower (\code{gaps}, \code{spacing\_errors}), as
+well as \code{step\_count}. Using the state before \code{reset()} raises
+\code{env\_lib.ResetNeededError}.
+
+% ---------------------------------------------------------------------------
+\section{Baseline controllers and string stability}\label{sec:platoon-baseline}
+
+\code{cacc\_policy(obs, *, k\_p=0.5, k\_d=0.6, k\_a=0.65, accel\_min=-6.0,
+accel\_max=3.0)} is the decentralised linear CACC law
+\begin{equation}
+  u_i = k_p\, e_i + k_d\, (v_{i-1} - v_i) + k_a\, a_{i-1},
+  \label{eq:platoon-cacc}
+\end{equation}
+a pure function of each follower's own observation row that works for any
+leading batch shape, \code{(..., n, 13)} $\to$ \code{(..., n)}. The predecessor
+acceleration $a_{i-1}$ is taken from the V2V channel and multiplied by the
+availability flag, so without communication (\code{topology="none"}) and for
+\code{k\_a=0} the law is sensor-only ACC. \code{env\_lib.baseline\_policy(env)}
+binds it with the action bounds of the environment.
+
+\paragraph{Choice of the gains.} The law has the structure of the CACC designs
+studied in the platooning literature: a PD feedback on the spacing error and
+the relative speed plus a feed-forward of the acceleration that the predecessor
+transmits over V2V. That literature shows that the feed-forward is what makes
+string stability possible at much shorter time headways than with ACC. For
+identical vehicles and the exact discretisation above, the commands of
+consecutive followers satisfy $U_i(z) = \Gamma(z)\, U_{i-1}(z)$ with
+\begin{equation}
+  \Gamma = \frac{k_p H_p + k_d H_v + k_a H_a}{1 + k_p H_p + (k_p h + k_d) H_v},
+  \label{eq:platoon-string}
+\end{equation}
+where $H_p$, $H_v$ and $H_a$ are the transfer functions from the command to the
+position, speed and acceleration of one vehicle; the same ratio relates
+consecutive positions, speeds and accelerations. The platoon is string stable
+when $\max_\omega |\Gamma(e^{j\omega\Delta t})| \le 1$; since $\Gamma(1) = 1$ the
+peak is never below one. \code{string\_stability\_gain(k\_p, k\_d, k\_a, *,
+headway, time\_constant, dt)} evaluates this peak (and returns \code{inf} if the
+vehicle's own loop is unstable). The gains were chosen with it: for
+$k_p = 0.5$\,s$^{-2}$ and $k_d = 0.6$\,s$^{-1}$ the peak equals one for all lags
+in $[0.2, 0.4]$\,s at $h = 0.6$\,s exactly when $k_a \in [0.575, 0.755]$, and
+$k_a = 0.65$ lies in the middle of this interval. A full feed-forward
+($k_a = 1$) is not string stable with a lagged drivetrain (peak 1.25), because
+the measured acceleration of the predecessor lags its command.
+Table~\ref{tab:platoon-gain} lists the peak over the lag range for both
+controllers: CACC is string stable from $h \approx 0.56$\,s on, ACC with the
+same feedback gains only from $h \approx 1.14$\,s on; with the default gains
+CACC stays string stable at $h = 0.6$\,s for lags up to 0.43\,s.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Peak string-stability gain $\max_\omega |\Gamma|$, worst case over
+    $\tau \in [0.2, 0.4]$\,s ($\Delta t = 0.1$\,s, $k_p = 0.5$, $k_d = 0.6$;
+    CACC: $k_a = 0.65$, ACC: $k_a = 0$). Values above one are string unstable.}
+  \label{tab:platoon-gain}
+  \begin{tabular}{@{}lccccccc@{}}
+    \toprule
+    Headway $h$ [s] & 0.4 & 0.5 & 0.6 & 0.8 & 1.0 & 1.2 & 1.5 \\
+    \midrule
+    CACC & 1.136 & 1.042 & 1.000 & 1.000 & 1.000 & 1.000 & 1.000 \\
+    ACC  & 1.625 & 1.491 & 1.377 & 1.197 & 1.062 & 1.000 & 1.000 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Numerical demonstration.} Table~\ref{tab:platoon-baselines}
+compares random actions, ACC at the default headway, ACC at $h = 1.2$\,s and
+CACC in 20 episodes per scenario (reset seeds 0--19, 8 followers, predecessor
+following, default parameters otherwise). ACC at $h = 0.6$\,s is string unstable:
+in the cruise scenario the peak spacing error grows from the first to the last
+follower by a factor of 2.4 (median), and in every stop-and-go episode the
+amplified braking wave ends in a collision after about 11\,s. ACC with the
+longer headway of 1.2\,s is string stable again (amplification below one) but
+keeps twice the distance and tracks worse. CACC at $h = 0.6$\,s never collides,
+attenuates the errors along the platoon (median last-to-first ratio 0.35) and
+keeps them below 0.42\,m in all stop-and-go episodes. It clearly beats random
+actions, which collide within about 7\,s.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Baselines over 20 episodes per scenario: mean return, collisions,
+    mean peak $|e_i|$ of the first and the last (8th) follower, and median
+    error amplification (peak of the last divided by peak of the first
+    follower). Episodes that end in a collision are cut short, so their peaks
+    only cover the part of the platoon the wave reached.}
+  \label{tab:platoon-baselines}
+  \begin{tabular}{@{}llrcrrr@{}}
+    \toprule
+    Scenario & Controller & Return & Collisions & Peak $|e_1|$ [m] & Peak $|e_8|$ [m] & Ampl. \\
+    \midrule
+    mixed       & random           & $-4395$ & 20/20 & 22.57 & 11.30 & 0.49 \\
+                & ACC, $h = 0.6$   & $-844$  & 20/20 & 4.16 & 1.28 & 0.10 \\
+                & ACC, $h = 1.2$   & $-395$  & 0/20  & 1.76 & 1.58 & 0.93 \\
+                & CACC, $h = 0.6$  & $-50$   & 0/20  & 0.26 & 0.10 & 0.35 \\
+    \midrule
+    stop-and-go & ACC, $h = 0.6$   & $-816$  & 20/20 & 4.30 & 1.24 & 0.03 \\
+                & ACC, $h = 1.2$   & $-529$  & 0/20  & 1.94 & 1.66 & 0.86 \\
+                & CACC, $h = 0.6$  & $-68$   & 0/20  & 0.28 & 0.11 & 0.35 \\
+    \midrule
+    cruise      & ACC, $h = 0.6$   & $-140$  & 0/20  & 0.83 & 1.96 & 2.40 \\
+                & ACC, $h = 1.2$   & $-8.2$  & 0/20  & 0.35 & 0.23 & 0.67 \\
+                & CACC, $h = 0.6$  & $-1.3$  & 0/20  & 0.12 & 0.08 & 0.74 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The standard deviation of the CACC return in the mixed scenario is 13. In the
+cruise scenario the errors of CACC are so small (about 0.1\,m) that the initial
+perturbations dominate the peaks, which is why its amplification ratio is less
+informative there. The example script reproduces such a comparison:
+
+\begin{shellcode}
+# random vs ACC vs CACC (default settings), then a GIF of CACC in stop-and-go
+python examples/platoon_demo.py
+python examples/platoon_demo.py --scenario stop_and_go --render renders/platoon.gif
+# a longer headway, bidirectional communication and 12 followers
+python examples/platoon_demo.py --headway 1.2 --topology bidirectional --vehicles 12
+\end{shellcode}
+
+% ---------------------------------------------------------------------------
+\section{Vector environment}\label{sec:platoon-vector}
+
+\code{PlatoonVectorEnv(num\_envs, *, autoreset\_mode="next\_step",
+render\_mode=None, **kwargs)} takes the keyword arguments of \code{PlatoonEnv}
+and simulates \code{num\_envs} platoons with the same batched core, so a copy
+evolves exactly like a single environment started from the same state (the
+test suite checks bit-for-bit equality of copy 0 with a single environment).
+\code{env\_lib.make\_vec("Platoon-v0", num\_envs)} creates it. Observations have
+shape \code{(num\_envs, n, 13)}, actions \code{(num\_envs, n)}, rewards are the team
+rewards of the copies and the info arrays gain a leading \code{num\_envs}
+dimension (\code{agent\_rewards} has shape \code{(num\_envs, n)}). Reset options may
+have the single-environment shape (applied to every reset copy) or an extra
+leading \code{num\_envs} dimension. With the default \code{"next\_step"}
+autoreset, the info rows of the copies reset in a step describe their new
+initial state, as in \code{gymnasium.vector.SyncVectorEnv}. \code{render()}
+draws copy 0. All copies share one generator, so copy $b$ does not reproduce a
+single environment seeded with \code{seed + b}.
+
+Table~\ref{tab:platoon-throughput} reports the measured throughput of
+\code{step()} (CACC actions, no resets during the measurement; policy time
+excluded) against \code{gymnasium.vector.SyncVectorEnv} of the single
+environment, on a 4-core x86-64 machine with Python 3.11 and NumPy 2.4 (one
+thread). A single \code{PlatoonEnv.step()} takes about 78\,$\mu$s for 8 as for
+64 followers. With random actions, which end episodes after about 65 steps and
+therefore reset many copies every step, the native environment reaches
+0.65\,M environment steps per second for $n = 8$ and $B = 1024$ and
+0.13\,M for $n = 64$.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Throughput of \code{PlatoonVectorEnv} (native) and of
+    \code{SyncVectorEnv} over single environments (sync): time per
+    \code{step()} of the whole batch, environment steps and agent steps
+    ($n$ per environment step) per second, and the speed-up of native over
+    sync.}
+  \label{tab:platoon-throughput}
+  \begin{tabular}{@{}rrrrrrr@{}}
+    \toprule
+    & & \multicolumn{3}{c}{native} & sync & \\
+    \cmidrule(lr){3-5}\cmidrule(lr){6-6}
+    $n$ & $B$ & ms/step & env-steps/s & agent-steps/s & env-steps/s & speed-up \\
+    \midrule
+    8  & 1    & 0.118 & 8\,500      & 68\,000      & 7\,600  & 1.1 \\
+    8  & 64   & 0.162 & 395\,000    & 3.2\,M       & 10\,000 & 40 \\
+    8  & 1024 & 0.743 & 1\,380\,000 & 11.0\,M      & 9\,000  & 153 \\
+    64 & 1    & 0.128 & 7\,800      & 0.50\,M      & 7\,100  & 1.1 \\
+    64 & 64   & 0.309 & 207\,000    & 13.3\,M      & 8\,500  & 24 \\
+    64 & 1024 & 5.21  & 197\,000    & 12.6\,M      & 8\,300  & 24 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Rendering}\label{sec:platoon-render}
+
+The dashboard ($1000 \times 560$ pixels, Figure~\ref{fig:platoon}) shows the
+road at the top: a two-lane strip seen from above with a camera that follows the
+platoon (moving lane markings and distance posts). Vehicles are rounded
+rectangles drawn to scale in length; the leader is drawn in the text colour and
+labelled, the followers in a sequential colour ramp from the first to the last
+follower. Brake lights glow when a vehicle decelerates. The gap in front of
+every follower is shaded by its spacing error (red: too close, blue: too far,
+more opaque for larger errors), a tick marks the desired position, and the V2V
+links of the topology are drawn as arcs with moving data packets. Below, the
+spacing errors of all followers over time show how disturbances propagate, the
+speed panel shows the leader, its reference profile for the whole episode and
+the followers, and the bar chart gives the peak spacing error of every follower
+together with the last-to-first ratio. The header reports the team size, the
+topology, step, time, leader speed and minimum gap, with a status badge
+(CRUISING, COLLISION, BREAK-UP or COMPLETE). Both themes are supported. An
+\code{"rgb\_array"} frame takes about 24\,ms for 8 followers and 40\,ms for 64
+(mean over an episode; the first frame, which builds the figure, about 0.25\,s).
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\figwidth]{platoon.png}
+  \caption{CACC in the stop-and-go scenario (seed 2, light theme) at
+    $t = 31.5$\,s: the leader has started the second braking manoeuvre and the
+    braking wave (brake lights) travels down the platoon. The spacing errors
+    stay below 0.35\,m, and the peak errors of the last followers are much
+    smaller than those of the first ones (last over first follower: 0.33).}
+  \label{fig:platoon}
+\end{figure}
+
+% ---------------------------------------------------------------------------
+\section{Usage}\label{sec:platoon-usage}
+
+\begin{pycode}
+import env_lib
+from env_lib.platoon_env import cacc_policy
+
+env = env_lib.make("Platoon-v0", topology="predecessor_leader",
+                   scenario="stop_and_go")
+obs, info = env.reset(seed=0)                  # obs: (8, 13) float32
+layout = env.unwrapped.observation_layout
+print(obs[:, layout["leader_available"]].ravel())  # all ones for PLF
+episode_return = 0.0
+while True:
+    action = cacc_policy(obs)                  # ACC: cacc_policy(obs, k_a=0.0)
+    obs, reward, terminated, truncated, info = env.step(action)
+    episode_return += reward
+    if terminated or truncated:
+        break
+print(info["collision"], info["peak_spacing_errors"], episode_return)
+env.close()
+
+# 1024 platoons in one batch; the same policy works on the batched observation.
+envs = env_lib.make_vec("Platoon-v0", num_envs=1024)
+obs, infos = envs.reset(seed=0)                # obs: (1024, 8, 13)
+for _ in range(600):
+    obs, rewards, terminated, truncated, infos = envs.step(cacc_policy(obs))
+envs.close()
+\end{pycode}
+
+A custom leader profile is passed through the reset options, for example a
+constant speed with \code{env.reset(options=\{"leader\_command":
+np.zeros(env.unwrapped.max\_steps)\})}; with \code{init\_spacing\_noise=0} and
+\code{init\_speed\_noise=0} the platoon then starts and stays in equilibrium
+under CACC.
+
+% ---------------------------------------------------------------------------
+\section{Reproducibility}\label{sec:platoon-repro}
+
+The leader profile, the initial perturbations and, with
+\code{randomize\_vehicles=True}, the vehicle parameters are drawn from
+\code{self.np\_random}, seeded by \code{reset(seed=...)}. With the default
+\code{randomize\_vehicles=False} the heterogeneous platoon is fixed by
+\code{vehicle\_seed} and identical in every instance, including every copy of a
+vector environment. The simulation itself is deterministic.
+
+\endgroup

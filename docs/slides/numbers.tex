@@ -1,0 +1,36 @@
+% Figures quoted on the slides, measured on one core of an Intel Xeon at
+% 2.8 GHz (OMP_NUM_THREADS=1) with benchmarks/benchmark_vector.py,
+% benchmarks/benchmark_envs.py and env_lib.evaluate (release 1.1).
+\newcommand{\NumFamilies}{8}
+\newcommand{\NumIds}{18}
+\newcommand{\NumContinuous}{6}
+\newcommand{\NumThroughput}{2--3\,M}
+\newcommand{\NumTests}{1\,140}
+\newcommand{\NumHandbookPages}{187}
+\newcommand{\NumEvalEpisodes}{64}
+\newcommand{\FigTitleA}{power_grid.png}
+\newcommand{\FigTitleB}{platoon.png}
+\newcommand{\FigPowerGrid}{power_grid.png}
+\newcommand{\FigPlatoon}{platoon.png}
+% Platoon-v0, 8 followers, random actions, automatic resets included.
+\newcommand{\ThroughputTitle}{Platoon-v0, 8 followers, one CPU core}
+\newcommand{\ThroughputNative}{(1,57023) (16,394933) (64,908170) (256,2361407) (1024,4235400)}
+\newcommand{\ThroughputSync}{(1,49192) (16,62560) (64,65584) (256,58960)}
+\newcommand{\PerfRows}{%
+  Kuramoto, 50 oscillators & 2.36 ms & 0.09 ms\\
+  Kuramoto (PyTorch), $50 \times 8$ & 10.3 ms & 0.45 ms\\
+  WirelessComm, $12 \times 12$ & 0.56 ms & 0.06 ms\\
+  Pistonball, 20 pistons & 1.11 ms & 0.08 ms\\
+  AJLATT, 4 robots & 90 ms & 4.7 ms\\
+  PowerGrid, 16 buses & new & 0.25 ms\\
+  Platoon, 8 followers & new & 0.13 ms\\}
+\newcommand{\BaselineRows}{%
+  PowerGrid & droop control $u_i = -k\,\omega_i$ & $-569$ & $-0.8$\\
+  Platoon & CACC $u_i = k_p e_i + k_d \Delta v_i + k_a a_{i-1}$ & $-5270$ & $-47$\\
+  Consensus & Laplacian protocol & $-17178$ & $-1414$\\
+  Formation & Laplacian protocol on formation offsets & $-18011$ & $-1608$\\
+  Kuramoto (frequency tracking) & frequency compensation and phase feedback & $-117$ & $-104$\\
+  AJLATT (no collision termination) & encircle the target belief & $-33113$ & $-7109$\\
+  Pistonball & ramp towards the ball & $-205$ & $841$\\
+  LineMsg & always relay & $43$ & $95$\\
+  WirelessComm & collision-free access schedule & $388$ & $924$\\}

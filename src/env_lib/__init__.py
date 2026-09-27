@@ -20,7 +20,7 @@ from typing import Any
 
 from env_lib._version import __version__
 from env_lib.errors import ResetNeededError
-from env_lib.registration import list_envs, make, register_envs
+from env_lib.registration import get_spec, list_envs, make, make_vec, register_envs
 
 register_envs()
 
@@ -37,23 +37,42 @@ _LAZY_ATTRIBUTES: dict[str, tuple[str, str]] = {
     "ConsensusEnv": ("env_lib.consensus_env.consensus_env", "ConsensusEnv"),
     "AJLATTEnv": ("env_lib.ajlatt_env.env", "AJLATTEnv"),
     "AJLATTConfig": ("env_lib.ajlatt_env.config", "AJLATTConfig"),
+    "PowerGridEnv": ("env_lib.power_grid_env.power_grid_env", "PowerGridEnv"),
+    "PowerGridVectorEnv": ("env_lib.power_grid_env.power_grid_env", "PowerGridVectorEnv"),
+    "PlatoonEnv": ("env_lib.platoon_env.platoon_env", "PlatoonEnv"),
+    "PlatoonVectorEnv": ("env_lib.platoon_env.platoon_env", "PlatoonVectorEnv"),
+    "ConsensusVectorEnv": ("env_lib.consensus_env.vector", "ConsensusVectorEnv"),
+    "KuramotoOscillatorVectorEnv": ("env_lib.kos_env.vector", "KuramotoOscillatorVectorEnv"),
+    # Convenience API.
+    "EnvInfo": ("env_lib.catalog", "EnvInfo"),
+    "describe": ("env_lib.catalog", "describe"),
+    "baseline_policy": ("env_lib.baselines", "baseline_policy"),
+    "evaluate": ("env_lib.utils.evaluation", "evaluate"),
+    "rollout": ("env_lib.utils.evaluation", "rollout"),
 }
 
 _SUBPACKAGES = (
     "ajlatt_env",
+    "baselines",
+    "catalog",
     "consensus_env",
     "kos_env",
     "linemsg_env",
     "pistonball_env",
+    "platoon_env",
+    "power_grid_env",
     "utils",
     "wireless_comm_env",
+    "wrappers",
 )
 
 __all__: list[str] = [
     "ResetNeededError",
     "__version__",
+    "get_spec",
     "list_envs",
     "make",
+    "make_vec",
     "register_envs",
     *sorted(_LAZY_ATTRIBUTES),
     *_SUBPACKAGES,

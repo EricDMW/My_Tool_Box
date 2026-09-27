@@ -7,6 +7,9 @@ Two interchangeable backends of the same controlled Kuramoto model:
   in parallel on CPU or GPU. Requires the optional ``torch`` dependency
   (``pip install "my-tool-box[torch]"``) and is imported lazily.
 
+:class:`KuramotoOscillatorVectorEnv` is the natively batched Gymnasium vector
+environment of the NumPy backend (used by ``env_lib.make_vec``).
+
 The Gymnasium ids (``KuramotoOscillator-v0``, ``KuramotoOscillatorTorch-v0``,
 ...) are registered centrally by :mod:`env_lib.registration` when
 :mod:`env_lib` is imported.
@@ -24,8 +27,14 @@ import warnings
 from typing import Any
 
 from env_lib.kos_env.kuramoto_env import KuramotoOscillatorEnv
+from env_lib.kos_env.vector import KuramotoOscillatorVectorEnv
 
-__all__ = ["KuramotoOscillatorEnv", "KuramotoOscillatorEnvTorch", "register"]
+__all__ = [
+    "KuramotoOscillatorEnv",
+    "KuramotoOscillatorEnvTorch",
+    "KuramotoOscillatorVectorEnv",
+    "register",
+]
 
 
 def register() -> None:

@@ -8,11 +8,12 @@
 \chapter{Environment Library Overview}\label{chap:envlib}
 
 The \pkg{env\_lib} package provides multi-agent environments for research on
-cooperative control, networked decision making and multi-robot estimation. All
+networked control, cooperative decision making and multi-robot estimation. All
 environments implement the Gymnasium API, are registered with Gymnasium when
-\pkg{env\_lib} is imported, and share one rendering and recording layer. This
-chapter describes what the environments have in common; the following chapters
-document each environment in detail:
+\pkg{env\_lib} is imported, and share one registry, one rendering and
+recording layer and one set of graph utilities. This chapter describes what
+the environments have in common; the following chapters document each
+environment in detail:
 
 \begin{itemize}
   \item Kuramoto oscillator networks, NumPy and batched PyTorch backends
@@ -22,16 +23,27 @@ document each environment in detail:
   \item Pistonball, a cooperative physics game (Chapter~\ref{chap:pistonball});
   \item Consensus and formation control on communication graphs
         (Chapter~\ref{chap:consensus});
+  \item PowerGrid, frequency control of a networked power system
+        (Chapter~\ref{chap:power_grid});
+  \item Platoon, cooperative adaptive cruise control of a vehicle platoon
+        (Chapter~\ref{chap:platoon});
   \item AJLATT, active joint localisation and target tracking with a robot
         team, including its map tools (Chapter~\ref{chap:ajlatt}).
 \end{itemize}
+
+Chapter~\ref{chap:workflow} then describes the layer that connects the
+environments to experiments: native vector environments, the catalogue and
+the \code{env-lib} command line, adapters, baseline controllers and
+evaluation.
 
 % ---------------------------------------------------------------------------
 \section{Environments at a glance}\label{sec:envlib-comparison}
 
 Table~\ref{tab:envlib-comparison} summarises the environments in their default
 configuration. $N$ is the number of oscillators, $M$ the number of coupling
-edges and $n$ the number of agents.
+edges and $n$ the number of agents. The NumPy Kuramoto, Consensus, Formation,
+PowerGrid and Platoon environments have native vector implementations
+(Section~\ref{sec:envlib-vector}).
 
 \begin{table}[htbp]
   \centering\footnotesize
@@ -56,6 +68,10 @@ edges and $n$ the number of agents.
       \code{(20, 7)} & sum of local rewards & \pkg{pymunk}, \pkg{pygame} \\
     Consensus / Formation & $n = 8$ & \code{Box(-1, 1, (n, 2))} &
       \code{(8, 16)} & mean of local rewards, success bonus & none \\
+    PowerGrid & $n = 16$ buses & \code{Box(-0.1, 0.1, (n,))}: injection in per unit &
+      \code{(16, 10)} & sum of local rewards, trip penalty & none \\
+    Platoon & $n = 8$ followers & \code{Box(-6, 3, (n,))}: acceleration command in m/s$^2$ &
+      \code{(8, 13)} & sum of local rewards, collision and break-up penalties & none \\
     AJLATT & $n = 4$ robots & \code{Box((n, 2))}: $v \in [0, 2]$, $\omega \in [-\pi/4, \pi/4]$ &
       \code{(4, 24)} & per-robot array & none \\
     \bottomrule
@@ -69,16 +85,24 @@ The package lives in \code{src/env\_lib} of the repository:
 
 \begin{textcode}
 src/env_lib/
-  __init__.py           make(), list_envs(), lazily imported environment classes
-  registration.py       Gymnasium registration of every id (ENV_SPECS)
-  utils/                themes, renderers, record_episode, save_animation
-  kos_env/              Kuramoto oscillators (NumPy and PyTorch backends)
-  linemsg_env/          LineMsg: message relay along a line of agents
-  wireless_comm_env/    WirelessComm: random access to shared access points
-  pistonball_env/       Pistonball: cooperative physics game (pymunk, pygame)
-  consensus_env/        consensus and formation control on graphs
+  __init__.py           public names, lazily imported classes and functions
+  registration.py       ids and metadata (EnvSpec), make(), make_vec(), get_spec()
+  catalog.py            catalog(), describe(), EnvInfo
+  baselines.py          baseline controllers, baseline_policy(), list_baselines()
+  __main__.py           the env-lib command line (python -m env_lib)
+  errors.py             ResetNeededError
+  wrappers/             FlattenJointSpaces, TeamReward, ParallelEnvAdapter
+  utils/                themes, renderers, recording, graphs, BatchedVectorEnv,
+                        evaluate() and rollout()
+  kos_env/              Kuramoto oscillators (NumPy, PyTorch, native vector)
+  consensus_env/        consensus and formation control (single, native vector)
+  power_grid_env/       PowerGrid: frequency control (single, native vector)
+  platoon_env/          Platoon: cooperative adaptive cruise control
   ajlatt_env/           AJLATT: multi-robot localisation and target tracking
     maps/               occupancy maps, map builder and map plotting
+  pistonball_env/       Pistonball: cooperative physics game (pymunk, pygame)
+  linemsg_env/          LineMsg: message relay along a line of agents
+  wireless_comm_env/    WirelessComm: random access to shared access points
 \end{textcode}
 
 Every environment subpackage contains the environment module and a
@@ -89,24 +113,31 @@ figure or window.
 \paragraph{Lazy imports.} \code{import env\_lib} imports neither PyTorch nor
 pygame, pymunk or tkinter. The environment classes of
 Table~\ref{tab:envlib-classes} are attributes of the package that are imported
-on first access, for example \code{env\_lib.ConsensusEnv}. An optional
-dependency is therefore only needed when the environment that uses it is
-created (Table~\ref{tab:envlib-optional}).
+on first access, for example \code{env\_lib.ConsensusEnv}; the same holds for
+\code{env\_lib.baseline\_policy}, \code{env\_lib.evaluate},
+\code{env\_lib.rollout}, \code{env\_lib.describe} and \code{env\_lib.EnvInfo}
+and for the subpackages \pkg{env\_lib.wrappers}, \pkg{env\_lib.baselines} and
+\pkg{env\_lib.catalog}. An optional dependency is therefore only needed when
+the environment that uses it is created (Table~\ref{tab:envlib-optional}).
 
 \begin{table}[htbp]
   \centering\small
   \caption{Environment classes exported by \pkg{env\_lib}.}
   \label{tab:envlib-classes}
-  \begin{tabularx}{\textwidth}{@{}ll>{\raggedright\arraybackslash}X@{}}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{5.3cm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{0.7cm}@{}}
     \toprule
-    Class & Module & Chapter \\
+    Class & Module & Ch. \\
     \midrule
     \code{KuramotoOscillatorEnv} & \code{env\_lib.kos\_env.kuramoto\_env} & \ref{chap:kuramoto} \\
     \code{KuramotoOscillatorEnvTorch} & \code{env\_lib.kos\_env.kuramoto\_env\_torch} & \ref{chap:kuramoto} \\
+    \code{KuramotoOscillatorVectorEnv} & \code{env\_lib.kos\_env.vector} & \ref{chap:workflow} \\
     \code{LineMsgEnv} & \code{env\_lib.linemsg\_env.linemsg\_env} & \ref{chap:networked} \\
     \code{WirelessCommEnv} & \code{env\_lib.wireless\_comm\_env.wireless\_comm\_env} & \ref{chap:networked} \\
     \code{PistonballEnv} & \code{env\_lib.pistonball\_env.pistonball\_env} & \ref{chap:pistonball} \\
     \code{ConsensusEnv} & \code{env\_lib.consensus\_env.consensus\_env} & \ref{chap:consensus} \\
+    \code{ConsensusVectorEnv} & \code{env\_lib.consensus\_env.vector} & \ref{chap:workflow} \\
+    \code{PowerGridEnv}, \code{PowerGridVectorEnv} & \code{env\_lib.power\_grid\_env.power\_grid\_env} & \ref{chap:power_grid} \\
+    \code{PlatoonEnv}, \code{PlatoonVectorEnv} & \code{env\_lib.platoon\_env.platoon\_env} & \ref{chap:platoon} \\
     \code{AJLATTEnv}, \code{AJLATTConfig} & \code{env\_lib.ajlatt\_env} & \ref{chap:ajlatt} \\
     \bottomrule
   \end{tabularx}
@@ -130,6 +161,11 @@ created (Table~\ref{tab:envlib-optional}).
   \end{tabularx}
 \end{table}
 
+PettingZoo is not an extra: the parallel adapter of
+Section~\ref{sec:workflow-wrappers} works without it and subclasses
+PettingZoo's \code{ParallelEnv} when it is installed
+(Section~\ref{sec:install-pettingzoo}).
+
 % ---------------------------------------------------------------------------
 \section{Creating environments}\label{sec:envlib-make}
 
@@ -143,7 +179,7 @@ env = env_lib.make("WirelessComm-v0")               # registered id
 env = gym.make("WirelessComm-v0")                   # after importing env_lib
 env = env_lib.WirelessCommEnv(grid_x=6, grid_y=6)   # direct construction
 
-print(env_lib.list_envs())                          # all registered ids
+print(len(env_lib.list_envs()))                     # 18 registered ids
 \end{pycode}
 
 The function \code{env\_lib.make} registers the environments if necessary and
@@ -152,9 +188,100 @@ passed to the constructor and override the configuration of the id, for example
 \code{env\_lib.make("LineMsg-v0", num\_agents=20, max\_iter=100)}.
 \code{gymnasium.make} returns the environment inside Gymnasium's standard
 wrappers (order enforcement and, except for \envid{AJLATT-v0}, the passive
-environment checker). Environment-specific methods such as
-\code{laplacian\_policy()} or \code{get\_batch\_observations()} are reached
-through \code{env.unwrapped}.
+environment checker). Environment-specific methods and attributes such as
+\code{laplacian\_policy()}, \code{adjacency} or \code{observation\_layout} are
+reached through \code{env.unwrapped}.
+
+\paragraph{Episode length.} \code{env\_lib.make(env\_id, max\_episode\_steps=N)}
+sets the environment's own limit argument (\code{max\_steps},
+\code{max\_iter}, \code{max\_cycles} or \code{max\_episode\_steps}, recorded in
+\code{EnvSpec.limit\_kwarg}) to \code{N} instead of adding a \code{TimeLimit}
+wrapper, so there is always exactly one limit. Passing both
+\code{max\_episode\_steps} and a different value of the limit argument raises
+\code{ValueError}. \code{gymnasium.make} itself does not translate the
+argument (Section~\ref{sec:envlib-episodes}).
+
+\paragraph{Vector environments.} \code{env\_lib.make\_vec(env\_id, num\_envs)}
+creates \code{num\_envs} copies as one Gymnasium vector environment: the
+environment's native batched implementation when it has one, and
+\code{gymnasium.vector.SyncVectorEnv} otherwise
+(Section~\ref{sec:envlib-vector}). It takes the same keyword arguments as
+\code{make}, including \code{max\_episode\_steps}.
+
+\begin{pycode}
+import env_lib
+
+env = env_lib.make("Platoon-v0", max_episode_steps=300)
+print(env.unwrapped.max_steps, env.spec.max_episode_steps)   # 300 None
+
+envs = env_lib.make_vec("Platoon-v0", num_envs=64)      # native batch
+print(type(envs).__name__)                              # PlatoonVectorEnv
+print(envs.observation_space.shape)                     # (64, 8, 13)
+envs = env_lib.make_vec("LineMsg-v0", num_envs=4)       # no native version
+print(type(envs).__name__)                              # SyncVectorEnv
+\end{pycode}
+
+% ---------------------------------------------------------------------------
+\section{Registry and metadata}\label{sec:envlib-registry}
+
+Every registered id is described by an \code{EnvSpec} record (class
+\code{env\_lib.registration.EnvSpec}) in \code{env\_lib.registration.ENV\_SPECS};
+\code{env\_lib.get\_spec(env\_id)} returns the record of one id and raises
+\code{KeyError} for an unknown id. \code{EnvSpec} is a frozen dataclass,
+distinct from Gymnasium's \code{gymnasium.envs.registration.EnvSpec} (which
+\code{env.spec} returns); its fields are listed in
+Table~\ref{tab:envlib-spec}. The catalogue (\code{env\_lib.catalog()},
+Section~\ref{sec:workflow-catalog}) and the \code{env-lib} command line are
+built on these records, so an environment can be selected by its properties
+instead of by name.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Fields of \code{env\_lib.registration.EnvSpec}.}
+  \label{tab:envlib-spec}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.6cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Field (default) & Content \\
+    \midrule
+    \code{id} & registered Gymnasium id \\
+    \code{entry\_point} & \code{"module:Class"} of the single environment \\
+    \code{kwargs} (\code{\{\}}) & constructor arguments of this configuration \\
+    \code{description} (\code{""}) & one-line summary \\
+    \code{family} (\code{""}) & environment family: the subpackage name without
+      \code{\_env} (\code{"kuramoto"}, \code{"linemsg"}, \code{"wireless\_comm"},
+      \code{"pistonball"}, \code{"consensus"}, \code{"power\_grid"},
+      \code{"platoon"}, \code{"ajlatt"}) \\
+    \code{observation\_type}, \code{action\_type} (\code{"continuous"}) &
+      \code{"continuous"}, \code{"discrete"} or, for actions that can be either
+      (Pistonball), \code{"continuous|discrete"} \\
+    \code{requires} (\code{None}) & optional-dependency extra needed by the
+      environment (\code{"torch"} or \code{"pistonball"}) \\
+    \code{vector\_entry\_point} (\code{None}) & \code{"module:Class"} of the native
+      batched implementation used by \code{make\_vec} \\
+    \code{limit\_kwarg} (\code{"max\_steps"}) & name of the constructor argument that
+      sets the episode length; \code{make} and \code{make\_vec} translate
+      \code{max\_episode\_steps} into it \\
+    \code{per\_agent\_rewards} (\code{False}) & rewards and termination flags are
+      per-agent arrays (AJLATT); \code{make\_vec} then wraps Sync and Async copies
+      in \code{TeamReward} \\
+    \code{disable\_env\_checker} (\code{False}) & skip Gymnasium's passive checker
+      (\code{True} for AJLATT, whose rewards are per-robot arrays) \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{pycode}
+import env_lib
+
+spec = env_lib.get_spec("PowerGrid-v0")
+print(spec.family, spec.action_type)   # power_grid continuous
+print(spec.limit_kwarg)                # max_steps
+print(spec.vector_entry_point)
+# env_lib.power_grid_env.power_grid_env:PowerGridVectorEnv
+
+native = env_lib.catalog(native_vector=True, inspect=False).ids()
+print(len(native))                     # 8 ids with a native batch
+\end{pycode}
 
 % ---------------------------------------------------------------------------
 \section{Common API conventions}\label{sec:envlib-api}
@@ -174,7 +301,8 @@ Observations are \code{float32} NumPy arrays contained in
 \code{observation\_space}. Calling \code{step()} before the first
 \code{reset()} raises \code{env\_lib.ResetNeededError}, which derives from
 both \code{RuntimeError} and \code{gymnasium.error.ResetNeeded}, so either can
-be caught. Invalid
+be caught; the native vector environments raise it as well, also when the
+first \code{reset()} resets only some copies. Invalid
 actions (wrong shape, values outside a discrete range, NaN or infinite values)
 raise \code{ValueError}, and continuous actions are clipped to the action
 bounds. AJLATT is the exception: it only checks the action shape, and clipping
@@ -184,28 +312,78 @@ is opt-in (\code{clip\_actions=True}, Section~\ref{sec:ajlatt-spaces}).
 
 Each environment exposes the whole team through a single Gymnasium interface.
 The action space covers all agents at once (for example
-\code{Box(-1, 1, (8, 2))} for eight planar agents, or
+\code{Box(-1, 1, (8, 2))} for eight planar agents,
+\code{Box(-0.1, 0.1, (16,))} for the 16 buses of a power grid, or
 \code{MultiDiscrete([5] * 36)} for 36 wireless agents), and observations have
 one row per agent. A multi-agent algorithm splits the joint arrays along the
-first axis; a centralised algorithm uses them directly.
+first axis; a centralised algorithm uses them directly. The wrappers of
+Section~\ref{sec:workflow-wrappers} provide both views ready-made: a flat
+vector for single-agent libraries and per-agent dictionaries for the
+PettingZoo Parallel API.
 
 The scalar \code{reward} returned by \code{step()} is the team reward. The
 per-agent rewards are always available as \code{info["agent\_rewards"]}, a
 \code{float64} array of shape \code{(n\_agents,)}, which every \code{step()}
 returns. How the team reward is formed from the per-agent rewards depends on the
 environment (Table~\ref{tab:envlib-comparison}): it is their sum for LineMsg,
-WirelessComm, Pistonball and AJLATT and their mean (plus a success bonus) for
-Consensus. The Kuramoto environments control one or several complete oscillator
-networks, so their ``agents'' are systems: the NumPy backend reports
-\code{n\_agents} copies of its reward and the PyTorch backend one reward per
-simulated system. AJLATT returns the per-robot rewards and per-robot collision
-flags directly as arrays; \code{TeamRewardWrapper} converts them to a scalar
-reward and a scalar \code{terminated} flag (Section~\ref{sec:ajlatt-wrapper}).
+WirelessComm, Pistonball, PowerGrid, Platoon and AJLATT and their mean (plus a
+success bonus) for Consensus. The Kuramoto environments control one or several
+complete oscillator networks, so their ``agents'' are systems: the NumPy
+backend reports \code{n\_agents} copies of its reward and the PyTorch backend
+one reward per simulated system. AJLATT returns the per-robot rewards and
+per-robot collision flags directly as arrays; \code{TeamReward}
+(Section~\ref{sec:workflow-wrappers}) and the older \code{TeamRewardWrapper}
+(Section~\ref{sec:ajlatt-wrapper}) convert them to a scalar reward and a scalar
+\code{terminated} flag.
+
+\subsection{Info dictionaries}\label{sec:envlib-info}
 
 The info dictionary returned by \code{reset()} contains
-\code{"agent\_rewards"} (all zeros) for LineMsg, WirelessComm, Consensus and
-AJLATT. The Kuramoto and Pistonball environments do not include the key in
-their reset info.
+\code{"agent\_rewards"} (all zeros) for LineMsg, WirelessComm, Consensus,
+PowerGrid, Platoon and AJLATT. The Kuramoto and Pistonball environments do not
+include the key in their reset info. Table~\ref{tab:envlib-info} lists the
+other keys of the step info; the environment chapters define them.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Keys of the info dictionary returned by \code{step()} besides
+    \code{"agent\_rewards"}.}
+  \label{tab:envlib-info}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{2.4cm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{1.5cm}@{}}
+    \toprule
+    Environment & Keys & Details \\
+    \midrule
+    Kuramoto & \code{order\_parameter}, \code{phase\_coherence}, \code{phases},
+      \code{natural\_frequencies}, \code{coupling\_matrix}, \code{dphases\_dt},
+      \code{step\_count}, \code{device}, \code{n\_agents} &
+      Sec.~\ref{sec:kuramoto-info} \\
+    LineMsg & none & Sec.~\ref{sec:linemsg-params} \\
+    WirelessComm & \code{outcomes}, \code{ap\_load} & Sec.~\ref{sec:wireless-params} \\
+    Pistonball & \code{local\_rewards}, \code{total\_reward} & Sec.~\ref{sec:pistonball-params} \\
+    Consensus & \code{error}, \code{algebraic\_connectivity}, \code{adjacency},
+      \code{success}, \code{step} & Sec.~\ref{sec:consensus-info} \\
+    PowerGrid & \code{omega}, \code{rocof}, \code{max\_abs\_omega},
+      \code{frequency\_nadir}, \code{peak\_abs\_omega}, \code{coi\_omega},
+      \code{frequency\_spread}, \code{control\_effort}, \code{order\_parameter},
+      \code{total\_disturbance}, \code{tripped}, \code{step}, \code{time} &
+      Sec.~\ref{sec:power-grid-info} \\
+    Platoon & \code{spacing\_errors}, \code{gaps}, \code{relative\_speeds},
+      \code{speeds}, \code{accelerations}, \code{commands},
+      \code{peak\_spacing\_errors}, \code{error\_amplification},
+      \code{leader\_speed}, \code{leader\_acceleration}, \code{min\_gap},
+      \code{collision}, \code{breakup}, \code{step}, \code{time} &
+      Sec.~\ref{sec:platoon-info} \\
+    AJLATT & \code{team\_reward}, \code{collisions}, \code{episode\_collisions},
+      \code{target\_observed}, \code{communication}, \code{robot\_cov\_trace},
+      \code{target\_cov\_trace}, \code{step}, \code{numerical\_error} &
+      Sec.~\ref{sec:ajlatt-info} \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+In a vector environment every info value gains a leading \code{num\_envs}
+dimension and comes with Gymnasium's boolean mask \code{"\_key"}
+(Section~\ref{sec:workflow-vector}).
 
 \subsection{Termination and truncation}\label{sec:envlib-episodes}
 
@@ -213,11 +391,14 @@ their reset info.
 signals the end of the time budget. Every environment enforces its own episode
 limit through a constructor argument (Table~\ref{tab:envlib-limits}). The
 registrations do not add a \code{TimeLimit} wrapper (\code{env.spec.max\_episode\_steps}
-is \code{None}), so a limit passed to the constructor is never overridden by the
-registry. To change the episode length pass the constructor argument, for
-example \code{env\_lib.make("Consensus-v0", max\_steps=400)}; passing
-\code{max\_episode\_steps} to \code{gymnasium.make} would add a second,
-independent limit.
+is \code{None}), so the limit argument is the only limit. To change the episode
+length, pass the constructor argument, for example
+\code{env\_lib.make("Consensus-v0", max\_steps=400)}, or pass
+\code{max\_episode\_steps} to \code{env\_lib.make} or \code{env\_lib.make\_vec},
+which set the same argument. Only \code{gymnasium.make(...,
+max\_episode\_steps=N)} called directly adds an independent \code{TimeLimit}
+wrapper on top of the environment's own limit; the shorter of the two then
+applies.
 
 \begin{table}[htbp]
   \centering\small
@@ -231,7 +412,11 @@ independent limit.
     LineMsg & \code{max\_iter} & 50 & never (always \code{False}) \\
     WirelessComm & \code{max\_iter} & 50 & never (always \code{False}) \\
     Pistonball & \code{max\_cycles} & 125 & the ball reaches the left wall \\
-    Consensus & \code{max\_steps} & 200 & the task error drops below \code{tolerance} \\
+    Consensus / Formation & \code{max\_steps} & 200 & the task error drops below \code{tolerance} \\
+    PowerGrid & \code{max\_steps} & 200 & a frequency deviation exceeds the trip limit,
+      $\max_i |\omega_i| > 2\pi$\,\code{frequency\_limit} \\
+    Platoon & \code{max\_steps} & 600 & a follower collides with its predecessor or its
+      gap exceeds \code{breakup\_distance} \\
     AJLATT & \code{max\_episode\_steps} & 120 & per robot: an obstacle is closer than
       \code{obstacle\_collision\_distance} (array of flags) \\
     \bottomrule
@@ -243,10 +428,10 @@ independent limit.
 \begin{itemize}
   \item \code{reset(seed=s)} seeds the environment's generator
         \code{self.np\_random}. All randomness of an episode (initial state,
-        stochastic transitions, noise) is drawn from this generator, and
-        \code{reset()} without a seed continues its stream. With the same seed,
-        the same actions and the same library versions an episode is
-        reproduced exactly.
+        stochastic transitions, noise, load disturbances, leader profiles)
+        is drawn from this generator, and \code{reset()} without a seed
+        continues its stream. With the same seed, the same actions and the
+        same library versions an episode is reproduced exactly.
   \item No environment reads or modifies the global NumPy or PyTorch random
         state. The PyTorch Kuramoto backend owns a \code{torch.Generator} that
         is seeded from \code{self.np\_random} at every reset.
@@ -255,20 +440,161 @@ independent limit.
   \item Some structure is fixed at construction and has its own seed:
         \code{topology\_seed} (random Kuramoto topology, default 42),
         \code{graph\_seed} (Erd\H{o}s--R\'enyi graph of the consensus
-        environment) and \code{AJLATTConfig.seed} (seed of the first AJLATT
-        reset when none is given).
+        environment), \code{network\_seed} (PowerGrid network and physical
+        parameters, default 0), \code{vehicle\_seed} (Platoon vehicle lags and
+        lengths, default 0) and \code{AJLATTConfig.seed} (seed of the first
+        AJLATT reset when none is given). With \code{randomize\_network=True}
+        (PowerGrid) or \code{randomize\_vehicles=True} (Platoon) this
+        structure is instead resampled from \code{self.np\_random} at every
+        reset.
+  \item A native vector environment draws all copies from one generator, so
+        \code{reset(seed=s)} makes the batch reproducible, but copy $i$ does
+        not reproduce a single environment seeded with $s + i$
+        (Section~\ref{sec:workflow-vector}).
   \item The legacy \code{env.seed()} methods of LineMsg, WirelessComm and
         Pistonball still work but emit a \code{DeprecationWarning}; use
         \code{reset(seed=...)} instead.
 \end{itemize}
 
-\subsection{Reset options}
+\subsection{Reset options}\label{sec:envlib-reset-options}
 
-\code{reset(options=...)} can override parts of the sampled initial state in
-the Kuramoto environments (\code{"phases"}, \code{"natural\_frequencies"},
-\code{"coupling\_strengths"}) and in the consensus environment
-(\code{"positions"}, \code{"velocities"}). Unknown keys raise
-\code{ValueError}. The other environments accept and ignore \code{options}.
+\code{reset(options=...)} can override parts of the sampled initial state
+(Table~\ref{tab:envlib-options}). The values of the listed keys are validated,
+and a wrong shape or a non-finite entry raises \code{ValueError}.
+\emph{Unknown keys are ignored with a} \code{UserWarning} that names them and
+the supported keys; they do not raise, so generic tools that pass options of
+their own (such as PettingZoo's \code{parallel\_api\_test}) work with every
+environment. LineMsg, WirelessComm, Pistonball and AJLATT have no reset
+options and ignore \code{options} altogether. The native vector environments
+accept the same keys, as arrays for one copy (applied to every reset copy) or
+with a leading \code{num\_envs} dimension, and in addition \code{"reset\_mask"}
+(Section~\ref{sec:workflow-vector}).
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Reset options.}
+  \label{tab:envlib-options}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.0cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Environment & Keys \\
+    \midrule
+    Kuramoto & \code{"phases"}, \code{"natural\_frequencies"}, \code{"coupling\_strengths"} (dynamic coupling only) \\
+    Consensus / Formation & \code{"positions"}, \code{"velocities"}, each \code{(n, 2)} \\
+    PowerGrid & \code{"theta"}, \code{"omega"}, \code{"disturbance"}, each \code{(n,)} \\
+    Platoon & \code{"positions"} and \code{"velocities"} (given together), \code{"accelerations"},
+      \code{"time\_constants"}, \code{"lengths"}, each \code{(n + 1,)} with the leader first;
+      \code{"leader\_command"} \code{(max\_steps,)} \\
+    others & none; \code{options} is ignored \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{pycode}
+import warnings
+import numpy as np
+import env_lib
+
+env = env_lib.make("PowerGrid-v0")
+omega = np.full(16, 0.1)                      # 0.1 rad/s at every bus
+with warnings.catch_warnings(record=True) as caught:
+    warnings.simplefilter("always")
+    obs, info = env.reset(seed=0, options={"omega": omega, "tag": "run-1"})
+print(info["omega"][:3])                      # [0.1 0.1 0.1]
+print(caught[0].category.__name__)            # UserWarning ("tag" is ignored)
+\end{pycode}
+
+% ---------------------------------------------------------------------------
+\section{Vectorised simulation and the workflow layer}\label{sec:envlib-vector}
+
+\code{env\_lib.make\_vec} returns a Gymnasium vector environment in which
+observations, rewards and flags have a leading \code{num\_envs} dimension. For
+the NumPy Kuramoto ids, \envid{Consensus-v0}, \envid{Formation-v0},
+\envid{PowerGrid-v0} and \envid{Platoon-v0} it is a native implementation
+(\code{KuramotoOscillatorVectorEnv}, \code{ConsensusVectorEnv},
+\code{PowerGridVectorEnv}, \code{PlatoonVectorEnv}) that advances all copies
+with one set of array operations and shares its dynamics code with the single
+environment. The native classes derive from
+\code{env\_lib.utils.BatchedVectorEnv}, which implements seeding, action
+validation, the three autoreset modes and the info masks on top of three
+array hooks. All other ids are wrapped in \code{gymnasium.vector.SyncVectorEnv}
+(\code{vectorization\_mode="async"} gives an \code{AsyncVectorEnv}).
+
+Chapter~\ref{chap:workflow} documents this layer in full: vector environments,
+autoreset and seeding (Section~\ref{sec:workflow-vector}), the catalogue and
+the command line (Sections~\ref{sec:workflow-catalog}
+and~\ref{sec:workflow-cli}), the wrappers \code{FlattenJointSpaces},
+\code{TeamReward} and \code{to\_parallel}
+(Section~\ref{sec:workflow-wrappers}), the baseline controllers
+(Section~\ref{sec:workflow-baselines}) and \code{evaluate} and \code{rollout}
+(Section~\ref{sec:workflow-evaluation}).
+
+% ---------------------------------------------------------------------------
+\section{Graph utilities}\label{sec:envlib-graphs}
+
+The module \pkg{env\_lib.utils.graphs} collects the graph computations of
+networked control. A graph is a square adjacency matrix: agent $i$ interacts
+with agent $j$ when entry $(i, j)$ is non-zero, and weighted matrices (such as
+the line susceptances of PowerGrid) are accepted where weights make sense.
+Every random topology takes a \code{numpy.random.Generator}, so graphs are
+reproducible when the generator is seeded. PowerGrid builds its transmission
+network with \code{make\_graph}, and the functions apply equally to the
+matrices exposed by the other environments (\code{adjacency} of Consensus and
+Platoon, \code{topology\_matrix} of Kuramoto).
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Functions of \pkg{env\_lib.utils.graphs}.}
+  \label{tab:envlib-graphs}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{6.3cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Function & Result \\
+    \midrule
+    \code{make\_graph(topology, n, *, rng=None, ...)} & symmetric boolean \code{(n, n)}
+      adjacency of one of \code{TOPOLOGIES}: \code{"ring"}, \code{"line"},
+      \code{"star"} (node 0 is the hub), \code{"complete"}, \code{"grid"},
+      \code{"erdos\_renyi"}, \code{"small\_world"} (Watts--Strogatz),
+      \code{"random\_geometric"}; random topologies are resampled until
+      connected (\code{connected=True}); \code{return\_positions=True} also
+      returns node coordinates \\
+    \code{is\_connected(adjacency)} & whether the undirected graph is connected \\
+    \code{laplacian(adjacency)} & $L = D - A$ (weighted for a weighted matrix) \\
+    \code{algebraic\_connectivity(adjacency)} & Fiedler value $\lambda_2(L)$ of the
+      symmetrised graph; positive exactly for a connected graph, and the rate of
+      linear consensus \\
+    \code{k\_hop\_adjacency(adjacency, k, *, include\_self=False)} & boolean matrix of
+      the pairs within $k$ hops: the neighbourhoods of $\kappa$-hop (truncated)
+      policies and critics \\
+    \code{degree}, \code{neighbor\_lists}, \code{edge\_list} & weighted degrees, neighbour
+      indices per node, undirected edges $(i, j)$ with $i < j$ \\
+    \code{grid\_shape(n)} & rows and columns of the most square grid with $n$ nodes \\
+    \code{circular\_layout(n)}, \code{spring\_layout(adjacency)} & node positions for
+      plotting (a circle, or a deterministic force-directed layout in $[-1, 1]^2$) \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{pycode}
+import numpy as np
+import env_lib
+from env_lib.utils import graphs
+
+adj = graphs.make_graph("small_world", 12, rng=np.random.default_rng(0))
+print(adj.shape, adj.dtype, graphs.is_connected(adj))  # (12, 12) bool True
+print(len(graphs.edge_list(adj)), graphs.degree(adj).max())  # 24 6.0
+lap = graphs.laplacian(adj)                            # L = D - A
+print(round(graphs.algebraic_connectivity(adj), 3))    # 1.35
+two_hop = graphs.k_hop_adjacency(adj, 2)               # pairs within two hops
+print(two_hop.sum(axis=1))             # [11  9  9 11  8 11 11 10  8  9 10 11]
+xy = graphs.spring_layout(adj)                         # (12, 2) in [-1, 1]
+
+grid = env_lib.make("PowerGrid-v0").unwrapped          # the benchmark grid
+print(round(graphs.algebraic_connectivity(grid.adjacency), 3))     # 0.668
+print(round(graphs.algebraic_connectivity(grid.susceptance), 3))   # 0.424
+\end{pycode}
+
+The last line weights every line of the benchmark grid with its susceptance
+$B_{ij}$, which gives the algebraic connectivity of the weighted Laplacian that
+governs the electro-mechanical modes of the grid.
 
 % ---------------------------------------------------------------------------
 \section{Rendering}\label{sec:envlib-rendering}
@@ -290,6 +616,9 @@ argument:
     plain-text summary of the agents' actions and states.
 \end{description}
 
+The native vector environments accept \code{render\_mode} as well and draw
+copy 0; a \code{SyncVectorEnv} returns one frame per copy.
+
 \begin{table}[htbp]
   \centering\small
   \caption{Render modes and frame sizes (width $\times$ height in pixels).}
@@ -303,6 +632,8 @@ argument:
     WirelessComm & human, rgb\_array, ansi & $1000 \times 560$ & matplotlib, 10 \\
     Pistonball & human, rgb\_array & $(160 + 40n) \times 560$ & pygame, 20 \\
     Consensus / Formation & human, rgb\_array & $1000 \times 560$ & matplotlib, 20 \\
+    PowerGrid & human, rgb\_array & $1000 \times 560$ & matplotlib, 20 \\
+    Platoon & human, rgb\_array & $1000 \times 560$ & matplotlib, 10 \\
     AJLATT & human, rgb\_array & $1100 \times 620$ & matplotlib, 8 \\
     \bottomrule
   \end{tabularx}
@@ -349,6 +680,7 @@ for _ in range(100):
         break
 frame = env.render()        # numpy array of shape (560, 1000, 3), dtype uint8
 env.close()
+set_theme("dark")           # back to the default theme
 \end{pycode}
 
 % ---------------------------------------------------------------------------
@@ -356,6 +688,7 @@ env.close()
 
 \code{env\_lib.utils} provides two functions to turn rollouts into animations:
 
+% norun
 \begin{pycode}
 record_episode(env, policy=None, path=None, *, max_steps=None, seed=None,
                fps=None, render_every=1) -> list[numpy.ndarray]
@@ -386,54 +719,63 @@ import env_lib
 from env_lib.utils import record_episode, save_animation
 
 env = env_lib.make("Formation-v0", render_mode="rgb_array")
-policy = lambda obs: env.unwrapped.laplacian_policy()     # baseline controller
+policy = env_lib.baseline_policy(env)                    # Laplacian controller
 frames = record_episode(env, policy, "renders/formation.gif",
                         max_steps=150, seed=0, render_every=2)
 save_animation(frames[::2], "renders/formation_fast.gif", fps=20)
 env.close()
 \end{pycode}
 
+The command \code{env-lib run Formation-v0 -{}-gif renders/formation.gif}
+records the same kind of episode without writing code
+(Section~\ref{sec:workflow-cli}).
+
 % ---------------------------------------------------------------------------
 \section{Registered environments}\label{sec:envlib-ids}
 
-Table~\ref{tab:envlib-ids} lists all ids returned by \code{env\_lib.list\_envs()}
-with the constructor arguments each registration sets; all other arguments keep
-their defaults. The version suffixes follow the historical ids of the project and
-denote preset configurations, not revisions: \envid{WirelessComm-v1}, for
-example, is the $4 \times 4$ grid and not a newer version of
-\envid{WirelessComm-v0}. Gymnasium may therefore emit an ``out of date''
-\code{DeprecationWarning} when a \code{-v0} id is created; the warning is
-harmless.
+Table~\ref{tab:envlib-ids} lists all 18 ids returned by
+\code{env\_lib.list\_envs()} with the constructor arguments each registration
+sets; all other arguments keep their defaults. The last column shows how
+\code{env\_lib.make\_vec} vectorises the id: with a native implementation or
+with \code{SyncVectorEnv}. The version suffixes follow the historical ids of
+the project and denote preset configurations, not revisions:
+\envid{WirelessComm-v1}, for example, is the $4 \times 4$ grid and not a newer
+version of \envid{WirelessComm-v0}. Gymnasium may therefore emit an ``out of
+date'' \code{DeprecationWarning} when a \code{-v0} id is created with
+\code{gymnasium.make}; the warning is harmless, and \code{env\_lib.make}
+suppresses it.
 
 \begingroup\small
-\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.52\textwidth}>{\raggedright\arraybackslash}p{0.44\textwidth}@{}}
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.43\textwidth}>{\raggedright\arraybackslash}p{0.43\textwidth}>{\raggedright\arraybackslash}p{0.08\textwidth}@{}}
   \caption{Registered Gymnasium ids and their configuration.}\label{tab:envlib-ids}\\
   \toprule
-  Id & Class and configuration \\
+  Id & Class and configuration & Vector \\
   \midrule
   \endfirsthead
   \toprule
-  Id & Class and configuration \\
+  Id & Class and configuration & Vector \\
   \midrule
   \endhead
   \bottomrule
   \endfoot
-  \envid{KuramotoOscillator-v0} & \code{KuramotoOscillatorEnv}; defaults (10 oscillators, dynamic coupling) \\
-  \envid{KuramotoOscillator-v1} & \code{KuramotoOscillatorEnv}; \code{n\_oscillators=5} \\
-  \envid{KuramotoOscillator-Constant-v0} & \code{KuramotoOscillatorEnv}; \code{n\_oscillators=6}, \code{coupling\_mode="constant"} \\
-  \envid{KuramotoOscillator-FreqSync-Constant-v0} & \code{KuramotoOscillatorEnv}; \code{n\_oscillators=6}, \code{coupling\_mode="constant"}, \code{reward\_type=}\allowbreak\code{"frequency\_synchronization"}, \code{target\_frequency=2.0} \\
-  \envid{KuramotoOscillatorTorch-v0} & \code{KuramotoOscillatorEnvTorch}; defaults (10 oscillators, one system) \\
-  \envid{KuramotoOscillatorTorch-v1} & \code{KuramotoOscillatorEnvTorch}; \code{n\_oscillators=8}, \code{n\_agents=4}, \code{device="cpu"} \\
-  \envid{KuramotoOscillatorTorch-v2} & \code{KuramotoOscillatorEnvTorch}; \code{n\_oscillators=10}, \code{n\_agents=1}, \code{device="auto"}, \code{integration\_method="rk4"} \\
-  \envid{KuramotoOscillatorTorch-Constant-v0} & \code{KuramotoOscillatorEnvTorch}; \code{n\_oscillators=6}, \code{coupling\_mode="constant"} \\
-  \envid{KuramotoOscillatorTorch-FreqSync-Constant-v0} & \code{KuramotoOscillatorEnvTorch}; \code{n\_oscillators=6}, \code{coupling\_mode="constant"}, \code{reward\_type=}\allowbreak\code{"frequency\_synchronization"}, \code{target\_frequency=2.0} \\
-  \envid{LineMsg-v0} & \code{LineMsgEnv}; defaults (10 agents) \\
-  \envid{WirelessComm-v0} & \code{WirelessCommEnv}; defaults ($6 \times 6$ grid) \\
-  \envid{WirelessComm-v1} & \code{WirelessCommEnv}; \code{grid\_x=4}, \code{grid\_y=4} \\
-  \envid{Pistonball-v0} & \code{PistonballEnv}; defaults (20 pistons); needs \pkg{pymunk} (and \pkg{pygame} to render) \\
-  \envid{Consensus-v0} & \code{ConsensusEnv}; defaults (8 agents, rendezvous on a ring) \\
-  \envid{Formation-v0} & \code{ConsensusEnv}; \code{task="formation"} (circle formation) \\
-  \envid{AJLATT-v0} & \code{AJLATTEnv}; defaults (4 robots on \code{obstacles04}); passive environment checker disabled because rewards and \code{terminated} are per-robot arrays \\
+  \envid{KuramotoOscillator-v0} & \code{KuramotoOscillatorEnv}; defaults (10 oscillators, dynamic coupling) & native \\
+  \envid{KuramotoOscillator-v1} & \code{KuramotoOscillatorEnv}; \code{n\_oscillators=5} & native \\
+  \envid{KuramotoOscillator-Constant-v0} & \code{KuramotoOscillatorEnv}; \code{n\_oscillators=6}, \code{coupling\_mode="constant"} & native \\
+  \envid{KuramotoOscillator-\allowbreak FreqSync-Constant-v0} & \code{KuramotoOscillatorEnv}; \code{n\_oscillators=6}, \code{coupling\_mode="constant"}, \code{reward\_type=}\allowbreak\code{"frequency\_synchronization"}, \code{target\_frequency=2.0} & native \\
+  \envid{KuramotoOscillatorTorch-v0} & \code{KuramotoOscillatorEnvTorch}; defaults (10 oscillators, one system) & sync \\
+  \envid{KuramotoOscillatorTorch-v1} & \code{KuramotoOscillatorEnvTorch}; \code{n\_oscillators=8}, \code{n\_agents=4}, \code{device="cpu"} & sync \\
+  \envid{KuramotoOscillatorTorch-v2} & \code{KuramotoOscillatorEnvTorch}; \code{n\_oscillators=10}, \code{n\_agents=1}, \code{device="auto"}, \code{integration\_method="rk4"} & sync \\
+  \envid{KuramotoOscillatorTorch-\allowbreak Constant-v0} & \code{KuramotoOscillatorEnvTorch}; \code{n\_oscillators=6}, \code{coupling\_mode="constant"} & sync \\
+  \envid{KuramotoOscillatorTorch-\allowbreak FreqSync-Constant-v0} & \code{KuramotoOscillatorEnvTorch}; \code{n\_oscillators=6}, \code{coupling\_mode="constant"}, \code{reward\_type=}\allowbreak\code{"frequency\_synchronization"}, \code{target\_frequency=2.0} & sync \\
+  \envid{LineMsg-v0} & \code{LineMsgEnv}; defaults (10 agents) & sync \\
+  \envid{WirelessComm-v0} & \code{WirelessCommEnv}; defaults ($6 \times 6$ grid) & sync \\
+  \envid{WirelessComm-v1} & \code{WirelessCommEnv}; \code{grid\_x=4}, \code{grid\_y=4} & sync \\
+  \envid{Pistonball-v0} & \code{PistonballEnv}; defaults (20 pistons); needs \pkg{pymunk} (and \pkg{pygame} to render) & sync \\
+  \envid{Consensus-v0} & \code{ConsensusEnv}; defaults (8 agents, rendezvous on a ring) & native \\
+  \envid{Formation-v0} & \code{ConsensusEnv}; \code{task="formation"} (circle formation) & native \\
+  \envid{PowerGrid-v0} & \code{PowerGridEnv}; defaults (16 buses, small-world network fixed by \code{network\_seed=0}) & native \\
+  \envid{Platoon-v0} & \code{PlatoonEnv}; defaults (8 followers, predecessor following, mixed leader scenario) & native \\
+  \envid{AJLATT-v0} & \code{AJLATTEnv}; defaults (4 robots on \code{obstacles04}); passive environment checker disabled because rewards and \code{terminated} are per-robot arrays & sync \\
 \end{longtable}
 \endgroup
 

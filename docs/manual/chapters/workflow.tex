@@ -1,0 +1,590 @@
+% ---------------------------------------------------------------------------
+% Vectorised simulation, adapters, baselines and evaluation
+% ---------------------------------------------------------------------------
+\begingroup
+% Line breaking for paragraphs with long, unbreakable identifiers (local to
+% this chapter): allow looser lines instead of overfull ones.
+\setlength{\emergencystretch}{3em}\tolerance=1000
+\chapter{Vectorised Simulation, Adapters, Baselines and Evaluation}\label{chap:workflow}
+
+The previous chapters describe the environments one by one. This chapter
+describes the layer that connects them to a research workflow, new in version
+1.1: batched simulation of many environment copies, a catalogue and a command
+line to discover and try the environments, wrappers that plug them into
+single-agent and multi-agent reinforcement learning libraries, a classical
+baseline controller for every environment, and tools to evaluate policies and
+record trajectories. Everything is reachable from the top-level package:
+
+\begin{pycode}
+import env_lib
+
+print(env_lib.catalog(action_type="continuous"))      # discover
+envs = env_lib.make_vec("Formation-v0", num_envs=256)  # native batched copies
+policy = env_lib.baseline_policy(envs)                 # classical controller
+result = env_lib.evaluate(envs, policy, n_episodes=256, seed=0)
+print(result)                                          # mean return, 95% CI, ...
+\end{pycode}
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Public names of the convenience layer.}
+  \label{tab:workflow-api}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Name & Purpose \\
+    \midrule
+    \code{env\_lib.make\_vec} & $B$ copies as one vector environment (Section~\ref{sec:workflow-vector}) \\
+    \code{env\_lib.catalog}, \code{env\_lib.describe}, \code{env\_lib.EnvInfo} & discover environments (Section~\ref{sec:workflow-catalog}) \\
+    \code{env-lib} (\code{python -m env\_lib}) & command line (Section~\ref{sec:workflow-cli}) \\
+    \code{env\_lib.wrappers} & \code{FlattenJointSpaces}, \code{TeamReward}, \code{ParallelEnvAdapter}, \code{to\_parallel} (Section~\ref{sec:workflow-wrappers}) \\
+    \code{env\_lib.baseline\_policy}, \code{env\_lib.baselines} & baseline controllers (Section~\ref{sec:workflow-baselines}) \\
+    \code{env\_lib.evaluate}, \code{env\_lib.rollout} & evaluation and trajectories (Section~\ref{sec:workflow-evaluation}) \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Vector environments}\label{sec:workflow-vector}
+
+% norun
+\begin{pycode}
+env_lib.make_vec(env_id, num_envs=1, vectorization_mode=None, *,
+                 vector_kwargs=None, wrappers=None, **kwargs)
+\end{pycode}
+creates \code{num\_envs} copies of a registered environment as one Gymnasium
+vector environment. Keyword
+arguments configure the environment exactly as in \code{env\_lib.make}. With
+\code{vectorization\_mode=None} the environment's native batched implementation
+is used when it has one and \code{gymnasium.vector.SyncVectorEnv} otherwise;
+\code{"sync"}, \code{"async"} and \code{"vector\_entry\_point"} force a mode.
+\code{vector\_kwargs} and \code{wrappers} (applied to every copy) are only
+accepted by the Sync and Async modes.
+
+\paragraph{Native batched environments.} Native vector environments keep the
+state of all $B$ copies in arrays with a leading batch dimension and advance
+them with one set of array operations per step, instead of stepping $B$ Python
+objects one after another. They share their dynamics code with the single
+environment, so copy $b$ reproduces a single environment started from the same
+state. Native implementations exist for \envid{Consensus-v0},
+\envid{Formation-v0}, the NumPy \envid{KuramotoOscillator-*} ids,
+\envid{PowerGrid-v0} and \envid{Platoon-v0}; \code{env\_lib.catalog(native\_vector=True)}
+lists them. Batched shapes, with $n$ agents:
+\begin{itemize}
+  \item observations \code{(B, n, obs\_dim)} (\code{(B, obs\_dim)} for Kuramoto),
+        actions \code{(B, n, act\_dim)} or \code{(B, n)};
+  \item rewards \code{(B,)}: the team reward of every copy;
+  \item infos: arrays with a leading \code{B} dimension, among them
+        \code{agent\_rewards} of shape \code{(B, n)}, each key \code{k} with the
+        Gymnasium validity mask \code{"\_k"}.
+\end{itemize}
+
+\paragraph{Autoreset.} A copy whose episode ended is reset automatically
+according to the \code{autoreset\_mode} argument of \code{make\_vec}, see
+Table~\ref{tab:workflow-autoreset}. It accepts \code{"next\_step"},
+\code{"same\_step"}, \code{"disabled"}, Gymnasium's spellings
+(\code{"NextStep"}, \dots) or a member of \code{gymnasium.vector.AutoresetMode},
+and works for every vectorisation mode: \code{make\_vec} passes it to the
+native class or converts it for Gymnasium's Sync and Async classes.
+Gymnasium~1.0, which has no \code{AutoresetMode}, supports only
+\code{"next\_step"} for Sync and Async environments.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Autoreset modes of vector environments.}
+  \label{tab:workflow-autoreset}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Mode & Behaviour \\
+    \midrule
+    \code{"next\_step"} (default) & The copy is reset on the \emph{next} call to \code{step()}: that call ignores its action and returns its first observation with reward 0 and both flags \code{False}. The last observation of the episode is the one returned together with \code{terminated}/\code{truncated}. \\
+    \code{"same\_step"} & The copy is reset within the step that ended the episode; the returned observation already belongs to the new episode and the final observation and info are in \code{infos["final\_obs"]} and \code{infos["final\_info"]}. \\
+    \code{"disabled"} & No automatic reset; call \code{reset(options=\{"reset\_mask": mask\})} with a boolean array of shape \code{(B,)} to reset selected copies. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\paragraph{Seeding.} \code{reset(seed=s)} makes a batch reproducible in every
+mode, with one difference. Sync and Async environments seed copy $i$ with
+$s + i$, so copy $i$ reproduces a single environment reset with seed $s + i$.
+Native environments draw the initial states of all copies from one shared
+generator, so their copies do \emph{not} reproduce single environments seeded
+with $s + i$; to compare a copy with a single environment, start both from the
+same state through \code{reset(options=...)} (for example the
+\code{"positions"} option of the consensus environment). Automatic resets
+continue the generators and take no seed.
+
+\paragraph{Which mode to use.} Use the native implementation whenever one
+exists and many copies are needed (training with large batches, Monte-Carlo
+evaluation, parameter sweeps): its cost per step grows slowly with $B$. Use
+\code{"sync"} for environments without a native implementation, for small
+batches and for debugging (everything runs in one process and exceptions
+surface directly). Use \code{"async"}, which steps the copies in worker
+processes, only when a single step is expensive compared with the
+inter-process communication, as for AJLATT and Pistonball on a machine with
+several cores. Sync and Async environments need a scalar reward per copy:
+for environments that return per-agent reward arrays (AJLATT,
+\code{EnvSpec.per\_agent\_rewards}) \code{make\_vec} applies
+\code{TeamReward} to every copy unless \code{wrappers} is given; the per-agent
+rewards stay in \code{infos["agent\_rewards"]}
+(Section~\ref{sec:workflow-wrappers}).
+
+\code{env-lib bench ID -{}-num-envs 256} compares the three modes for one
+environment (Section~\ref{sec:workflow-cli}), and
+\code{benchmarks/benchmark\_vector.py} measures native and Sync throughput for
+1 to 1024 copies. Table~\ref{tab:workflow-throughput} lists reference values.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Throughput in environment steps per second with random actions and
+    automatic resets, measured with \code{benchmarks/benchmark\_vector.py} on one
+    core of an Intel Xeon at 2.8~GHz (\code{OMP\_NUM\_THREADS=1}, Python~3.11,
+    NumPy~2.4). The last column counts agent-steps (copies times agents).}
+  \label{tab:workflow-throughput}
+  \begin{tabular}{@{}lrrrrr@{}}
+    \toprule
+    Environment & 1 copy & native, $B = 256$ & sync, $B = 256$ & speed-up & agent-steps/s \\
+    \midrule
+    \envid{Consensus-v0}          & 7\,864 & 345\,252 & 8\,695 & 39.7 & $2.76\times10^{6}$ \\
+    \envid{Formation-v0}          & 7\,859 & 312\,695 & 8\,286 & 37.7 & $2.50\times10^{6}$ \\
+    \envid{KuramotoOscillator-v0} & 6\,895 & 315\,715 & 9\,625 & 32.8 & $3.16\times10^{6}$ \\
+    \envid{PowerGrid-v0}          & 3\,286 & 133\,637 & 3\,074 & 43.5 & $2.14\times10^{6}$ \\
+    \envid{Platoon-v0}            & 7\,128 & 295\,176 & 7\,370 & 40.1 & $2.36\times10^{6}$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The Sync throughput stays at a few thousand steps per second whatever the
+number of copies, because every copy is a separate Python object stepped in a
+loop. The native throughput grows with $B$ until the arrays no longer fit in
+the processor caches; with 1024 copies it is between $1.1\times10^{5}$
+(PowerGrid) and $5.3\times10^{5}$ (Platoon) steps per second.
+
+% ---------------------------------------------------------------------------
+\section{Discovering environments}\label{sec:workflow-catalog}
+
+% norun
+\begin{pycode}
+env_lib.catalog(*, family=None, action_type=None, observation_type=None,
+                native_vector=None, available_only=False, inspect=True)
+\end{pycode}
+returns a \code{Catalog}, a list of \code{EnvInfo} records (Table~\ref{tab:workflow-envinfo})
+whose \code{str()} is an aligned text table; \code{to\_markdown()} gives a
+Markdown table and \code{ids()} the list of ids. The filters combine:
+\code{family} takes one family name or several, \code{action\_type} and
+\code{observation\_type} take \code{"continuous"} or \code{"discrete"}
+(Pistonball, whose actions can be either, matches both), \code{native\_vector}
+selects environments with or without a native vector implementation and
+\code{available\_only} hides environments whose optional dependencies are
+missing. With \code{inspect=True} every environment is created once to read
+the number of agents and the space shapes; the results are cached for the
+session, and an environment that cannot be created is reported as unavailable
+with a \code{note} instead of raising. \code{inspect=False} skips this step
+(and the import of optional dependencies such as PyTorch).
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Fields of \code{EnvInfo} (a frozen dataclass).}
+  \label{tab:workflow-envinfo}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Field & Content \\
+    \midrule
+    \code{id}, \code{family}, \code{description} & registered id, family (subpackage without \code{\_env}), one-line summary \\
+    \code{observation\_type}, \code{action\_type} & \code{"continuous"}, \code{"discrete"} or \code{"continuous|discrete"} \\
+    \code{requires}, \code{available} & optional-dependency extra (or \code{None}); whether it and the environment module can be imported \\
+    \code{native\_vector} & whether \code{make\_vec} uses a native batched implementation \\
+    \code{n\_agents} & leading dimension of the joint observation (1 for a flat observation) \\
+    \code{observation\_shape}, \code{action\_shape} & shapes of the joint spaces (\code{()} for a \code{Discrete} action) \\
+    \code{observation\_space}, \code{action\_space} & one-line descriptions of the spaces with their bounds \\
+    \code{kwargs} & constructor arguments of this registered configuration (read-only) \\
+    \code{entry\_point}, \code{vector\_entry\_point}, \code{note} & implementation classes; reason for unavailability \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\code{env\_lib.describe(env\_id)} returns a readable multi-line description: the
+summary of the class docstring, the spaces with their bounds, the observation
+layout (for environments with an \code{observation\_layout}), all constructor
+parameters (values set by the registered id are marked with \code{*}), native
+vector support, the baseline controller and the optional dependency. An
+excerpt:
+
+\begin{textcode}
+Formation-v0 -- networked formation control
+
+family        consensus
+summary       Networked multi-agent consensus (rendezvous) and formation control.
+agents        8
+observation   continuous; Box(8, 16) float32, low -inf, high inf
+action        continuous; Box(8, 2) float32, low -1, high 1
+obs layout    position   columns 0:2
+              velocity   columns 2:4
+              offset     columns 4:6
+              neighbors  columns 6:16
+parameters    n_agents=8, task='formation'*, topology='ring', dynamics='single', ...
+vector        native batched implementation
+              env_lib.consensus_env.vector:ConsensusVectorEnv (env_lib.make_vec)
+baseline      Laplacian protocol u_i = k sum_j (y_j - y_i) - k_v v_i
+requires      no optional dependencies
+\end{textcode}
+
+% ---------------------------------------------------------------------------
+\section{The \texorpdfstring{\code{env-lib}}{env-lib} command line}\label{sec:workflow-cli}
+
+Installing the package provides the console script \code{env-lib}
+(equivalently \code{python -m env\_lib}) with the sub-commands of
+Table~\ref{tab:workflow-cli}. Constructor arguments are passed as
+\code{-{}-kwarg key=value ...}, where values are Python literals (strings may be
+written without quotes). Output is plain aligned text; errors such as an
+unknown id are reported on standard error with exit status 2.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Sub-commands of \code{env-lib}.}
+  \label{tab:workflow-cli}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.34\textwidth}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Command & Purpose \\
+    \midrule
+    \code{list [-{}-continuous|-{}-discrete] [-{}-family F ...] [-{}-native] [-{}-available] [-{}-markdown] [-{}-no-inspect]} & catalogue table (Section~\ref{sec:workflow-catalog}) \\
+    \code{describe ID} & \code{env\_lib.describe(ID)} \\
+    \code{baselines} & baseline controller of every family \\
+    \code{run ID [-{}-steps N] [-{}-policy baseline|random] [-{}-seed S] [-{}-gif PATH] [-{}-fps F] [-{}-theme light|dark] [-{}-kwarg K=V ...]} & roll out one episode, print the team return, the per-agent returns and the final info; record a GIF (or MP4) with \code{record\_episode} \\
+    \code{evaluate ID [-{}-episodes N] [-{}-policy both|baseline|random] [-{}-num-envs N] [-{}-seed S] [-{}-kwarg K=V ...]} & compare random actions with the baseline using \code{env\_lib.evaluate}, in parallel with \code{-{}-num-envs} \\
+    \code{bench ID [-{}-num-envs N] [-{}-steps N] [-{}-async] [-{}-kwarg K=V ...]} & throughput of the single environment, the native vector environment (if any) and \code{SyncVectorEnv} (and \code{AsyncVectorEnv}) with a fixed random action \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{shellcode}
+env-lib list --family consensus power_grid platoon
+env-lib describe PowerGrid-v0
+env-lib run Formation-v0 --kwarg formation_shape=wedge topology=proximity --gif renders/wedge.gif
+env-lib evaluate Formation-v0 --episodes 64 --num-envs 32
+env-lib bench Consensus-v0 --num-envs 256 --steps 200
+\end{shellcode}
+
+Output of \code{env-lib run Formation-v0 -{}-seed 1 -{}-kwarg n\_agents=6}:
+
+\begin{textcode}
+Formation-v0 (n_agents=6)
+  policy        baseline: Laplacian protocol u_i = k sum_j (y_j - y_i) - k_v v_i
+  seed          1
+  episode       60 steps, terminated (0.01 s)
+  team return   -551.1200
+  agent return  mean -561.1200, min -909.6050 (agent_4), max -305.6054 (agent_1)
+    agent       return
+    agent_0  -312.4189
+    ...
+    agent_5  -495.0546
+  final info    error=0.04559  algebraic_connectivity=1  success=True  step=60
+\end{textcode}
+
+and of \code{env-lib evaluate Formation-v0 -{}-episodes 64 -{}-num-envs 32}:
+
+\begin{textcode}
+Formation-v0: 64 episodes per policy, seed 0, 32 parallel copies
+policy    mean return        std  95% CI +-  length  terminated  success     s
+random    -18076.8171  5566.8354  1390.5541   200.0          0%       0%  0.29
+baseline   -1608.2215   635.6866   158.7898    92.7        100%     100%  0.09
+\end{textcode}
+
+% ---------------------------------------------------------------------------
+\section{Wrappers and adapters}\label{sec:workflow-wrappers}
+
+The environments expose the whole team through one Gymnasium interface
+(Chapter~\ref{chap:envlib}): stacked observations, a joint action and a team
+reward with the per-agent rewards in \code{info["agent\_rewards"]}. The package
+\code{env\_lib.wrappers} converts this interface to the forms expected by
+single-agent and multi-agent libraries.
+
+\paragraph{\texorpdfstring{\code{FlattenJointSpaces(env)}}{FlattenJointSpaces}.}
+The joint observation becomes a one-dimensional \code{float32} vector and the
+wrapper accepts a flat action, which it reshapes to the joint action shape. This
+is the form single-agent libraries such as Stable-Baselines3 and CleanRL
+expect; they then learn one centralised policy for the team. \code{Box},
+\code{MultiBinary} and \code{MultiDiscrete} observations are supported
+(discrete values become \code{float32} entries with matching bounds), as are
+\code{Box}, \code{MultiBinary}, \code{MultiDiscrete} and \code{Discrete} actions
+(\code{Discrete} is passed through); other spaces raise \code{TypeError}.
+Rewards and flags are passed through, so environments with per-agent reward
+arrays (AJLATT) are combined with \code{TeamReward}. The flattened environments
+pass Gymnasium's \code{check\_env}: the test suite checks the flattened
+Consensus, Kuramoto, LineMsg and WirelessComm environments and
+\code{TeamReward} on AJLATT, and the flattened PowerGrid, Platoon and
+\code{TeamReward}-wrapped AJLATT environments pass as well. Stable-Baselines3
+itself is not part of the test suite. A typical use (not executed here, since
+Stable-Baselines3 is not a dependency):
+
+% norun
+\begin{pycode}
+import env_lib
+from env_lib.wrappers import FlattenJointSpaces, TeamReward
+from stable_baselines3 import PPO          # not a dependency of env_lib
+
+env = FlattenJointSpaces(env_lib.make("Formation-v0"))  # obs (128,), act (16,)
+model = PPO("MlpPolicy", env).learn(total_timesteps=200_000)
+
+ajlatt = FlattenJointSpaces(TeamReward(env_lib.make("AJLATT-v0")))
+\end{pycode}
+
+\paragraph{\texorpdfstring{\code{TeamReward(env, reduce="sum", source="reward")}}{TeamReward}.}
+Returns a scalar team reward and scalar \code{terminated}/\code{truncated}
+flags. With \code{source="reward"} a per-agent reward array is reduced with
+\code{reduce} (\code{"sum"} or \code{"mean"}) and a scalar reward, which already
+is the environment's team reward (possibly with a success bonus), is passed
+through; with \code{source="agent\_rewards"} the team reward is always
+\code{reduce(info["agent\_rewards"])}. \code{terminated} is true when any agent
+terminated. The per-agent values stay available in \code{info["agent\_rewards"]}
+and \code{info["agent\_terminated"]}. It generalises
+\code{env\_lib.ajlatt\_env.TeamRewardWrapper}.
+
+\paragraph{\texorpdfstring{\code{ParallelEnvAdapter(env)} and \code{to\_parallel(env\_or\_id, **kwargs)}}{ParallelEnvAdapter and to\_parallel}.}
+These expose an environment through the PettingZoo Parallel API, in which every
+quantity is a dictionary keyed by agent name. PettingZoo is not a dependency:
+when it is installed the adapter subclasses \code{pettingzoo.utils.env.ParallelEnv},
+otherwise it is a plain class with the same protocol. Agents are named
+\code{"agent\_0"}, \code{"agent\_1"}, \ldots{} in the order of the leading axis of
+the joint observation (a flat observation, as in Kuramoto, gives the single agent
+\code{"agent\_0"}).
+\begin{itemize}
+  \item \code{observation\_space(agent)} and \code{action\_space(agent)} are slices
+        of the joint spaces: \code{Box (n, d)} gives \code{Box (d,)},
+        \code{Box (n,)} gives \code{Box (1,)}, \code{MultiDiscrete} and
+        \code{MultiBinary} give \code{Discrete}, and the joint
+        \code{Discrete(2 ** n)} of LineMsg gives \code{Discrete(2)} per agent
+        (bit $i$ is agent $i$).
+  \item \code{reset(seed, options)} returns observation and info dictionaries;
+        \code{options} are forwarded to the environment unchanged.
+  \item \code{step(actions)} takes one action per agent and returns observation,
+        reward, termination, truncation and info dictionaries. Rewards come from
+        \code{info["agent\_rewards"]}; termination and truncation flags are per
+        agent when the environment reports arrays (AJLATT) and shared otherwise.
+        When the joint episode ends, agents that did not terminate are marked
+        truncated and \code{agents} becomes empty.
+  \item Info arrays whose leading dimension is the number of agents are sliced per
+        agent (for example row $i$ of the consensus adjacency matrix); other
+        entries are shared. \code{state()} returns the joint observation
+        (\code{state\_space} is the joint observation space); \code{render()} and
+        \code{close()} are forwarded.
+\end{itemize}
+
+\begin{pycode}
+import env_lib
+from env_lib.wrappers import to_parallel
+
+env = to_parallel("PowerGrid-v0", n_buses=24)
+policy = env_lib.baseline_policy(env)       # dictionaries in, dictionaries out
+observations, infos = env.reset(seed=0)
+while env.agents:
+    actions = policy(observations)          # {agent: action}
+    observations, rewards, terminations, truncations, infos = env.step(actions)
+print(len(rewards), sum(rewards.values()))  # 24 agents, last team reward
+env.close()
+\end{pycode}
+
+PettingZoo's \code{parallel\_api\_test} passes for the adapted environment of
+every family: \code{tests/envs/test\_wrappers.py} runs it on LineMsg (both
+action spaces), WirelessComm, AJLATT, Pistonball, Consensus, Kuramoto,
+PowerGrid and Platoon. The test resets with the dummy option
+\code{\{"options": 1\}}; the environments with reset options ignore such unknown
+keys with a \code{UserWarning} (Section~\ref{sec:envlib-reset-options}), and
+the others ignore \code{options} altogether.
+
+% ---------------------------------------------------------------------------
+\section{Baseline controllers}\label{sec:workflow-baselines}
+
+\code{env\_lib.baseline\_policy(env, **kwargs)} returns a classical controller
+for any environment of the package: a single environment, a vector
+environment (native, Sync or Async), wrapped or not, a
+\code{ParallelEnvAdapter} or a registered id. It dispatches on the type of the
+unwrapped environment and reads the parameters it needs (action bounds,
+dynamics, grid size, \ldots) from the environment. The returned
+\code{BaselinePolicy} maps an observation with any leading batch shape to an
+action, so one object drives a single environment and all copies of a vector
+environment; it also accepts PyTorch tensors (returning a tensor on the same
+device), the observation dictionaries of the parallel adapter (returning action
+dictionaries) and observations flattened by \code{FlattenJointSpaces}.
+Keyword arguments set the controller gains; \code{env\_lib.baselines.list\_baselines()}
+returns a short description per family and the underlying pure functions
+(\code{laplacian\_consensus}, \code{kuramoto\_feedback}, \code{linemsg\_relay},
+\code{wireless\_schedule}, \code{pistonball\_ramp}, \code{ajlatt\_encircle}) are
+public. Table~\ref{tab:workflow-baselines} lists the controllers.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Baseline controllers (defaults in brackets; all outputs are clipped
+    to the action bounds).}
+  \label{tab:workflow-baselines}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.17\textwidth}>{\raggedright\arraybackslash}p{0.2\textwidth}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Environment & Controller & Law \\
+    \midrule
+    Consensus, Formation & Laplacian protocol &
+      $u_i = k \sum_{j \in \mathcal{N}_i} (y_j - y_i) - k_v v_i$, $y = x - d$, from the
+      neighbour slots of the observation [$k = 1$, $k_v = \max(0, \sqrt{k} - c)$ for
+      the double integrator, else 0]; equals \code{laplacian\_policy()} when all
+      neighbours fit into the slots \\
+    Kuramoto (NumPy, PyTorch, vector) & frequency compensation and mean-field phase feedback &
+      $a_i = (\Omega - \omega_i) + k \sin(\psi - \theta_i)$ with the mean phase $\psi$,
+      $\Omega$ the mean natural frequency (or \code{target\_frequency} for frequency
+      tracking) [$k = 3$]; coupling strengths at the upper bound (dynamic mode) \\
+    LineMsg & always relay & $a_i = 1$ for every agent (maximises the expected reward) \\
+    WirelessComm & collision-free schedule &
+      agent $(a, b)$ owns access point $(a, b)$ and sends to it when it holds a
+      packet; agents of the last row and column borrow an access point whose owner
+      (and competing borrower) has an empty queue \\
+    Pistonball & decentralised ramp &
+      pistons that see the ball track a height rising from fully down half a piston
+      left of the ball to fully up half a piston right of it,
+      $a_i = \operatorname{clip}(k (h_i - h^*_i), -1, 1)$ [$k = 8$]; other pistons move down \\
+    AJLATT & encircle the target belief &
+      robot $i$ drives to the slot at angle $2\pi i / N$ and distance $r$ from its target
+      belief: $v = \min(v_{\max}, 0.5 \lVert g \rVert) \max(0, \cos e)$,
+      $\omega = \operatorname{clip}(k e)$, $e$ the bearing error [$r = 1.8$\,m, $k = 1.2$] \\
+    PowerGrid & droop control &
+      $u_i = \operatorname{clip}(-k\, \omega_i, -u_{\max,i}, u_{\max,i})$ (\code{droop\_policy}) [$k = 0.25$] \\
+    Platoon & cooperative adaptive cruise control &
+      $u_i = k_p e_i + k_d (v_{i-1} - v_i) + k_a a_{i-1}$ (\code{cacc\_policy})
+      [$k_p = 0.5$, $k_d = 0.6$, $k_a = 0.65$] \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Table~\ref{tab:workflow-baseline-results} compares the baselines with uniformly
+random actions. Two environments need care when reading returns. The Kuramoto
+environments with an order-parameter reward terminate on synchronisation while
+paying a positive reward per step, so a faster controller collects \emph{less}
+return; their task metric is the time to synchronise, and with termination
+disabled (\code{sync\_threshold=1.5}) the baseline also has the higher return.
+AJLATT pays a negative reward per step and terminates on collisions, so random
+robots that collide early collect a \emph{higher} return; with
+\code{terminate\_on\_collision=False} the comparison is fair.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Mean return (95\,\% confidence half-width) and mean episode length of
+    random actions and the baseline; 10 episodes with seeds 0--9 (5 for AJLATT),
+    default parameters unless stated, measured with \code{env\_lib.evaluate}.}
+  \label{tab:workflow-baseline-results}
+  \begin{tabular}{@{}lrrrr@{}}
+    \toprule
+    & \multicolumn{2}{c}{Random} & \multicolumn{2}{c}{Baseline} \\
+    \cmidrule(lr){2-3}\cmidrule(l){4-5}
+    Environment & return & length & return & length \\
+    \midrule
+    \envid{Consensus-v0}   & $-16923 \pm 3372$ & 200 & $-1456 \pm 421$ & 85 \\
+    \envid{Formation-v0}   & $-17673 \pm 3470$ & 200 & $-1676 \pm 503$ & 96 \\
+    \envid{KuramotoOscillator-v0} & $24.4 \pm 1.1$ & 22 & $17.7 \pm 0.8$ & 12 \\
+    \quad \code{sync\_threshold=1.5, max\_steps=200} & $191.7 \pm 3.0$ & 200 & $196.2 \pm 1.2$ & 200 \\
+    \envid{KuramotoOscillator-Constant-v0} & $65.7 \pm 9.5$ & 92 & $47.8 \pm 3.8$ & 58 \\
+    \quad \code{sync\_threshold=1.5, max\_steps=200} & $165.1 \pm 14.4$ & 200 & $179.4 \pm 7.1$ & 200 \\
+    \envid{KuramotoOscillator-FreqSync-Constant-v0} & $-149.1 \pm 25.7$ & 92 & $-124.7 \pm 14.2$ & 61 \\
+    \envid{LineMsg-v0}      & $39.8 \pm 3.3$ & 50 & $95.0 \pm 0.0$ & 50 \\
+    \envid{WirelessComm-v0} & $391.8 \pm 12.1$ & 50 & $923.6 \pm 9.1$ & 50 \\
+    \envid{WirelessComm-v1} & $141.5 \pm 9.0$ & 50 & $336.3 \pm 7.7$ & 50 \\
+    \envid{Pistonball-v0}   & $-323 \pm 88$ & 125 & $919 \pm 34$ & 83 \\
+    \envid{AJLATT-v0}       & $-414 \pm 317$ & 13 & $-7025 \pm 281$ & 120 \\
+    \quad \code{terminate\_on\_collision=False} & $-35347 \pm 9948$ & 120 & $-7025 \pm 281$ & 120 \\
+    \envid{PowerGrid-v0}    & $-750.5 \pm 469.3$ & 195 & $-0.7 \pm 0.3$ & 200 \\
+    \envid{Platoon-v0}      & $-4957 \pm 1673$ & 69 & $-58.1 \pm 7.5$ & 600 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Evaluation and rollouts}\label{sec:workflow-evaluation}
+
+% norun
+\begin{pycode}
+env_lib.evaluate(env, policy=None, *, n_episodes=10, seed=None,
+                 max_steps=None, deterministic_seeds=True)
+\end{pycode}
+runs a policy (any callable from
+observation to action; \code{None} samples uniformly random actions from a
+private, seeded copy of the action space) and returns an
+\code{EvaluationResult} (Table~\ref{tab:workflow-result}).
+\begin{itemize}
+  \item Single environment: episode $k$ is reset with seed \code{seed + k}
+        (\code{deterministic\_seeds=True}), or only the first reset is seeded.
+  \item Vector environment (native, Sync or Async): the copies run in parallel
+        after one \code{reset(seed=seed)}. Copy $i$ contributes the first
+        $\lfloor (N + i) / B \rfloor$ episodes it finishes ($N$ episodes, $B$
+        copies), so that short episodes are not over-represented. All autoreset
+        modes are handled: the reset step of \code{"next\_step"} is not counted,
+        the final per-agent rewards of \code{"same\_step"} are read from
+        \code{infos["final\_info"]}, and \code{"disabled"} copies are reset
+        through the reset mask.
+  \item \code{max\_steps} caps the episode length; capped episodes count as
+        truncated (vector copies are then reset through the reset mask).
+  \item Per-agent reward arrays (AJLATT) are summed into the team return.
+\end{itemize}
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Fields of \code{EvaluationResult} (a frozen dataclass).}
+  \label{tab:workflow-result}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Field & Content \\
+    \midrule
+    \code{returns}, \code{lengths}, \code{terminated} & per-episode team return, length and termination flag (read-only arrays) \\
+    \code{agent\_returns} & per-episode per-agent returns \code{(N, n)} from \code{info["agent\_rewards"]}, or \code{None} \\
+    \code{successes} & \code{info["success"]} at the end of each episode, or \code{None} \\
+    \code{mean\_return}, \code{std\_return} & mean and sample standard deviation ($\text{ddof} = 1$) of the returns \\
+    \code{ci95} & half-width $t_{0.975, N-1}\, s / \sqrt{N}$ of the 95\,\% confidence interval of the mean return (\code{nan} for one episode) \\
+    \code{mean\_length}, \code{termination\_rate}, \code{success\_rate} & mean length and fractions of terminated and successful episodes \\
+    \code{env\_id}, \code{policy}, \code{n\_episodes} & labels and count; \code{summary()} returns the scalars as a dictionary \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\code{print(result)} gives a compact summary:
+
+\begin{textcode}
+EvaluationResult: Formation-v0, policy baseline:consensus, 64 episodes
+  return        -1608.222 +- 635.687 (std), 95% CI +- 158.790
+  length        92.7 steps (min 59, max 113)
+  terminated    100.0% of episodes
+  success       100.0% of episodes
+  agent return  mean -1618.222, min -1863.161, max -1463.515 (8 agents)
+\end{textcode}
+
+% norun
+\begin{pycode}
+env_lib.rollout(env, policy=None, *, n_steps=None, n_episodes=None, seed=None)
+\end{pycode}
+records the transitions of a single environment as a
+\code{Trajectory} of stacked arrays: \code{observations} and
+\code{next\_observations} \code{(T, ...)}, \code{actions}, the team
+\code{rewards} \code{(T,)}, \code{agent\_rewards} \code{(T, n)} (or \code{None}),
+\code{terminated}, \code{truncated} and \code{episode\_ids} \code{(T,)}. Without
+limits one episode is recorded; episode $k$ is reset with seed \code{seed + k}.
+\code{Trajectory.save(path)} writes a compressed \code{.npz} file,
+\code{Trajectory.load(path)} reads it back, \code{episode(k)} selects one episode
+and \code{episode\_returns()} returns the team return of each episode.
+
+\begin{pycode}
+import env_lib
+
+env = env_lib.make("Platoon-v0")
+data = env_lib.rollout(env, env_lib.baseline_policy(env), n_episodes=20, seed=0)
+data.save("data/platoon_cacc.npz")                   # e.g. for offline RL
+print(len(data), data.n_episodes, data.episode_returns().mean())
+\end{pycode}
+
+% ---------------------------------------------------------------------------
+\section{A complete workflow}\label{sec:workflow-example}
+
+\code{examples/workflow\_demo.py} combines the pieces of this chapter: it lists
+the environments with continuous actions, creates a native vector environment,
+evaluates random actions and the baseline on all copies in parallel, flattens
+the environment for a single-agent library, adapts it to the Parallel API and
+records a GIF of the baseline (about ten seconds in total):
+
+\begin{shellcode}
+python examples/workflow_demo.py
+python examples/workflow_demo.py --env Consensus-v0 --num-envs 128 --episodes 128
+\end{shellcode}
+
+\endgroup

@@ -234,3 +234,6 @@ renders/
 *.gif
 *.mp4
 !docs/images/*.gif
+
+# Slide build products
+docs/slides/output/

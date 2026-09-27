@@ -6,62 +6,106 @@
 % extra inter-word stretch in this chapter (the group keeps it local).
 \begingroup\setlength{\emergencystretch}{3em}% chapter-local
 
-This appendix lists the public classes and functions of version 1.0 with their
+This appendix lists the public classes and functions of version 1.1 with their
 signatures, grouped by module. Signatures omit type annotations; defaults are
 shown as in the source code. The chapters give the semantics, and the
 docstrings (\code{help(obj)} in Python) give full details. Names that start
 with an underscore and modules not listed here are internal and may change
-without notice.
+without notice; the one exception are the documented hooks of
+\code{BatchedVectorEnv} (Section~\ref{sec:api-vector}), which subclasses
+implement.
 
 \section{\texorpdfstring{\pkg{env\_lib}}{env\_lib}}\label{sec:api-envlib}
 
 \subsection{Package functions}
 
+% norun
 \begin{pycode}
 env_lib.make(env_id, **kwargs) -> gym.Env
+env_lib.make_vec(env_id, num_envs=1, vectorization_mode=None, *,
+                 autoreset_mode=None, vector_kwargs=None, wrappers=None,
+                 **kwargs) -> gym.vector.VectorEnv
+env_lib.get_spec(env_id) -> EnvSpec
 env_lib.list_envs() -> list[str]
 env_lib.register_envs()
-env_lib.__version__                       # "1.0.0"
+env_lib.__version__                       # "1.1.0"
 env_lib.ResetNeededError                  # exception class
 \end{pycode}
 
 \code{make} creates a registered environment (a thin wrapper around
 \code{gymnasium.make} that suppresses the ``out of date'' warning of
 \code{-v0} ids); keyword arguments go to the environment constructor.
-\code{list\_envs} returns the registered ids in the order of
-Table~\ref{tab:api-ids}. \code{register\_envs} registers all ids with
-Gymnasium; it runs automatically on \code{import env\_lib} and is idempotent.
-\code{ResetNeededError} is raised by every environment when \code{step()} or
-\code{render()} is called before \code{reset()}; it subclasses both
-\code{RuntimeError} and \code{gymnasium.error.ResetNeeded}.
-The environment classes below are exported lazily by \pkg{env\_lib}, so
-optional dependencies are imported only when a class is used.
+\code{max\_episode\_steps=N} sets the environment's own limit argument
+(\code{EnvSpec.limit\_kwarg}) instead of adding a \code{TimeLimit} wrapper; it
+raises \code{ValueError} if the limit argument is also given with a different
+value. \code{make\_vec} creates \code{num\_envs} copies as one Gymnasium vector
+environment with the same keyword arguments: \code{vectorization\_mode=None}
+selects the native batched implementation (\code{EnvSpec.vector\_entry\_point})
+when there is one and \code{gymnasium.vector.SyncVectorEnv} otherwise, and
+\code{"sync"}, \code{"async"} and \code{"vector\_entry\_point"} force a mode.
+\code{autoreset\_mode} (\code{"next\_step"}, \code{"same\_step"},
+\code{"disabled"}, Gymnasium's spellings or \code{AutoresetMode} members) works
+for every mode. \code{vector\_kwargs} (further arguments of the Sync or Async
+class) and \code{wrappers} (applied to every copy) are only accepted by the
+Sync and Async modes; for environments with per-agent reward arrays
+(\code{EnvSpec.per\_agent\_rewards}, AJLATT) \code{TeamReward} is applied when
+no \code{wrappers} are given.
+\code{get\_spec} returns the registration record of an id and raises
+\code{KeyError} for an unknown one. \code{list\_envs} returns the 18 registered
+ids in the order of Table~\ref{tab:api-ids}. \code{register\_envs} registers all
+ids with Gymnasium; it runs automatically on \code{import env\_lib} and is
+idempotent. \code{ResetNeededError} is raised by every environment, including
+the native vector environments, when \code{step()} or \code{render()} is
+called before \code{reset()}; it subclasses both \code{RuntimeError} and
+\code{gymnasium.error.ResetNeeded}. The environment classes below, and
+\code{baseline\_policy}, \code{evaluate}, \code{rollout}, \code{describe} and
+\code{EnvInfo}, are exported lazily by \pkg{env\_lib}, so optional
+dependencies are imported only when a name is used.
+
+\subsection{Registry records}
+
+Module \pkg{env\_lib.registration}; Section~\ref{sec:envlib-registry}.
+
+% norun
+\begin{pycode}
+EnvSpec(id, entry_point, kwargs={}, description='', family='',
+        observation_type='continuous', action_type='continuous',
+        requires=None, vector_entry_point=None, limit_kwarg='max_steps',
+        per_agent_rewards=False, disable_env_checker=False)   # frozen dataclass
+ENV_SPECS                               # list[EnvSpec] in list_envs() order
+\end{pycode}
+
+Table~\ref{tab:envlib-spec} describes the fields. \code{EnvSpec} is not
+Gymnasium's class of the same name, which \code{env.spec} returns.
 
 \begin{table}[htbp]
   \centering
   \small
-  \caption{Registered environment ids and their preset arguments.}
+  \caption{Registered environment ids, their preset arguments and the vector
+    implementation used by \code{make\_vec}.}
   \label{tab:api-ids}
-  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{6.1cm}>{\raggedright\arraybackslash}X@{}}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{6.1cm}>{\raggedright\arraybackslash}Xl@{}}
     \toprule
-    Id & Class and preset arguments \\
+    Id & Class and preset arguments & Vector \\
     \midrule
-    \envid{KuramotoOscillator-v0} & \code{KuramotoOscillatorEnv()} (10 oscillators) \\
-    \envid{KuramotoOscillator-v1} & \code{n\_oscillators=5} \\
-    \envid{KuramotoOscillator-Constant-v0} & \code{n\_oscillators=6}, \code{coupling\_mode="constant"} \\
-    \envid{KuramotoOscillator-\allowbreak FreqSync-Constant-v0} & as above, \code{reward\_type="frequency\_synchronization"}, \code{target\_frequency=2.0} \\
-    \envid{KuramotoOscillatorTorch-v0} & \code{KuramotoOscillatorEnvTorch()} (10 oscillators) \\
-    \envid{KuramotoOscillatorTorch-v1} & \code{n\_oscillators=8}, \code{n\_agents=4}, \code{device="cpu"} \\
-    \envid{KuramotoOscillatorTorch-v2} & \code{n\_oscillators=10}, \code{device="auto"}, \code{integration\_method="rk4"} \\
-    \envid{KuramotoOscillatorTorch-\allowbreak Constant-v0} & \code{n\_oscillators=6}, \code{coupling\_mode="constant"} \\
-    \envid{KuramotoOscillatorTorch-\allowbreak FreqSync-Constant-v0} & as above, frequency synchronisation, \code{target\_frequency=2.0} \\
-    \envid{LineMsg-v0} & \code{LineMsgEnv()} \\
-    \envid{WirelessComm-v0} & \code{WirelessCommEnv()} ($6 \times 6$ grid) \\
-    \envid{WirelessComm-v1} & \code{grid\_x=4}, \code{grid\_y=4} \\
-    \envid{Pistonball-v0} & \code{PistonballEnv()} \\
-    \envid{Consensus-v0} & \code{ConsensusEnv()} \\
-    \envid{Formation-v0} & \code{ConsensusEnv(task="formation")} \\
-    \envid{AJLATT-v0} & \code{AJLATTEnv()} (Gymnasium's passive environment checker disabled) \\
+    \envid{KuramotoOscillator-v0} & \code{KuramotoOscillatorEnv()} (10 oscillators) & native \\
+    \envid{KuramotoOscillator-v1} & \code{n\_oscillators=5} & native \\
+    \envid{KuramotoOscillator-Constant-v0} & \code{n\_oscillators=6}, \code{coupling\_mode="constant"} & native \\
+    \envid{KuramotoOscillator-\allowbreak FreqSync-Constant-v0} & as above, \code{reward\_type="frequency\_synchronization"}, \code{target\_frequency=2.0} & native \\
+    \envid{KuramotoOscillatorTorch-v0} & \code{KuramotoOscillatorEnvTorch()} (10 oscillators) & sync \\
+    \envid{KuramotoOscillatorTorch-v1} & \code{n\_oscillators=8}, \code{n\_agents=4}, \code{device="cpu"} & sync \\
+    \envid{KuramotoOscillatorTorch-v2} & \code{n\_oscillators=10}, \code{device="auto"}, \code{integration\_method="rk4"} & sync \\
+    \envid{KuramotoOscillatorTorch-\allowbreak Constant-v0} & \code{n\_oscillators=6}, \code{coupling\_mode="constant"} & sync \\
+    \envid{KuramotoOscillatorTorch-\allowbreak FreqSync-Constant-v0} & as above, frequency synchronisation, \code{target\_frequency=2.0} & sync \\
+    \envid{LineMsg-v0} & \code{LineMsgEnv()} & sync \\
+    \envid{WirelessComm-v0} & \code{WirelessCommEnv()} ($6 \times 6$ grid) & sync \\
+    \envid{WirelessComm-v1} & \code{grid\_x=4}, \code{grid\_y=4} & sync \\
+    \envid{Pistonball-v0} & \code{PistonballEnv()} & sync \\
+    \envid{Consensus-v0} & \code{ConsensusEnv()} & native \\
+    \envid{Formation-v0} & \code{ConsensusEnv(task="formation")} & native \\
+    \envid{PowerGrid-v0} & \code{PowerGridEnv()} (16 buses) & native \\
+    \envid{Platoon-v0} & \code{PlatoonEnv()} (8 followers) & native \\
+    \envid{AJLATT-v0} & \code{AJLATTEnv()} (Gymnasium's passive environment checker disabled) & sync \\
     \bottomrule
   \end{tabularx}
 \end{table}
@@ -70,6 +114,7 @@ optional dependencies are imported only when a class is used.
 
 Every environment class implements the Gymnasium methods
 
+% norun
 \begin{pycode}
 reset(*, seed=None, options=None) -> tuple[observation, dict]
 step(action) -> tuple[observation, reward, terminated, truncated, dict]
@@ -80,12 +125,38 @@ close()                              # idempotent
 and has the attributes \code{action\_space}, \code{observation\_space},
 \code{render\_mode}, \code{metadata} and \code{np\_random}. The \code{info}
 dictionary always contains \code{"agent\_rewards"}, a \code{float64} array of
-shape \code{(n\_agents,)}. Chapter~\ref{chap:envlib} describes the conventions.
+shape \code{(n\_agents,)}. Unknown keys of \code{options} are ignored with a
+\code{UserWarning} (Section~\ref{sec:envlib-reset-options}).
+Chapter~\ref{chap:envlib} describes the conventions.
 
-\subsection{\texorpdfstring{\code{KuramotoOscillatorEnv} and \code{KuramotoOscillatorEnvTorch}}{KuramotoOscillatorEnv and KuramotoOscillatorEnvTorch}}
+The native vector environments (\code{KuramotoOscillatorVectorEnv},
+\code{ConsensusVectorEnv}, \code{PowerGridVectorEnv}, \code{PlatoonVectorEnv})
+implement the Gymnasium vector API through \code{BatchedVectorEnv}:
+
+% norun
+\begin{pycode}
+reset(*, seed=None, options=None) -> tuple[observations, dict]
+step(actions) -> tuple[observations, rewards, terminations, truncations, dict]
+render() -> np.ndarray | None        # frame of copy 0
+close()
+\end{pycode}
+
+with the attributes \code{num\_envs}, \code{single\_observation\_space},
+\code{single\_action\_space}, \code{observation\_space}, \code{action\_space}
+(batched), \code{autoreset\_mode}, \code{render\_mode}, \code{metadata} and
+\code{np\_random} (one generator for all copies). \code{options} accepts
+\code{"reset\_mask"} and the reset options of the single environment. Their
+constructors take the keyword arguments of the single environment plus
+\code{num\_envs} and \code{autoreset\_mode}. Rewards have shape
+\code{(num\_envs,)}; every info value has a leading \code{num\_envs} dimension
+and a mask \code{"\_key"}; \code{infos["agent\_rewards"]} has shape
+\code{(num\_envs, n\_agents)}.
+
+\subsection{Kuramoto oscillator classes}
 
 Module \pkg{env\_lib.kos\_env}; Chapter~\ref{chap:kuramoto}.
 
+% norun
 \begin{pycode}
 KuramotoOscillatorEnv(n_oscillators=10, n_agents=1, dt=0.01, max_steps=1000,
                       coupling_range=(0.0, 5.0), control_input_range=(-1.0, 1.0),
@@ -99,6 +170,9 @@ KuramotoOscillatorEnv(n_oscillators=10, n_agents=1, dt=0.01, max_steps=1000,
                       sync_threshold=0.99, sync_bonus=10.0)
 
 KuramotoOscillatorEnvTorch(...same arguments..., device='cpu', render_agent=0)
+
+KuramotoOscillatorVectorEnv(num_envs=1, *, autoreset_mode='next_step',
+                            ...keyword arguments of KuramotoOscillatorEnv...)
 \end{pycode}
 
 \code{KuramotoOscillatorEnv} simulates one network with NumPy.
@@ -120,14 +194,24 @@ PyTorch class:
   \end{tabularx}
 \end{center}
 
-\code{env\_lib.kos\_env.register()} is deprecated; registration happens on
-import.
+\code{KuramotoOscillatorVectorEnv} (module \pkg{env\_lib.kos\_env.vector}) is the
+native vector environment of the NumPy ids: observations
+\code{(num\_envs, obs\_dim)}, actions \code{(num\_envs, action\_dim)}. It copies
+the configuration attributes of the single environment (\code{n\_oscillators},
+\code{coupling\_indices}, \code{topology\_matrix}, \ldots) and exposes the
+batched state as the read-only properties \code{phases},
+\code{natural\_frequencies}, \code{control\_inputs} (each
+\code{(num\_envs, N)}), \code{coupling\_strengths}
+(\code{(num\_envs, M)}; \code{None} in constant mode) and \code{step\_count}
+(\code{(num\_envs,)}). \code{env\_lib.kos\_env.register()} is deprecated;
+registration happens on import.
 
 \subsection{\texorpdfstring{\code{LineMsgEnv} and \code{WirelessCommEnv}}{LineMsgEnv and WirelessCommEnv}}
 
 Modules \pkg{env\_lib.linemsg\_env} and \pkg{env\_lib.wireless\_comm\_env};
 Chapter~\ref{chap:networked}.
 
+% norun
 \begin{pycode}
 LineMsgEnv(num_agents=10, n_obs_neighbors=1, max_iter=50, render_mode=None,
            action_space_type='discrete')
@@ -152,6 +236,7 @@ is \code{True} unless exactly one agent uses the access point.
 Module \pkg{env\_lib.pistonball\_env}; Chapter~\ref{chap:pistonball}. Requires
 the \code{pistonball} extra.
 
+% norun
 \begin{pycode}
 PistonballEnv(n_pistons=20, time_penalty=-0.1, continuous=True, random_drop=True,
               random_rotate=True, ball_mass=0.75, ball_friction=0.3,
@@ -186,10 +271,11 @@ it returns a joint action in which the selected piston follows the keys
 or closes the window. The module also exports \code{PistonballLayout} (screen
 geometry) and \code{PistonballRenderer} (the pygame renderer).
 
-\subsection{\texorpdfstring{\code{ConsensusEnv}}{ConsensusEnv}}
+\subsection{\texorpdfstring{\code{ConsensusEnv} and \code{ConsensusVectorEnv}}{ConsensusEnv and ConsensusVectorEnv}}
 
 Module \pkg{env\_lib.consensus\_env}; Chapter~\ref{chap:consensus}.
 
+% norun
 \begin{pycode}
 ConsensusEnv(*, n_agents=8, task='consensus', topology='ring', dynamics='single',
              dt=0.1, max_steps=200, arena_size=10.0, max_control=1.0,
@@ -197,6 +283,9 @@ ConsensusEnv(*, n_agents=8, task='consensus', topology='ring', dynamics='single'
              formation_shape='circle', formation_radius=3.0, comm_radius=4.0,
              edge_probability=0.3, graph_seed=None, max_neighbors=None,
              damping=0.5, render_mode=None)
+
+ConsensusVectorEnv(num_envs=1, *, autoreset_mode='next_step',
+                   ...keyword arguments of ConsensusEnv...)
 \end{pycode}
 
 \begin{center}
@@ -216,8 +305,17 @@ ConsensusEnv(*, n_agents=8, task='consensus', topology='ring', dynamics='single'
   \end{tabularx}
 \end{center}
 
+\code{ConsensusVectorEnv} (module \pkg{env\_lib.consensus\_env.vector}) is the
+native vector environment of \envid{Consensus-v0} and \envid{Formation-v0}. It
+has the same members with a leading \code{num\_envs} dimension
+(\code{positions} \code{(num\_envs, n\_agents, 2)}, \code{adjacency}
+\code{(num\_envs, n\_agents, n\_agents)}, \code{task\_error} \code{(num\_envs,)},
+\ldots; \code{formation\_offsets} is shared), and \code{laplacian\_policy()}
+returns the actions of all copies, \code{(num\_envs, n\_agents, 2)}.
+
 Module-level helpers and constants:
 
+% norun
 \begin{pycode}
 make_topology(topology, n_agents, *, edge_probability=0.3, rng=None,
               max_attempts=1000) -> np.ndarray       # adjacency of a static graph
@@ -232,10 +330,110 @@ DYNAMICS = ('single', 'double')
 FORMATION_SHAPES = ('circle', 'line', 'grid', 'wedge')
 \end{pycode}
 
+\subsection{\texorpdfstring{\code{PowerGridEnv} and \code{PowerGridVectorEnv}}{PowerGridEnv and PowerGridVectorEnv}}
+
+Module \pkg{env\_lib.power\_grid\_env}; Chapter~\ref{chap:power_grid}.
+
+% norun
+\begin{pycode}
+PowerGridEnv(*, n_buses=16, topology='small_world', topology_kwargs=None,
+             network_seed=0, randomize_network=False, inertia_range=(2.0, 8.0),
+             damping_range=(2.0, 6.0), susceptance_range=(0.3, 0.8),
+             line_loading=0.5, nominal_frequency=50.0, u_max=0.1, dt=0.05,
+             substeps=2, max_steps=200, initial_disturbances=1,
+             disturbance_rate=0.1, disturbance_magnitude=(0.05, 0.2),
+             load_increase_prob=0.5, noise_std=0.0, noise_tau=1.0,
+             frequency_limit=0.5, w_freq=1.0, w_rocof=0.1, w_u=10.0,
+             trip_penalty=100.0, neighbourhood=1, render_mode=None)
+
+PowerGridVectorEnv(num_envs=1, *, autoreset_mode='next_step', render_mode=None,
+                   **kwargs)             # kwargs: the arguments of PowerGridEnv
+
+droop_policy(observation, gain=DEFAULT_DROOP_GAIN) -> np.ndarray
+
+TOPOLOGIES              # the topologies of env_lib.utils.graphs.make_graph
+OBSERVATION_FEATURES    # ('omega', 'rocof', ..., 'capacity', 'inertia')
+OBSERVATION_SCALE       # feature -> fixed scale factor
+DEFAULT_DROOP_GAIN = 0.25
+\end{pycode}
+
+\begin{center}
+  \small
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{6.9cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Member of \code{PowerGridEnv} & Description \\
+    \midrule
+    \code{observation\_layout}, \code{observation\_scale} & Column slice and scale factor of every feature. \\
+    \code{adjacency}, \code{edges}, \code{susceptance} & Line graph \code{(n, n)}, lines \code{(E, 2)}, weighted adjacency $B_{ij}$. \\
+    \code{inertia}, \code{inertia\_constants}, \code{damping} & $M_i$, $H_i$ and $D_i$. \\
+    \code{nominal\_injections}, \code{equilibrium} & $P_i^0$ and the equilibrium angles $\theta^\star$. \\
+    \code{u\_max}, \code{omega\_limit} & Control bounds and trip limit (rad/s). \\
+    \code{theta}, \code{omega}, \code{disturbance}, \code{line\_flows} & Current state, $\Delta P_i$ and line flows. \\
+    \code{time}, \code{step\_count}, \code{positions} & Simulated time, steps, plotting layout. \\
+    \code{n\_buses}, \code{n\_agents}, \code{obs\_dim}, \code{max\_steps}, \code{dt}, \code{config} & Configuration. \\
+    \bottomrule
+  \end{tabularx}
+\end{center}
+
+\code{PowerGridVectorEnv} exposes \code{observation\_layout},
+\code{observation\_scale}, \code{u\_max} and, batched over the copies,
+\code{adjacency}, \code{inertia}, \code{damping}, \code{nominal\_injections},
+\code{equilibrium}, \code{theta}, \code{omega} and \code{disturbance}.
+\code{droop\_policy} computes $u_i = \operatorname{clip}(-k\,\omega_i,
+-u_{\max,i}, u_{\max,i})$ from each agent's observation row for any leading
+batch shape.
+
+\subsection{\texorpdfstring{\code{PlatoonEnv} and \code{PlatoonVectorEnv}}{PlatoonEnv and PlatoonVectorEnv}}
+
+Module \pkg{env\_lib.platoon\_env}; Chapter~\ref{chap:platoon}.
+
+% norun
+\begin{pycode}
+PlatoonEnv(*, n_followers=8, topology='predecessor', scenario='mixed', dt=0.1,
+           max_steps=600, headway=0.6, standstill_distance=2.0, accel_min=-6.0,
+           accel_max=3.0, tau_range=(0.2, 0.4), length_range=(4.0, 5.0),
+           vehicle_seed=0, randomize_vehicles=False, init_spacing_noise=0.1,
+           init_speed_noise=0.05, spacing_weight=1.0, speed_weight=0.1,
+           control_weight=0.02, jerk_weight=0.01, collision_penalty=500.0,
+           breakup_distance=100.0, breakup_penalty=250.0, render_mode=None)
+
+PlatoonVectorEnv(num_envs=1, *, autoreset_mode='next_step', render_mode=None,
+                 **kwargs)               # kwargs: the arguments of PlatoonEnv
+
+cacc_policy(obs, *, k_p=CACC_GAINS['k_p'], k_d=CACC_GAINS['k_d'],
+            k_a=CACC_GAINS['k_a'], accel_min=-6.0, accel_max=3.0) -> np.ndarray
+string_stability_gain(k_p=CACC_GAINS['k_p'], k_d=CACC_GAINS['k_d'],
+                      k_a=CACC_GAINS['k_a'], *, headway=0.6, time_constant=0.3,
+                      dt=0.1, n_frequencies=2000) -> float
+platoon_adjacency(topology, n_followers) -> tuple[np.ndarray, np.ndarray]
+PlatoonConfig.from_kwargs(**kwargs) -> PlatoonConfig   # frozen dataclass
+
+TOPOLOGIES = ('predecessor', 'predecessor_leader', 'bidirectional', 'none')
+SCENARIOS = ('mixed', 'cruise', 'stop_and_go', 'random')
+CACC_GAINS = {'k_p': 0.5, 'k_d': 0.6, 'k_a': 0.65}
+OBSERVATION_FEATURES    # the 13 column names, 'spacing_error', ...
+FEATURE_SCALES          # feature -> scale (observation = value / scale)
+\end{pycode}
+
+Both classes have the read-only properties \code{config},
+\code{n\_followers}, \code{n\_agents}, \code{topology}, \code{scenario},
+\code{dt}, \code{max\_steps}, \code{headway}, \code{standstill\_distance},
+\code{obs\_dim}, \code{adjacency} (boolean \code{(n, n)}, rows are receivers),
+\code{leader\_links} \code{(n,)} and \code{observation\_layout}.
+\code{PlatoonEnv} also exposes copies of the state with the leader first
+(\code{positions}, \code{velocities}, \code{accelerations},
+\code{time\_constants}, \code{lengths}, \code{leader\_command}), per follower
+(\code{gaps}, \code{spacing\_errors}) and \code{step\_count}.
+\code{cacc\_policy} is the decentralised CACC law, \code{string\_stability\_gain}
+the peak gain of its string-stability transfer function (1 means string
+stable, \code{inf} an unstable vehicle loop), and \code{platoon\_adjacency}
+returns the V2V graph and the leader links of a topology.
+
 \subsection{\texorpdfstring{\code{AJLATTEnv} and \code{AJLATTConfig}}{AJLATTEnv and AJLATTConfig}}
 
 Module \pkg{env\_lib.ajlatt\_env}; Chapter~\ref{chap:ajlatt}.
 
+% norun
 \begin{pycode}
 AJLATTEnv(config=None, render_mode=None, **overrides)
 AJLATTConfig(map_name='obstacles04', num_robots=4, num_targets=1,
@@ -251,7 +449,8 @@ load_map(map_name) -> tuple[np.ndarray, list[float], list[float]]
 \code{AJLATTEnv} is configured by an \code{AJLATTConfig} and/or keyword
 overrides of its fields. \code{TeamRewardWrapper} returns the summed team
 reward and a scalar \code{terminated} flag and keeps the per-robot values in
-\code{info["agent\_rewards"]} and \code{info["agent\_terminated"]}.
+\code{info["agent\_rewards"]} and \code{info["agent\_terminated"]}; it is
+equivalent to \code{env\_lib.wrappers.TeamReward(env, reduce="sum")}.
 \code{make} (also callable as \code{env\_lib.ajlatt\_env(...)}) accepts the
 legacy parameter names with a \code{DeprecationWarning} and ignores unknown
 names with a warning.
@@ -283,6 +482,7 @@ names with a warning.
 
 Module \pkg{env\_lib.ajlatt\_env.maps}; Chapter~\ref{chap:ajlatt}.
 
+% norun
 \begin{pycode}
 GridMap(map_path, margin2wall=0.5)
 GridMap.from_array(occupancy, *, mapmin=(0.0, 0.0), mapres=0.4, margin2wall=0.5,
@@ -317,8 +517,128 @@ The submodules \pkg{maps.builder} (\code{build\_map}, \code{rasterize},
 \code{bresenham\_batch}, \code{se2\_to\_cell}, \code{cell\_to\_se2} and
 \code{coord\_change2g} are exported as well.
 
+\section{\texorpdfstring{\pkg{env\_lib.catalog}}{env\_lib.catalog}}\label{sec:api-catalog}
+
+Section~\ref{sec:workflow-catalog}.
+
+% norun
+\begin{pycode}
+catalog(*, family=None, action_type=None, observation_type=None,
+        native_vector=None, available_only=False, inspect=True) -> Catalog
+describe(env_id) -> str
+clear_cache()
+EnvInfo(id, family, description, observation_type, action_type, requires,
+        native_vector, available, n_agents=None, observation_shape=None,
+        action_shape=None, kwargs={}, entry_point='', vector_entry_point=None,
+        observation_space=None, action_space=None, note=None)  # frozen dataclass
+EnvInfo.matches(kind, *, action=True) -> bool
+Catalog                                   # list subclass of EnvInfo records
+Catalog.ids() -> list[str]
+Catalog.get(env_id) -> EnvInfo            # KeyError if absent
+Catalog.to_markdown() -> str
+\end{pycode}
+
+\code{catalog} returns the registered environments that match all given
+filters (\code{action\_type} and \code{observation\_type} take
+\code{"continuous"} or \code{"discrete"}, otherwise \code{ValueError});
+\code{str(catalog)} is an aligned text table. \code{describe} raises
+\code{KeyError} for an unknown id. \code{clear\_cache} forgets the cached
+availability checks and inspection results. The module is callable:
+\code{env\_lib.catalog(...)} calls \code{catalog(...)} whether or not the
+submodule has been imported, and \code{env\_lib.describe} and
+\code{env\_lib.EnvInfo} are exported at the top level.
+
+\section{\texorpdfstring{\pkg{env\_lib.baselines}}{env\_lib.baselines}}\label{sec:api-baselines}
+
+Section~\ref{sec:workflow-baselines}.
+
+% norun
+\begin{pycode}
+baseline_policy(env, **kwargs) -> BaselinePolicy
+list_baselines() -> dict[str, str]        # family -> description
+family_of(env) -> str
+
+BaselinePolicy(function, parameters, *, family, description,
+               observation_shapes=None, action_shapes=None)
+    # attributes function, parameters, family, description, name
+    # __call__(observation) -> action (NumPy array, or tensor for a tensor input)
+
+laplacian_consensus(observation, *, gain=1.0, velocity_gain=0.0,
+                    max_control=math.inf) -> np.ndarray
+kuramoto_feedback(observation, *, n_oscillators, n_couplings=0,
+                  control_low=-1.0, control_high=1.0, coupling=5.0,
+                  target_frequency=None, gain=3.0) -> np.ndarray
+linemsg_relay(observation, *, joint_discrete=True) -> np.ndarray
+wireless_schedule(observation, *, grid_x, grid_y, ddl,
+                  n_obs_neighbors=1) -> np.ndarray
+pistonball_ramp(observation, *, continuous=True, gain=8.0) -> np.ndarray
+ajlatt_encircle(observation, *, radius=1.8, gain=1.2, max_linear_velocity=2.0,
+                max_angular_velocity=math.pi / 4,
+                heading_column=-2) -> np.ndarray
+\end{pycode}
+
+\code{baseline\_policy} accepts a single or vector environment (native, Sync
+or Async), wrapped or not, a \code{ParallelEnvAdapter} (the returned policy
+then maps observation dictionaries to action dictionaries) or a registered id,
+and binds the controller's parameters from the environment. Keyword arguments
+override the gains: \code{gain} and \code{velocity\_gain} (consensus),
+\code{gain} and \code{coupling} (Kuramoto), \code{gain} (Pistonball and
+PowerGrid), \code{radius} and \code{gain} (AJLATT), \code{k\_p}, \code{k\_d},
+\code{k\_a}, \code{accel\_min} and \code{accel\_max} (Platoon; the bounds
+default to the action bounds); LineMsg and WirelessComm take none. It raises
+\code{TypeError} for environments without a baseline, for unknown keyword
+arguments and for wrappers that change the spaces beyond a reshape, and
+\code{NotImplementedError} if the module of the baseline cannot be imported.
+\code{BaselinePolicy.name} is \code{"baseline:<family>"}. The PowerGrid and
+Platoon controllers are \code{env\_lib.power\_grid\_env.droop\_policy} and
+\code{env\_lib.platoon\_env.cacc\_policy}. \code{family\_of} returns the family
+of an environment or id (\code{TypeError} for other environments).
+
+\section{\texorpdfstring{\pkg{env\_lib.wrappers}}{env\_lib.wrappers}}\label{sec:api-wrappers}
+
+Section~\ref{sec:workflow-wrappers}.
+
+% norun
+\begin{pycode}
+FlattenJointSpaces(env)                   # gymnasium.Wrapper
+FlattenJointSpaces.observation(observation) -> np.ndarray   # 1-D float32
+FlattenJointSpaces.action(action)         # flat action -> joint action shape
+TeamReward(env, reduce='sum', source='reward')              # gymnasium.Wrapper
+ParallelEnvAdapter(env, *, agent_prefix='agent')
+to_parallel(env_or_id, **kwargs) -> ParallelEnvAdapter
+PETTINGZOO_AVAILABLE                      # bool: pettingzoo importable
+\end{pycode}
+
+\begin{center}
+  \small
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{6.9cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Member of \code{ParallelEnvAdapter} & Description \\
+    \midrule
+    \code{possible\_agents}, \code{agents}, \code{n\_agents} & Agent names \code{"agent\_0"}, \ldots; live agents (empty after the end of an episode); their number. \\
+    \code{observation\_space(agent)}, \code{action\_space(agent)} & Per-agent spaces (also as the dictionaries \code{observation\_spaces}, \code{action\_spaces}). \\
+    \code{reset(seed=None, options=None)} & Observation and info dictionaries. \\
+    \code{step(actions)} & Observation, reward, termination, truncation and info dictionaries; \code{RuntimeError} after the end of an episode, \code{ValueError} for a missing action. \\
+    \code{state()}, \code{state\_space} & Joint observation and its space. \\
+    \code{stack\_observations(observations)} & Joint observation from a dictionary. \\
+    \code{split\_actions(joint\_action, agents=None)} & Action dictionary from a joint action. \\
+    \code{render()}, \code{close()}, \code{metadata}, \code{render\_mode} & Forwarded to or taken from the wrapped environment. \\
+    \bottomrule
+  \end{tabularx}
+\end{center}
+
+\code{FlattenJointSpaces} and \code{ParallelEnvAdapter} raise \code{TypeError}
+for unsupported spaces (and the adapter for a vector environment);
+\code{TeamReward} raises \code{ValueError} for an unknown \code{reduce} or
+\code{source}. \code{to\_parallel} creates the environment with
+\code{env\_lib.make} when given an id and raises \code{TypeError} for keyword
+arguments together with an environment instance.
+
 \section{\texorpdfstring{\pkg{env\_lib.utils}}{env\_lib.utils}}\label{sec:api-utils}
 
+\subsection{Rendering and recording}
+
+% norun
 \begin{pycode}
 record_episode(env, policy=None, path=None, *, max_steps=None, seed=None,
                fps=None, render_every=1) -> list[np.ndarray]
@@ -352,11 +672,180 @@ artists once) and \code{\_update(...)} (update their data), and users call
 \code{figure\_to\_rgb}, \code{style\_axes} and \code{with\_alpha} are helpers
 for custom renderers.
 
+\subsection{Evaluation and trajectories}
+
+Module \pkg{env\_lib.utils.evaluation}, also exported by \pkg{env\_lib.utils}
+and, for \code{evaluate} and \code{rollout}, by \pkg{env\_lib};
+Section~\ref{sec:workflow-evaluation}.
+
+% norun
+\begin{pycode}
+evaluate(env, policy=None, *, n_episodes=10, seed=None, max_steps=None,
+         deterministic_seeds=True) -> EvaluationResult
+rollout(env, policy=None, *, n_steps=None, n_episodes=None,
+        seed=None) -> Trajectory
+
+EvaluationResult(returns, lengths, terminated, agent_returns=None,
+                 successes=None, env_id=None, policy=None)   # frozen dataclass
+EvaluationResult.summary() -> dict[str, Any]
+    # derived fields: n_episodes, mean_return, std_return, ci95, mean_length,
+    #                 termination_rate, success_rate
+
+Trajectory(observations, actions, rewards, next_observations, terminated,
+           truncated, episode_ids, agent_rewards=None, env_id=None)  # dataclass
+Trajectory.save(path) -> Path             # compressed .npz
+Trajectory.load(path) -> Trajectory       # class method
+Trajectory.episode(index) -> Trajectory
+Trajectory.episode_returns() -> np.ndarray
+Trajectory.n_episodes                     # property; len(trajectory) = steps
+\end{pycode}
+
+\code{evaluate} raises \code{ValueError} for \code{n\_episodes < 1} or
+\code{max\_steps < 1}; \code{rollout} raises \code{TypeError} for a vector
+environment and \code{ValueError} for non-positive limits.
+
+\subsection{Graph utilities}
+
+Module \pkg{env\_lib.utils.graphs} (also \code{env\_lib.utils.graphs});
+Section~\ref{sec:envlib-graphs}.
+
+% norun
+\begin{pycode}
+make_graph(topology, n, *, rng=None, edge_probability=0.3, neighbors=4,
+           rewire_probability=0.1, radius=None, connected=True,
+           max_attempts=1000, return_positions=False)
+    # -> bool (n, n) adjacency, or (adjacency, positions (n, 2))
+is_connected(adjacency) -> bool
+laplacian(adjacency) -> np.ndarray
+algebraic_connectivity(adjacency) -> float
+k_hop_adjacency(adjacency, k, *, include_self=False) -> np.ndarray
+degree(adjacency) -> np.ndarray
+neighbor_lists(adjacency) -> list[np.ndarray]
+edge_list(adjacency) -> np.ndarray        # (n_edges, 2), i < j
+grid_shape(n) -> tuple[int, int]
+circular_layout(n, radius=1.0) -> np.ndarray
+spring_layout(adjacency, *, iterations=200, seed=0,
+              initial=None) -> np.ndarray
+TOPOLOGIES = ('ring', 'line', 'star', 'complete', 'grid', 'erdos_renyi',
+              'small_world', 'random_geometric')
+\end{pycode}
+
+\code{make\_graph} raises \code{ValueError} for an unknown topology, invalid
+parameters, fewer than two nodes, or when no connected random graph is found
+in \code{max\_attempts} samples; \code{algebraic\_connectivity} needs at least
+two nodes.
+
+\subsection{Batched vector environments}\label{sec:api-vector}
+
+Module \pkg{env\_lib.utils.vector}; \code{BatchedVectorEnv} is also exported by
+\pkg{env\_lib.utils}.
+
+% norun
+\begin{pycode}
+BatchedVectorEnv(num_envs, single_observation_space, single_action_space, *,
+                 autoreset_mode='next_step', render_mode=None)
+AUTORESET_MODES = ('next_step', 'same_step', 'disabled')
+
+# Hooks implemented by subclasses
+_reset_envs(mask, options)          # re-initialise the copies where mask is True
+_step_envs(actions, active) -> tuple[rewards, terminated, truncated, infos]
+_observe() -> np.ndarray            # (num_envs, *single_observation_space.shape)
+_reset_infos(mask) -> dict          # optional; the info returned by reset()
+\end{pycode}
+
+\code{BatchedVectorEnv} derives from \code{gymnasium.vector.VectorEnv} and
+implements \code{reset} and \code{step} on top of the hooks: seeding of the
+shared generator \code{self.np\_random}, the \code{"reset\_mask"} option
+(removed before \code{options} reaches \code{\_reset\_envs}), action
+validation (reshaping when the number of entries matches, \code{ValueError}
+for a wrong size or for NaN and infinite values), the three autoreset modes
+(\code{autoreset\_mode} also accepts \code{"NextStep"}-style names and
+\code{gymnasium.vector.AutoresetMode} members), \code{infos["final\_obs"]} and
+\code{infos["final\_info"]} in same-step mode, the \code{"\_key"} masks of
+every info key and \code{ResetNeededError}. \code{\_step\_envs} returns arrays
+of shape \code{(num\_envs,)} and a dictionary of arrays with a leading
+\code{num\_envs} dimension; \code{active} marks the copies whose results are
+used (under next-step autoreset the others are reset right afterwards).
+\code{render()} returns \code{None} without a render mode and raises
+\code{NotImplementedError} otherwise unless a subclass overrides it. A
+subclass that serves as a \code{vector\_entry\_point} must accept the keyword
+arguments of the single environment plus \code{num\_envs} and
+\code{autoreset\_mode}, because \code{gymnasium.make\_vec} calls it as
+\code{VectorClass(num\_envs=..., **registered\_kwargs, **user\_kwargs)}. A
+minimal subclass:
+
+\begin{pycode}
+import numpy as np
+from gymnasium import spaces
+from env_lib.utils import BatchedVectorEnv
+
+class Integrators(BatchedVectorEnv):
+    """n agents with x' = u, reward -x_i^2 per agent, 50 steps per episode."""
+
+    def __init__(self, num_envs=1, *, autoreset_mode="next_step", n_agents=4):
+        obs = spaces.Box(-np.inf, np.inf, (n_agents, 1), np.float32)
+        act = spaces.Box(-1.0, 1.0, (n_agents, 1), np.float32)
+        super().__init__(num_envs, obs, act, autoreset_mode=autoreset_mode)
+        self.x = np.zeros((self.num_envs, n_agents, 1))
+        self.t = np.zeros(self.num_envs, dtype=np.int64)
+
+    def _reset_envs(self, mask, options):
+        self.x[mask] = self.np_random.uniform(-1.0, 1.0, self.x[mask].shape)
+        self.t[mask] = 0
+
+    def _step_envs(self, actions, active):
+        self.x += 0.1 * np.clip(actions, -1.0, 1.0)
+        self.t += 1
+        agent_rewards = -self.x[..., 0] ** 2               # (num_envs, n_agents)
+        terminated = np.zeros(self.num_envs, dtype=bool)
+        infos = {"agent_rewards": agent_rewards}
+        return agent_rewards.sum(axis=1), terminated, self.t >= 50, infos
+
+    def _observe(self):
+        return self.x.astype(np.float32)
+
+envs = Integrators(8)
+obs, infos = envs.reset(seed=0)
+obs, rewards, terminated, truncated, infos = envs.step(-obs)
+print(obs.shape, rewards.shape)             # (8, 4, 1) (8,)
+print(infos["agent_rewards"].shape)         # (8, 4)
+\end{pycode}
+
+\section{The \texorpdfstring{\code{env-lib}}{env-lib} command line}\label{sec:api-cli}
+
+Module \pkg{env\_lib.\_\_main\_\_}; Section~\ref{sec:workflow-cli}. The console
+script \code{env-lib} and \code{python -m env\_lib} call
+\code{env\_lib.\_\_main\_\_.main(argv=None) -> int}, which returns the exit
+status (0 on success, 2 for usage errors such as an unknown id).
+
+\begin{shellcode}
+env-lib list [--continuous | --discrete] [--family F [F ...]] [--native]
+             [--available] [--markdown] [--no-inspect]
+env-lib describe ENV_ID
+env-lib baselines
+env-lib run ENV_ID [--steps N] [--policy {baseline,random}] [--seed S]
+            [--gif PATH] [--fps F] [--theme {dark,light}]
+            [--kwarg KEY=VALUE [KEY=VALUE ...]]
+env-lib evaluate ENV_ID [--episodes N] [--policy {both,baseline,random}]
+                 [--num-envs N] [--seed S] [--kwarg KEY=VALUE [...]]
+env-lib bench ENV_ID [--num-envs N] [--steps N] [--seed S] [--async]
+              [--kwarg KEY=VALUE [...]]
+\end{shellcode}
+
+Defaults: \code{run} steps until the episode ends (\code{-{}-steps} caps it),
+with \code{-{}-policy baseline}, \code{-{}-seed 0} and \code{-{}-theme dark};
+\code{evaluate} uses \code{-{}-episodes 10}, \code{-{}-policy both},
+\code{-{}-num-envs 1} and \code{-{}-seed 0}; \code{bench} uses
+\code{-{}-num-envs 32}, \code{-{}-steps 200} and \code{-{}-seed 0}.
+\code{-{}-kwarg} values are parsed as Python literals (plain text otherwise) and
+may be repeated.
+
 \section{\texorpdfstring{\pkg{toolkit.plotkit}}{toolkit.plotkit}}\label{sec:api-plotkit}
 
 Chapter~\ref{chap:plotkit}. All plot functions return the
 \code{matplotlib.axes.Axes} they drew on.
 
+% norun
 \begin{pycode}
 plot_shadow_curve(y, x=None, y_std=None, labels=None, colors=None, alpha=0.2,
                   ax=None, axis=0, figsize=(10, 6), title=None, xlabel=None,
@@ -414,6 +903,7 @@ Table~\ref{tab:neural-shapes}.
 
 \subsection{Layers}
 
+% norun
 \begin{pycode}
 get_activation(name) -> nn.Module
 build_mlp(input_dim, hidden_dims, output_dim=None, activation='relu',
@@ -426,6 +916,7 @@ ACTIVATION_NAMES   # ('elu', 'gelu', 'identity', 'leaky_relu', 'mish', 'relu',
 
 \subsection{Policy and value networks}
 
+% norun
 \begin{pycode}
 MLPPolicyNetwork(input_dim, output_dim, hidden_dims=(256, 256),
                  activation='relu', dropout=0.0, layer_norm=False, device='cpu')
@@ -447,6 +938,7 @@ MLPValueNetwork, CNNValueNetwork, RNNValueNetwork, TransformerValueNetwork
 
 \subsection{Q-networks}
 
+% norun
 \begin{pycode}
 MLPQNetwork(state_dim, action_dim, hidden_dims=(256, 256), activation='relu',
             dropout=0.0, layer_norm=False, device='cpu', continuous_action=False)
@@ -468,6 +960,7 @@ CNNQNetwork = CNQNetwork; RNNQNetwork = RNQNetwork
 
 \subsection{Encoders and decoders}
 
+% norun
 \begin{pycode}
 MLPEncoder(input_dim, latent_dim, hidden_dims=(256, 256), activation='relu',
            dropout=0.0, layer_norm=False, device='cpu')
@@ -508,6 +1001,7 @@ VariationalDecoder(latent_dim, output_dim, hidden_dims=(256, 256),
 
 \subsection{Factories}
 
+% norun
 \begin{pycode}
 PolicyFactory.create_policy(policy_type, **kwargs)         # mlp cnn rnn transformer
 ValueFactory.create_value_network(network_type, **kwargs)  # mlp cnn rnn transformer
@@ -524,6 +1018,7 @@ for subclassing and type checks.
 
 All methods are static; Table~\ref{tab:neural-utils} describes them.
 
+% norun
 \begin{pycode}
 initialize_weights(module, method='xavier_uniform', gain=1.0)
 count_parameters(model) -> int
@@ -560,6 +1055,7 @@ compute_conv_output_size(input_size, conv_layers) -> tuple[int, int]
 
 \subsection{Tabular tools}
 
+% norun
 \begin{pycode}
 QTable(state_space_size, action_space_size=None, initial_value=0.0,
        dtype=np.float32, rng=None)
@@ -596,6 +1092,7 @@ DiscreteTools.thompson_sampling_policy(q_table, state, visit_counts,
 
 Chapter~\ref{chap:toolkit}, Section~\ref{sec:parakit}.
 
+% norun
 \begin{pycode}
 get_parameters(parser) -> dict[str, Any]
 save_parameters(values, path_or_dir) -> Path

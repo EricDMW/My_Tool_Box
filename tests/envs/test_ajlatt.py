@@ -407,3 +407,137 @@ def test_builder_sample_is_named_after_file(tmp_path):
     assert (tmp_path / "my_map.yaml").exists() and (tmp_path / "my_map.cfg").exists()
     grid = env_lib.ajlatt_env.load_grid_map(tmp_path / "my_map")
     assert grid.map.shape == (181, 181)
+
+
+# ---------------------------------------------------------------------------
+# Exactness of the optimised numerical kernels
+# ---------------------------------------------------------------------------
+def _reference_weights_newton(S, max_iter=100):
+    """Verbatim copy of the straightforward NumPy Newton solver (release 1.0)."""
+    n = S.shape[0]
+
+    def objective(c):
+        fused = (c @ S.reshape(n, -1)).reshape(S.shape[1:])
+        try:
+            inverse = np.linalg.inv(fused)
+        except np.linalg.LinAlgError:
+            return np.inf, None
+        value = np.trace(inverse)
+        if not np.isfinite(value) or value <= 0:
+            return np.inf, None
+        return value, inverse
+
+    c = np.full(n, 1.0 / n)
+    f, p = objective(c)
+    free = np.ones(n, dtype=bool)
+    for _ in range(max_iter):
+        b = S @ p
+        a = p @ b
+        grad = -np.einsum("nii->n", a)
+        hess = 2.0 * a.reshape(n, -1) @ b.transpose(0, 2, 1).reshape(n, -1).T
+        if free.all():
+            idx, sub_hess, sub_grad = None, hess, grad
+        else:
+            idx = np.flatnonzero(free)
+            sub_hess, sub_grad = hess[idx][:, idx], grad[idx]
+        m = sub_grad.size
+        kkt = np.empty((m + 1, m + 1))
+        kkt[:m, :m] = sub_hess
+        kkt[:m, m] = kkt[m, :m] = 1.0
+        kkt[m, m] = 0.0
+        rhs = np.append(-sub_grad, 0.0)
+        try:
+            solution = np.linalg.solve(kkt, rhs)
+            if not np.all(np.isfinite(solution)):
+                raise np.linalg.LinAlgError
+        except np.linalg.LinAlgError:
+            solution = np.linalg.lstsq(kkt, rhs, rcond=None)[0]
+        if idx is None:
+            step = solution[:m].copy()
+        else:
+            step = np.zeros(n)
+            step[idx] = solution[:m]
+        nu = solution[m]
+        decrement = -float(grad @ step)
+        accepted = False
+        if decrement > 1e-14 * f and np.max(np.abs(step)) > 1e-13:
+            decreasing = step < 0
+            alpha_max = 1.0
+            if decreasing.any():
+                alpha_max = min(1.0, float(np.min(c[decreasing] / -step[decreasing])))
+            alpha = alpha_max
+            while alpha > 1e-12:
+                trial = np.maximum(c + alpha * step, 0.0)
+                trial /= trial.sum()
+                f_trial, p_trial = objective(trial)
+                if p_trial is not None and f_trial <= f - 1e-4 * alpha * decrement:
+                    accepted = True
+                    break
+                alpha *= 0.5
+            if accepted:
+                if alpha == alpha_max and alpha_max < 1.0:
+                    blocked = decreasing & (c + alpha * step <= 1e-14)
+                    free &= ~blocked
+                    trial[blocked] = 0.0
+                    trial /= trial.sum()
+                    f_blocked, p_blocked = objective(trial)
+                    if p_blocked is not None:
+                        f_trial, p_trial = f_blocked, p_blocked
+                    else:
+                        free |= blocked
+                c, f, p = trial, f_trial, p_trial
+                continue
+        multipliers = grad + nu
+        fixed = np.flatnonzero(~free)
+        tolerance = 1e-9 * max(1.0, float(np.max(np.abs(grad))))
+        if fixed.size and multipliers[fixed].min() < -tolerance:
+            free[fixed[np.argmin(multipliers[fixed])]] = True
+            continue
+        break
+    return c
+
+
+def test_ci_newton_is_bitwise_identical_to_reference():
+    """The optimised solver performs the same floating-point operations.
+
+    Nearly identical sources (neighbouring robots sharing estimates) make the
+    KKT system ill-conditioned, so any rounding change would alter the
+    weights; the optimised implementation must therefore match exactly.
+    """
+    rng = np.random.default_rng(3)
+    for trial in range(150):
+        d, n = int(rng.choice([2, 3])), int(rng.integers(2, 6))
+        S = np.stack([_random_psd(rng, d) * 10 ** rng.uniform(-2, 2) for _ in range(n)])
+        if trial % 4 == 0:
+            S[1] = S[0] * (1.0 + 1e-10 * rng.normal())  # degenerate optimum
+        if trial % 5 == 0:
+            S[-1] = _random_psd(rng, d, rank=1)  # rank-deficient source
+        np.testing.assert_array_equal(ci_weights(S), _reference_weights_newton(S))
+
+
+def test_psd_inverse_matches_numpy():
+    rng = np.random.default_rng(4)
+    for _ in range(50):
+        m = _random_psd(rng, 3) + 0.1 * np.eye(3)
+        np.testing.assert_array_equal(psd_inverse(m), np.linalg.inv(m))
+    singular = np.array([[1.0, 1.0], [1.0, 1.0]])
+    np.testing.assert_allclose(psd_inverse(singular), np.linalg.pinv(singular))
+    np.testing.assert_allclose(psd_inverse([[2.0, 0.0], [0.0, 4.0]]), np.diag([0.5, 0.25]))
+
+
+@pytest.mark.parametrize("map_name", ["obstacles04", "empty"])
+def test_batched_ray_casting_matches_single_casts(map_name):
+    grid = env_lib.ajlatt_env.load_grid_map(map_name, margin2wall=1.0)
+    rng = np.random.default_rng(5)
+    lo, hi = grid.mapmin - 1.0, grid.mapmax + 1.0
+    poses = np.column_stack(
+        [rng.uniform(lo[0], hi[0], 40), rng.uniform(lo[1], hi[1], 40), rng.uniform(-4, 4, 40)]
+    )
+    full, sensor = grid.closest_obstacles(poses, fov=[2 * np.pi, np.pi / 2], r_max=3.0)
+    for pose, a, b in zip(poses, full, sensor):
+        assert a == grid.get_closest_obstacle(pose, fov=2 * np.pi, r_max=3.0)
+        assert b == grid.get_closest_obstacle(pose, fov=np.pi / 2, r_max=3.0)
+    assert grid.closest_obstacles(poses[:3], fov=np.pi) == [
+        grid.get_closest_obstacle(pose, fov=np.pi) for pose in poses[:3]
+    ]
+    assert grid.closest_obstacles(np.zeros((0, 3))) == []

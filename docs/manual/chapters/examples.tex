@@ -7,10 +7,10 @@
 \begingroup\setlength{\emergencystretch}{3em}% chapter-local
 
 This chapter is a practical companion to the reference chapters. It lists the
-example scripts that ship with the repository, shows how to write evaluation
-loops and record episodes as GIF or MP4 files, explains the benchmark script,
-and describes the testing, linting and continuous-integration workflow for
-contributors.
+example scripts that ship with the repository and the \code{env-lib} command
+line, shows how to write evaluation loops and record episodes as GIF or MP4
+files, explains the benchmark tools, and describes the testing, linting and
+continuous-integration workflow for contributors.
 
 \section{Example scripts}\label{sec:examples-catalogue}
 
@@ -36,7 +36,10 @@ extras they need (\code{pip install ".[all]"} covers all of them).
     \code{wireless\_comm\_demo.py} & Compares random access, slotted ALOHA and a collision-free rotating schedule on WirelessComm. \\
     \code{pistonball\_demo.py} & Compares a hand-written heuristic with random actions; \code{-{}-manual} enables keyboard control in a window. \\
     \code{consensus\_demo.py} & Compares random actions with the distributed Laplacian controller for consensus or formation control on any topology. \\
-    \code{ajlatt\_demo.py} & Compares random actions with an encircling heuristic for multi-robot target tracking and reports tracking error, covariance and collisions. \\
+    \code{power\_grid\_demo.py} & Compares no control, random injections and decentralised droop control on \envid{PowerGrid-v0} under the same disturbances; reports the return, frequency nadir, largest deviation, settling time and trips (\code{-{}-buses}, \code{-{}-topology}, \code{-{}-gain}, \code{-{}-noise}). \\
+    \code{platoon\_demo.py} & Compares random actions, sensor-only ACC and cooperative ACC on \envid{Platoon-v0} and prints the analytic string-stability gain of both controllers; reports collisions, the smallest gap and the peak spacing errors of the first and last follower (\code{-{}-vehicles}, \code{-{}-topology}, \code{-{}-scenario}, \code{-{}-headway}). \\
+    \code{ajlatt\_demo.py} & Compares random actions with the packaged encircling baseline (\code{env\_lib.baseline\_policy}, implemented by \code{env\_lib.baselines.ajlatt\_encircle}, computed from the observation alone) for multi-robot target tracking and reports tracking error, covariance and collisions. \\
+    \code{workflow\_demo.py} & The workflow of Chapter~\ref{chap:workflow} in six steps: lists the environments with continuous actions, creates a native vector environment, evaluates random actions and the baseline on all copies in parallel, flattens the spaces for single-agent libraries, adapts the environment to the PettingZoo Parallel API and records a GIF of the baseline (\code{-{}-env}, \code{-{}-num-envs}, \code{-{}-episodes}, \code{-{}-save}, \code{-{}-no-save}). \\
     \bottomrule
   \end{tabularx}
 \end{table}
@@ -61,8 +64,12 @@ extras they need (\code{pip install ".[all]"} covers all of them).
 The environment examples share a set of options: \code{-{}-seed}, \code{-{}-steps}
 (the episode length), \code{-{}-episodes} (evaluation episodes per policy),
 \code{-{}-save PATH} (record an episode; the suffix \code{.gif} or \code{.mp4}
-selects the format), \code{-{}-render-mode} (\code{human} opens a window) and
-\code{-{}-theme dark|light}. The transformer examples accept \code{-{}-quick} for
+selects the format; \code{power\_grid\_demo.py} and \code{platoon\_demo.py} call
+it \code{-{}-render PATH}, and the former also accepts \code{-{}-save}),
+\code{-{}-render-mode} (\code{human} opens a window) and
+\code{-{}-theme dark|light}. \code{workflow\_demo.py} takes an environment id
+(\code{-{}-env}) instead, and \code{quickstart.py} only \code{-{}-steps} and
+\code{-{}-render DIR}. The transformer examples accept \code{-{}-quick} for
 a run of a few seconds, used as a smoke test in continuous integration.
 
 \begin{shellcode}
@@ -72,7 +79,10 @@ python examples/linemsg_demo.py --policy relay --save renders/linemsg.gif
 python examples/wireless_comm_demo.py --policy schedule --save renders/wireless.gif
 python examples/pistonball_demo.py --episodes 20 --save renders/pistonball.gif
 python examples/consensus_demo.py --task formation --save renders/formation.gif
+python examples/power_grid_demo.py --topology ring --render renders/grid.gif
+python examples/platoon_demo.py --scenario stop_and_go --render renders/platoon.gif
 python examples/ajlatt_demo.py --map obstacles05 --save renders/ajlatt.gif
+python examples/workflow_demo.py --env Consensus-v0 --num-envs 128 --episodes 128
 python examples/plotkit_gallery.py --formats pdf png
 python examples/simple_transformer_example.py --quick
 \end{shellcode}
@@ -101,19 +111,79 @@ chapters explain the policies.
       heuristic $889 \pm 22$ (all episodes reach the goal), random $-342 \pm 40$ (none) \\
     \code{consensus\_demo.py} (ring, 8 agents) &
       Laplacian controller solves the task after 99 steps (return $-1968$); random actions do not (return $-19906$) \\
+    \code{power\_grid\_demo.py} (16 buses, 3 episodes) &
+      droop $-0.98 \pm 0.10$ (nadir $-0.019$\,Hz, settled after 2.95\,s); no control $-103.86 \pm 13.64$ (nadir $-0.114$\,Hz, never settled); random $-1020.10 \pm 726.37$ with one trip \\
+    \code{platoon\_demo.py} (8 followers, 5 episodes) &
+      CACC $-62.1$ without collisions over all 600 steps; ACC $-824.6$ and random $-4824.8$, both colliding in every episode; string-stability gain 1.000 (CACC) and 1.377 (ACC) \\
     \code{ajlatt\_demo.py} (\code{obstacles04}, 2 episodes) &
-      heuristic about $-7300$ with no collisions and target covariance trace about 2; random actions about $-45000$ with 29 to 37 collisions \\
+      baseline $-7333$ and $-7113$ with no collisions and target covariance trace about 2; random actions $-34171$ and $-20871$ with 63 and 53 collisions \\
+    \code{workflow\_demo.py} (\envid{Formation-v0}, 32 copies, 64 episodes) &
+      baseline $-1608.2 \pm 635.7$, all episodes successful after 92.7 steps on average; random $-18076.8 \pm 5566.8$, none successful \\
     \bottomrule
   \end{tabularx}
 \end{table}
 
+\section{The \texorpdfstring{\code{env-lib}}{env-lib} command line}\label{sec:examples-cli}
+
+The console script \code{env-lib} (equivalently \code{python -m env\_lib}) is
+the zero-code way to use every environment: it lists and describes them, runs
+and records an episode of the baseline controller or of random actions,
+evaluates both with confidence intervals, and benchmarks the single, native
+vector and \code{SyncVectorEnv} implementations. Constructor arguments are
+passed after \code{-{}-kwarg} as \code{key=value} pairs.
+Section~\ref{sec:workflow-cli} documents all sub-commands and options.
+
+\begin{shellcode}
+env-lib list --continuous                  # continuous-control ids
+env-lib describe Platoon-v0                # spaces, layout, parameters, baseline
+env-lib run PowerGrid-v0                   # one episode of the baseline
+env-lib run Platoon-v0 --kwarg scenario=stop_and_go --steps 300 \
+    --theme light --gif renders/platoon.gif  # record a GIF
+env-lib evaluate PowerGrid-v0 --episodes 32 --num-envs 32
+env-lib bench Platoon-v0 --num-envs 256 --steps 200
+\end{shellcode}
+
+The recording command prints a summary of the episode (agent rows shortened
+here):
+
+\begin{textcode}
+Platoon-v0 (scenario='stop_and_go')
+  policy        baseline: cooperative adaptive cruise control (env_lib.platoon_env.cacc_policy)
+  seed          0
+  episode       300 steps, stopped (--steps) (29.17 s)
+  team return   -26.8019
+  agent return  mean -3.3502, min -3.9278 (agent_0), max -2.8442 (agent_7)
+    agent     return
+    agent_0  -3.9278
+    ...
+    agent_7  -2.8442
+  final info    leader_speed=18.9  leader_acceleration=0.0009988  min_gap=11.41  collision=False  breakup=False  error_amplification=0.338  step=300  time=30
+  gif           renders/platoon.gif (301 frames)
+\end{textcode}
+
+and the evaluation compares random actions with the baseline on 32 copies
+simulated in parallel:
+
+\begin{textcode}
+PowerGrid-v0: 32 episodes per policy, seed 0, 32 parallel copies
+policy    mean return       std  95% CI +-  length  terminated  success     s
+random      -537.1770  404.5420   145.8530   198.1          6%        -  0.22
+baseline      -0.8164    0.6262     0.2258   200.0          0%        -  0.15
+\end{textcode}
+
+The last column is the wall-clock time of each evaluation in seconds.
+
 \section{Writing an evaluation loop}\label{sec:examples-loop}
 
 All environments share the Gymnasium interface, so one evaluation function
-serves all of them. The loop below evaluates a policy over several seeded
-episodes and reports the team return and the per-agent returns from
-\code{info["agent\_rewards"]}. \code{np.sum} and \code{np.any} make it work
-also for AJLATT, whose reward and \code{terminated} are per-robot arrays.
+serves all of them. The packaged \code{env\_lib.evaluate}
+(Section~\ref{sec:workflow-evaluation}) does this with confidence intervals
+and runs vector environments in parallel; writing the loop yourself is useful
+when an experiment needs other statistics. The loop below evaluates a policy
+over several seeded episodes and reports the team return and the per-agent
+returns from \code{info["agent\_rewards"]}. \code{np.sum} and \code{np.any}
+make it work also for AJLATT, whose reward and \code{terminated} are
+per-robot arrays.
 
 \begin{pycode}
 import numpy as np
@@ -142,11 +212,13 @@ print(f"{mean_return:.1f}", agent_returns.shape)   # 16 agents on the 4x4 grid
 env.close()
 \end{pycode}
 
-Policies that need more than the observation, such as the controllers built
-into some environments, can close over the environment:
-\code{lambda obs: env.unwrapped.laplacian\_policy()} for the consensus
-environment. Use \code{env.unwrapped} to reach environment-specific methods
-and attributes through the wrappers that \code{gymnasium.make} adds.
+\code{env\_lib.baseline\_policy(env)} returns the baseline controller of any
+environment as a function of the observation, which can be passed to this
+loop directly. Policies that need more than the observation can close over the
+environment, for example \code{lambda obs: env.unwrapped.laplacian\_policy()}
+for the consensus environment. Use \code{env.unwrapped} to reach
+environment-specific methods and attributes through the wrappers that
+\code{gymnasium.make} adds.
 
 \section{Recording episodes}\label{sec:examples-recording}
 
@@ -201,6 +273,9 @@ For full control, for example to record only part of an episode or to
 annotate frames, collect the frames yourself with \code{env.render()}:
 
 \begin{pycode}
+import env_lib
+from env_lib.utils import save_animation
+
 env = env_lib.make("KuramotoOscillator-v0", render_mode="rgb_array")
 obs, info = env.reset(seed=1)
 frames = []
@@ -221,7 +296,7 @@ figure and takes noticeably longer than later calls.
 
 \section{Benchmarks}\label{sec:examples-benchmarks}
 
-The script \code{benchmarks/benchmark\_envs.py} measures the mean wall-clock
+\paragraph{Single environments.} The script \code{benchmarks/benchmark\_envs.py} measures the mean wall-clock
 time of \code{env.step} (with pre-sampled random actions and no rendering)
 and the additional time of \code{env.render()} in \code{"rgb\_array"} mode,
 for representative configurations of every environment. Environments whose
@@ -247,41 +322,46 @@ python benchmarks/benchmark_envs.py --markdown > renders/benchmarks.md
     \code{-{}-steps} & \code{300} & Timed steps per case. \\
     \code{-{}-render-steps} & \code{40} & Timed rendered steps per case; \code{0} skips the rendering measurement. \\
     \code{-{}-seed} & \code{0} & Seed of the environment and of the action space. \\
-    \code{-{}-only} & all & Subset of the groups \code{kuramoto}, \code{linemsg}, \code{wireless}, \code{pistonball}, \code{consensus}, \code{ajlatt}. \\
+    \code{-{}-only} & all & Subset of the groups \code{kuramoto}, \code{linemsg}, \code{wireless}, \code{pistonball}, \code{consensus}, \code{ajlatt}, \code{power\_grid}, \code{platoon}. \\
     \code{-{}-markdown} & off & Print a Markdown table instead of plain text. \\
+    \code{-{}-torch-threads} & PyTorch default & Number of PyTorch threads for the PyTorch Kuramoto case. \\
     \bottomrule
   \end{tabularx}
 \end{table}
 
 Table~\ref{tab:examples-bench} shows typical results. The ``before 1.0''
-column was measured with the implementations that preceded version 1.0 on the
-same machine; the version 1.0 columns are the output of the script with its
-default options (x86\_64 Linux, Python 3.11, CPU only, PyTorch restricted to
-one thread). Absolute numbers depend on the hardware; the ratios are more
-informative.
+column was measured with the implementations that preceded version 1.0; the
+version 1.1 columns are the output of
+\code{OMP\_NUM\_THREADS=1 python benchmarks/benchmark\_envs.py -{}-torch-threads 1}
+on one core of an Intel Xeon at 2.8~GHz (Python~3.11, NumPy~2.4). Timings on a
+shared machine vary by 10 to 20 per cent between runs; the ratios are more
+informative than the absolute numbers.
 
 \begin{table}[htbp]
   \centering
   \small
-  \caption{Time per step and per rendered frame in milliseconds. A dash marks
-    a configuration that did not exist before version 1.0.}
+  \caption{Time per step and per rendered \code{"rgb\_array"} frame in
+    milliseconds. A dash marks a configuration that did not exist before
+    version 1.0.}
   \label{tab:examples-bench}
   \begin{tabular}{@{}lrrr@{}}
     \toprule
-    Configuration & Step, before 1.0 & Step, 1.0 & Frame, 1.0 \\
+    Configuration & Step, before 1.0 & Step, 1.1 & Frame, 1.1 \\
     \midrule
-    Kuramoto NumPy, $N = 10$              & 0.17  & 0.05  & 20 \\
-    Kuramoto NumPy, $N = 50$              & 2.36  & 0.05  & 36 \\
-    Kuramoto NumPy RK4, $N = 50$          & 7.1   & 0.10  & 36 \\
-    Kuramoto PyTorch, $N = 50$, 8 systems & 10.3  & 0.55  & 34 \\
-    LineMsg, 10 agents                    & 0.019 & 0.012 & 15 \\
-    WirelessComm, $6 \times 6$            & 0.154 & 0.035 & 13 \\
-    WirelessComm, $12 \times 12$          & 0.56  & 0.044 & 14 \\
-    Pistonball, 20 pistons                & 1.11  & 0.063 & 3 \\
-    Consensus, 8 agents                   & --    & 0.066 & 16 \\
-    Formation, 32 agents, proximity graph & --    & 0.20  & 20 \\
-    AJLATT, \code{obstacles04}, 4 robots  & 90    & 6.2   & 28 \\
-    AJLATT, \code{obstacles05}, 4 robots  & 67    & 6.2   & 26 \\
+    Kuramoto NumPy, $N = 10$              & 0.17  & 0.075 & 28 \\
+    Kuramoto NumPy, $N = 50$              & 2.36  & 0.093 & 44 \\
+    Kuramoto NumPy RK4, $N = 50$          & 7.1   & 0.12  & 53 \\
+    Kuramoto PyTorch, $N = 50$, 8 systems & 10.3  & 0.45  & 42 \\
+    LineMsg, 10 agents                    & 0.019 & 0.017 & 16 \\
+    WirelessComm, $6 \times 6$            & 0.154 & 0.057 & 14 \\
+    WirelessComm, $12 \times 12$          & 0.56  & 0.064 & 18 \\
+    Pistonball, 20 pistons                & 1.11  & 0.078 & 3 \\
+    Consensus, 8 agents                   & --    & 0.082 & 19 \\
+    Formation, 32 agents, proximity graph & --    & 0.28  & 29 \\
+    PowerGrid, 16 buses                   & --    & 0.25  & 36 \\
+    Platoon, 8 followers                  & --    & 0.13  & 38 \\
+    AJLATT, \code{obstacles04}, 4 robots  & 90    & 4.7   & 33 \\
+    AJLATT, \code{obstacles05}, 4 robots  & 67    & 4.7   & 34 \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -290,7 +370,35 @@ Before version 1.0 the Kuramoto \code{"rgb\_array"} renderer failed with
 matplotlib 3.10 and later, Pistonball drew its screen on every step even
 without rendering, and an AJLATT frame took about 110\,ms. Rendering now
 costs more than a simulation step in every environment, which is why it is
-performed only on request (Section~\ref{sec:trouble-performance}).
+performed only on request (Section~\ref{sec:trouble-performance}). The
+chapters of the environments added in version 1.1 report their step and frame
+times (Sections~\ref{sec:power-grid-vector}, \ref{sec:power-grid-render},
+\ref{sec:platoon-vector} and~\ref{sec:platoon-render}).
+
+\paragraph{Vector environments.} \code{benchmarks/benchmark\_vector.py} measures
+the throughput of \code{env\_lib.make\_vec(id, n)}, once with the native
+implementation and once with Gymnasium's \code{SyncVectorEnv}, for
+$n \in \{1, 16, 64, 256, 1024\}$
+(Sync is skipped above \code{-{}-sync-max}, default 256) and prints environment
+steps, agent-steps per second and the speed-up; \code{-{}-ids} selects
+environments, \code{-{}-num-envs} the batch sizes, \code{-{}-markdown} prints a
+Markdown table and \code{-{}-quick} runs a short smoke test. Every case runs at
+least 300 batched steps (\code{-{}-min-steps}), so automatic resets are
+included. \code{env-lib bench ID} measures the throughput
+of an environment in environment steps per second: the single environment, its
+native vector implementation (if any) and \code{SyncVectorEnv} over single
+environments (and \code{AsyncVectorEnv} with \code{-{}-async}), all stepped
+with a fixed random action. \code{-{}-num-envs} sets the number of copies,
+\code{-{}-steps} the number of timed steps and \code{-{}-kwarg} the
+constructor arguments. Table~\ref{tab:workflow-throughput} collects reference
+values, and Section~\ref{sec:trouble-performance} discusses batch sizes and
+threads.
+
+\begin{shellcode}
+env-lib bench Consensus-v0 --num-envs 256 --steps 200
+env-lib bench PowerGrid-v0 --num-envs 1024 --kwarg n_buses=64
+env-lib bench LineMsg-v0 --num-envs 64 --async     # no native implementation
+\end{shellcode}
 
 \section{Testing, linting and continuous integration}\label{sec:examples-contributing}
 
@@ -308,7 +416,7 @@ pytest -k "seed or determinism" -q          # tests whose name matches
 pytest --cov=env_lib --cov=toolkit --cov-report=term-missing
 \end{shellcode}
 
-The suite contains more than 700 tests. \code{tests/conftest.py} sets
+The suite contains more than 1100 tests. \code{tests/conftest.py} sets
 \code{MPLBACKEND=Agg} and \code{SDL\_VIDEODRIVER=dummy}, so rendering tests
 run without a display. Tests of optional features are skipped when the
 dependency is missing (\code{pytest.importorskip}). The marker \code{slow} is
@@ -320,7 +428,12 @@ spaces, that observations lie in \code{observation\_space}, determinism under
 seeding, reward and termination rules against simple reference
 implementations written in the tests, backward-compatible arguments, the
 registered ids, rendered frames and, where the multi-agent interface permits
-it, Gymnasium's \code{check\_env}. For the toolkit they cover input handling and numerical
+it, Gymnasium's \code{check\_env}. For the native vector environments they
+check that copy~0 reproduces a single environment started from the same state,
+the three autoreset modes and the info masks; for the workflow layer they
+check the catalogue, the command line, the baseline controllers, the wrappers
+(including PettingZoo's \code{parallel\_api\_test} when PettingZoo is
+installed) and the evaluation statistics. For the toolkit they cover input handling and numerical
 results of \pkg{plotkit}, network shapes and the version 1.0 fixes of
 \pkg{neural\_toolkit}, and the conversion rules of \pkg{parakit}.
 
@@ -351,9 +464,13 @@ jobs:
     \code{MPLBACKEND=Agg} and \code{SDL\_VIDEODRIVER=dummy}: installs the CPU
     build of PyTorch and the package with the \code{pistonball}, \code{video}
     and \code{dev} extras, runs \code{pytest -q}, and smoke-tests the examples
-    with \code{python examples/quickstart.py -{}-steps 5},
-    \code{python examples/simple\_transformer\_example.py -{}-quick -{}-no-plot}
-    and \code{python benchmarks/benchmark\_envs.py -{}-steps 20 -{}-render-steps 2}.
+    and the command line: \code{quickstart.py -{}-steps 5},
+    \code{simple\_transformer\_example.py -{}-quick -{}-no-plot},
+    \code{workflow\_demo.py -{}-no-save},
+    \code{power\_grid\_demo.py -{}-episodes 2 -{}-steps 50},
+    \code{platoon\_demo.py -{}-episodes 2 -{}-steps 100}, \code{env-lib list},
+    \code{env-lib evaluate Formation-v0 -{}-episodes 8 -{}-num-envs 8} and
+    \code{benchmarks/benchmark\_envs.py -{}-steps 20 -{}-render-steps 2}.
 \end{description}
 
 Running the same commands locally before opening a pull request avoids
@@ -393,8 +510,19 @@ A new environment needs the following additions:
 \begin{enumerate}
   \item an entry in \code{ENV\_SPECS} in \code{src/env\_lib/registration.py},
     with a string entry point so that registration does not import optional
-    dependencies;
+    dependencies, and the metadata of Table~\ref{tab:envlib-spec}
+    (\code{family}, observation and action types, \code{requires},
+    \code{limit\_kwarg} and, for a native batched implementation,
+    \code{vector\_entry\_point}); the catalogue and the command line pick the
+    entry up automatically;
   \item a lazy export in \code{src/env\_lib/\_\_init\_\_.py};
+  \item a baseline controller that is a pure function of the observation,
+    registered in \code{src/env\_lib/baselines.py} so that
+    \code{baseline\_policy} finds it;
+  \item for a native vector environment, a subclass of
+    \code{env\_lib.utils.BatchedVectorEnv} that accepts the constructor
+    arguments of the single environment plus \code{num\_envs} and
+    \code{autoreset\_mode} (Appendix~\ref{app:api});
   \item tests in \code{tests/envs/} and an example script in
     \code{examples/};
   \item a chapter in this manual and an entry in \code{CHANGELOG.md}.

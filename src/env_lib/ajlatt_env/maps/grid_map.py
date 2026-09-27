@@ -126,7 +126,9 @@ def bresenham_batch(sx, sy, ex, ey):
 
     This is an exact, vectorised re-implementation of the error-accumulation
     variant used by :func:`bresenham2D` (the major axis advances every step, the
-    minor axis whenever ``(floor(a/2) - k*b) mod a`` wraps around).
+    minor axis whenever ``(floor(a/2) - k*b) mod a`` wraps around, i.e. the
+    minor offset after ``k`` steps is ``-floor((floor(a/2) - k*b) / a)``).
+    Entries beyond a ray's length (``valid`` is ``False``) are unspecified.
 
     Parameters
     ----------
@@ -143,37 +145,48 @@ def bresenham_batch(sx, sy, ex, ey):
     valid:
         Boolean mask of the same shape; ray ``j`` has ``valid[j].sum()`` cells.
     """
-    ex = round_half_away(np.asarray(ex, dtype=float)).astype(np.int64)
-    ey = round_half_away(np.asarray(ey, dtype=float)).astype(np.int64)
-    sx = np.broadcast_to(round_half_away(sx).astype(np.int64), ex.shape)
-    sy = np.broadcast_to(round_half_away(sy).astype(np.int64), ey.shape)
+    ex = round_half_away(np.asarray(ex, dtype=float))
+    ey = round_half_away(np.asarray(ey, dtype=float))
+    sx = np.broadcast_to(round_half_away(sx), ex.shape)
+    sy = np.broadcast_to(round_half_away(sy), ey.shape)
+    xs, ys, valid = _bresenham_cells(sx, sy, ex, ey)
+    return xs.T, ys.T, valid.T
 
-    dx = np.abs(ex - sx)
-    dy = np.abs(ey - sy)
-    steep = dy > dx
-    major = np.where(steep, dy, dx)
-    minor = np.where(steep, dx, dy)
+
+def _bresenham_cells(sx, sy, ex, ey):
+    """Core of :func:`bresenham_batch` for integer-valued float arrays of shape ``(n_rays,)``.
+
+    Returns ``xs``, ``ys`` (``int64``) and ``valid`` of shape ``(max_len, n_rays)``
+    (step-major, so that the elementwise work runs along the long ray axis).
+    The arithmetic is done on small integers stored as float64, which is
+    exact (``floor`` of an exact quotient of integers below ``2**26``).
+    """
+    dx = ex - sx
+    dy = ey - sy
+    adx = np.abs(dx)
+    ady = np.abs(dy)
+    steep = ady > adx
+    major = np.where(steep, ady, adx)
+    minor = np.where(steep, adx, ady)
 
     length = int(major.max()) + 1 if major.size else 1
-    k = np.arange(length)[None, :]
-    valid = k <= major[:, None]
+    k = np.arange(length, dtype=np.float64)[:, np.newaxis]
+    valid = k <= major
 
-    # Minor-axis increments: q_0 = 0, q_k = [e_k - e_{k-1} >= 0], e_k = (h - k*b) mod a.
-    safe_major = np.maximum(major, 1)[:, None]
-    half = (major // 2)[:, None]
-    err = np.mod(half - k * minor[:, None], safe_major)
-    steps = np.zeros_like(err)
-    steps[:, 1:] = np.diff(err, axis=1) >= 0
-    steps[minor == 0] = 0
-    minor_offset = np.cumsum(steps, axis=1)
+    # Minor-axis offsets. The error term e_k = (h - k*b) mod a (h = floor(a/2))
+    # wraps around exactly when floor((h - k*b) / a) decreases, so the number of
+    # minor steps after k major steps is -floor((h - k*b) / a) (0 when b = 0).
+    # This closed form equals the cumulative count of wrap-arounds.
+    offset = np.floor((np.floor(0.5 * major) - k * minor) / np.maximum(major, 1.0))
+    np.negative(offset, out=offset)
 
-    sign_x = np.where(ex >= sx, 1, -1)[:, None]
-    sign_y = np.where(ey >= sy, 1, -1)[:, None]
-    steep_col = steep[:, None]
-    x0, y0 = sx[:, None], sy[:, None]
-    xs = np.where(steep_col, x0 + sign_x * minor_offset, x0 + sign_x * k)
-    ys = np.where(steep_col, y0 + sign_y * k, y0 + sign_y * minor_offset)
-    return xs, ys, valid
+    along_x = np.where(steep, offset, k)
+    along_y = np.where(steep, k, offset)
+    along_x *= np.where(dx >= 0, 1.0, -1.0)
+    along_y *= np.where(dy >= 0, 1.0, -1.0)
+    along_x += sx
+    along_y += sy
+    return along_x.astype(np.int64), along_y.astype(np.int64), valid
 
 
 # ---------------------------------------------------------------------------
@@ -304,10 +317,11 @@ class GridMap:
         """Vectorised ``is_collision_ray_cell`` for arrays of cell indices."""
         nx, ny = self.mapdim
         inside = (xs >= 0) & (ys >= 0) & (xs < nx) & (ys < ny)
-        blocked = ~inside
-        if self.map is not None:
-            blocked[inside] = self._occupied[xs[inside], ys[inside]]
-        return blocked
+        if self.map is None:
+            return ~inside
+        # Clipping only changes cells outside the grid, which are blocked anyway.
+        flat = np.clip(xs, 0, nx - 1) * ny + np.clip(ys, 0, ny - 1)
+        return ~inside | self._occupied.reshape(-1).take(flat)
 
     def is_collision_ray_cell(self, cell) -> bool:
         """``True`` if ``cell`` is outside the grid or occupied."""
@@ -347,20 +361,54 @@ class GridMap:
             return np.zeros(len(start_pos), dtype=bool)
         start = round_half_away((start_pos[:, :2] - self.mapmin) / self.mapres - 0.5)
         end = round_half_away((end_pos[:, :2] - self.mapmin) / self.mapres - 0.5)
-        xs, ys, valid = bresenham_batch(start[:, 0], start[:, 1], end[:, 0], end[:, 1])
-        return np.any(self._cells_blocked(xs, ys) & valid, axis=1)
+        xs, ys, valid = _bresenham_cells(start[:, 0], start[:, 1], end[:, 0], end[:, 1])
+        return np.any(self._cells_blocked(xs, ys) & valid, axis=0)
 
     def _cast(self, odom, angles: np.ndarray, r_max: float):
         """Cast rays at ``angles`` (body frame); return first-hit distances and cells.
 
         Rays that hit nothing get ``inf`` distance.
         """
-        odom = np.asarray(odom, dtype=float)
-        sx, sy = self.se2_to_cell(odom[:2])
-        body = r_max * np.array([np.cos(angles), np.sin(angles)])
-        end = coord_change2g(body, odom[-1]) + odom[:2, np.newaxis]
-        ex, ey = se2_to_cell_batch(end.T, self.mapmin, self.mapres)
-        xs, ys, valid = bresenham_batch(sx, sy, ex, ey)
+        dist, points = self._cast_batch(np.asarray(odom, dtype=float)[None], angles, r_max)
+        return dist[0], points[0]
+
+    def _cast_batch(self, odoms: np.ndarray, angles: np.ndarray, r_max: float):
+        """:meth:`_cast` for several poses ``(P, 3)`` at once (one Bresenham batch).
+
+        Every ray is traced exactly as by a single-pose call; batching only
+        removes the per-call overhead. Returns distances ``(P, R)`` and hit
+        points ``(P, R, 2)``.
+        """
+        ((dist, points),) = self._cast_fans(np.asarray(odoms, dtype=float), [angles], r_max)
+        return dist, points
+
+    def _cast_fans(self, odoms: np.ndarray, fans: list, r_max: float) -> list:
+        """Cast several fans of rays (body-frame angle arrays) from every pose in one batch.
+
+        Returns one ``(distances (P, R_f), points (P, R_f, 2))`` pair per fan.
+        """
+        n_poses = len(odoms)
+        start = round_half_away((odoms[:, :2] - self.mapmin) / self.mapres - 0.5)
+        cos, sin = np.cos(odoms[:, -1]), np.sin(odoms[:, -1])
+        rotation = np.empty((n_poses, 2, 2))
+        rotation[:, 0, 0] = cos
+        rotation[:, 0, 1] = -sin
+        rotation[:, 1, 0] = sin
+        rotation[:, 1, 1] = cos
+        ends, counts = [], []
+        for angles in fans:
+            body = r_max * np.array([np.cos(angles), np.sin(angles)])
+            end = rotation @ body + odoms[:, :2, np.newaxis]  # (P, 2, R_f)
+            ends.append(end.transpose(0, 2, 1).reshape(-1, 2))
+            counts.append(len(angles))
+        end = np.concatenate(ends) if len(ends) > 1 else ends[0]
+        ex, ey = se2_to_cell_batch(end, self.mapmin, self.mapres)
+        rays_per_pose = [np.repeat(start[:, axis], count) for axis in (0, 1) for count in counts]
+        n_fans = len(fans)
+        sx = np.concatenate(rays_per_pose[:n_fans])
+        sy = np.concatenate(rays_per_pose[n_fans:])
+        # Start and end cells are already integers: skip the rounding of bresenham_batch.
+        xs, ys, valid = _bresenham_cells(sx, sy, ex, ey)  # step-major: (max_len, n_rays)
 
         if self.map is None:
             cx = (xs + 0.5) * self.mapres[0] + self.mapmin[0]
@@ -375,14 +423,56 @@ class GridMap:
             hit = self._cells_blocked(xs, ys)
         hit &= valid
 
-        has_hit = hit.any(axis=1)
-        first = hit.argmax(axis=1)
-        rows = np.arange(len(first))
-        hit_cells = np.stack([xs[rows, first], ys[rows, first]], axis=1)
+        has_hit = hit.any(axis=0)
+        first = hit.argmax(axis=0)
+        rays = np.arange(len(first))
+        hit_cells = np.stack([xs[first, rays], ys[first, rays]], axis=1)
         points = (hit_cells + 0.5) * self.mapres + self.mapmin
-        dist = np.sqrt(np.sum(np.square(points - odom[:2]), axis=1))
+        origin = np.concatenate([np.repeat(odoms[:, :2], count, axis=0) for count in counts])
+        dist = np.sqrt(np.sum(np.square(points - origin), axis=1))
         dist[~has_hit] = np.inf
-        return dist, points
+        out, offset = [], 0
+        for count in counts:
+            size = n_poses * count
+            out.append(
+                (
+                    dist[offset : offset + size].reshape(n_poses, count),
+                    points[offset : offset + size].reshape(n_poses, count, 2),
+                )
+            )
+            offset += size
+        return out
+
+    def closest_obstacles(
+        self,
+        odoms,
+        ang_res: float = 0.05,
+        fov: float | Sequence[float] = DEFAULT_FOV,
+        r_max: float = DEFAULT_SENSOR_RANGE,
+    ) -> list:
+        """:meth:`get_closest_obstacle` (``(range, bearing)`` or ``None``) for poses ``(P, 3)``.
+
+        The rays of all poses are cast in one batch; the results are identical
+        to calling :meth:`get_closest_obstacle` pose by pose. ``fov`` may also
+        be a sequence of fields of view; the result is then one list per field
+        of view (all fans are still cast in a single batch).
+        """
+        odoms = np.asarray(odoms, dtype=float).reshape(-1, 3)
+        several = not np.isscalar(fov)
+        fovs = list(fov) if several else [fov]
+        fans = [np.arange(-0.5 * value, 0.5 * value, ang_res) for value in fovs]
+        results: list = [[None] * len(odoms) for _ in fans]
+        active = [i for i, angles in enumerate(fans) if angles.size]
+        if len(odoms) and active:
+            cast = self._cast_fans(odoms, [fans[i] for i in active], r_max)
+            for i, (dist, _) in zip(active, cast):
+                best = dist.argmin(axis=1)
+                nearest = dist[np.arange(len(best)), best]
+                results[i] = [
+                    (float(nearest[k]), float(fans[i][best[k]])) if nearest[k] < r_max else None
+                    for k in range(len(best))
+                ]
+        return results if several else results[0]
 
     def get_closest_obstacle(
         self,

@@ -578,14 +578,29 @@ def test_torch_rejects_bad_device_and_matrix():
 
 def test_reset_options_are_validated():
     env = KuramotoOscillatorEnv(n_oscillators=4, coupling_mode="constant")
-    with pytest.raises(ValueError, match="Unknown reset option"):
-        env.reset(options={"velocity": np.zeros(4)})
+    with pytest.warns(UserWarning, match="ignoring unknown reset option"):
+        obs, _ = env.reset(options={"velocity": np.zeros(4), "phases": np.full(4, 0.25)})
+    np.testing.assert_allclose(obs[:4], 0.25)  # known keys still apply
     with pytest.raises(ValueError, match="shape"):
         env.reset(options={"phases": np.zeros(3)})
     with pytest.raises(ValueError, match="dynamic"):
         env.reset(options={"coupling_strengths": np.zeros(6)})
     obs, _ = env.reset(options={"phases": np.full(4, 4.0)})
     np.testing.assert_allclose(obs[:4], 4.0 - 2 * np.pi, atol=1e-6)
+
+
+def test_unknown_reset_options_warn_for_both_backends():
+    classes = [KuramotoOscillatorEnv]
+    try:
+        classes.append(torch_env_class())
+    except pytest.skip.Exception:
+        pass
+    for cls in classes:
+        env = cls(n_oscillators=3)
+        with pytest.warns(UserWarning, match="ignoring unknown reset option"):
+            env.reset(seed=0, options={"options": 1})  # as passed by PettingZoo's API test
+        with pytest.raises(ValueError), pytest.warns(UserWarning):  # known keys stay strict
+            env.reset(options={"options": 1, "phases": np.zeros(5)})
 
 
 def test_deprecated_register_function():
