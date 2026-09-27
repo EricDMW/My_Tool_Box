@@ -1,554 +1,674 @@
-\chapter{Plotkit}
+% ---------------------------------------------------------------------------
+% Chapter: plotkit
+% ---------------------------------------------------------------------------
+\chapter{plotkit: Publication-Quality Plots}\label{chap:plotkit}
 
-\section{Overview}
+\pkg{toolkit.plotkit} produces the figures that research papers on
+reinforcement learning need most often: learning curves aggregated over seeds
+with uncertainty bands, grouped bar charts with error bars, histograms and
+annotated heatmaps. It depends only on matplotlib, accepts data from NumPy,
+pandas, PyTorch, TensorFlow and JAX, and never changes the global matplotlib
+configuration unless explicitly asked to.
 
-The \texttt{plotkit} subpackage provides comprehensive plotting utilities for research visualization. It's designed to make it easy to create publication-quality plots for reinforcement learning experiments, neural network analysis, and performance evaluation.
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{plotkit_gallery.png}
+  \caption{A three-panel summary figure made with \pkg{plotkit}
+    (\code{examples/plotkit\_gallery.py}, synthetic data): (a) learning curves
+    of three methods over eight seeds with 95\,\% confidence bands and EMA
+    smoothing, (b) grouped bars with 95\,\% confidence intervals, (c) an
+    annotated heatmap of a hyperparameter sweep. Each method keeps its
+    Okabe-Ito colour in every panel.}
+  \label{fig:plotkit-gallery}
+\end{figure}
 
-\section{Core Features}
+\section{Overview}\label{sec:plotkit-overview}
 
-\subsection{Training Visualization}
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Public API of \pkg{toolkit.plotkit}.}
+  \label{tab:plotkit-api}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{4.4cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Name & Purpose \\
+    \midrule
+    \code{plot\_shadow\_curve} & Mean curves with a shaded band (std, SEM, 95\,\% CI, min-max or explicit) and optional smoothing. \\
+    \code{plot\_learning\_curves} & \code{\{method: runs\}} learning curves aggregated over seeds; runs may have different lengths. \\
+    \code{plot\_line}, \code{plot\_scatter} & Line and scatter plots of one or several series. \\
+    \code{plot\_bar} & Bar charts; several series are grouped side by side, with error bars and value labels. \\
+    \code{plot\_histogram} & Overlaid histograms on common bins. \\
+    \code{plot\_heatmap}, \code{plot\_gray\_scale} & Annotated heatmaps with colorbar (seaborn-compatible arguments, matplotlib only). \\
+    \code{save\_figure} & Save a figure to several formats at once. \\
+    \code{style\_context}, \code{set\_research\_style}, \code{reset\_style}, \code{STYLE\_PRESETS} & Style presets applied locally or globally. \\
+    \code{get\_palette}, \code{RESEARCH\_COLORS}, \code{OKABE\_ITO\_COLORS} (and the \code{*\_COLOR\_LIST} variants) & Colour palettes, including a colour-blind-safe one. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
 
-Plotkit provides extensive tools for visualizing training progress:
-
+All plot functions share the same behaviour:
 \begin{itemize}
-    \item \textbf{Loss Curves}: Plot training and validation losses over time
-    \item \textbf{Reward Plots}: Visualize episode rewards and cumulative rewards
-    \item \textbf{Convergence Analysis}: Monitor algorithm convergence
-    \item \textbf{Learning Curves}: Track learning progress across episodes
+  \item they draw into the \code{ax} argument when it is given and otherwise
+    create a new figure of size \code{figsize};
+  \item they apply the \code{style} preset \emph{locally}, inside a
+    \code{matplotlib.rc\_context}, so the caller's \code{rcParams} are
+    unchanged afterwards;
+  \item they return the \code{matplotlib.axes.Axes} they drew on, which can be
+    customised further with ordinary matplotlib calls.
 \end{itemize}
 
-\subsection{Performance Metrics}
+A non-default style also restyles the axes it draws on (spines, tick labels,
+axis-label fonts), so that axes created outside the style context match the
+preset. Pass \code{style="default"} to leave an existing axes exactly as it
+is.
 
-Comprehensive performance analysis tools:
+\begin{pycode}
+import numpy as np
+from toolkit.plotkit import plot_shadow_curve, save_figure
+
+rng = np.random.default_rng(0)
+returns = rng.normal(size=(5, 100)).cumsum(axis=1)     # 5 seeds x 100 steps
+ax = plot_shadow_curve(returns, band="ci95", smoothing=10, labels="Agent",
+                       xlabel="Episode", ylabel="Return")
+save_figure(ax, "renders/first_curve", formats=("pdf", "png"))
+\end{pycode}
+
+\section{Input rules}\label{sec:plotkit-inputs}
+
+Every function converts its data inputs with the same rules:
 
 \begin{itemize}
-    \item \textbf{Accuracy Metrics}: Plot accuracy, precision, recall, and F1-score
-    \item \textbf{Policy Analysis}: Visualize policy distributions and action probabilities
-    \item \textbf{Value Function Analysis}: Plot value function estimates
-    \item \textbf{Q-Value Analysis}: Visualize Q-value distributions
+  \item A 1-D array-like of numbers, including a flat Python list of scalars,
+    is \emph{one} series.
+  \item A list or tuple of array-likes is \emph{several} series, one per
+    element; the elements may have different lengths.
+  \item A 2-D array is read by the function: \code{plot\_shadow\_curve} reads
+    it as \emph{samples of one curve} along \code{axis} (default: rows are
+    samples such as seeds, columns are steps); \code{plot\_line},
+    \code{plot\_scatter}, \code{plot\_bar} and \code{plot\_histogram} read it
+    as \code{(n\_series, n\_points)}.
+  \item A pandas \code{DataFrame} contributes one series per column.
+  \item pandas \code{Series}, PyTorch tensors (on any device, with or without
+    \code{requires\_grad}), TensorFlow eager tensors and JAX arrays are
+    converted to NumPy automatically. Masked arrays become NaN.
+  \item A single \code{x} is shared by all series; a list of arrays (or a 2-D
+    array) gives one \code{x} per series. When \code{x} is omitted, each series
+    is plotted against \code{0, \ldots, n - 1}.
 \end{itemize}
 
-\subsection{Network Analysis}
-
-Deep analysis of neural network behavior:
-
-\begin{itemize}
-    \item \textbf{Weight Distributions}: Analyze weight distributions across layers
-    \item \textbf{Activation Maps}: Visualize activation patterns
-    \item \textbf{Gradient Analysis}: Monitor gradient flow and vanishing/exploding gradients
-    \item \textbf{Attention Maps}: Visualize attention patterns in transformer networks
-\end{itemize}
-
-\subsection{Environment Visualization}
-
-Tools for understanding environment dynamics:
-
-\begin{itemize}
-    \item \textbf{State Representations}: Visualize state spaces and transitions
-    \item \textbf{Action Distributions}: Plot action selection patterns
-    \item \textbf{Trajectory Visualization}: Show agent trajectories through environments
-    \item \textbf{Multi-Agent Interactions}: Visualize interactions between agents
-\end{itemize}
-
-\section{Basic Usage}
-
-\subsection{Training Curves}
-
-Plot training progress with multiple metrics:
-
-\begin{lstlisting}[language=python, caption=Training Curves Example]
-from toolkit.plotkit import plot_training_curves
-import numpy as np
-
-# Generate sample data
-episodes = np.arange(1000)
-rewards = np.random.normal(0, 1, 1000).cumsum()
-losses = np.exp(-episodes / 200) + 0.1 * np.random.randn(1000)
-
-# Plot training curves
-plot_training_curves(
-    episodes=episodes,
-    rewards=rewards,
-    losses=losses,
-    title="Training Progress",
-    xlabel="Episode",
-    ylabel="Value",
-    save_path="training_curves.png",
-    show_plot=True
-)
-\end{lstlisting}
-
-\subsection{Performance Metrics}
-
-Visualize multiple performance metrics:
-
-\begin{lstlisting}[language=python, caption=Performance Metrics Example]
-from toolkit.plotkit import plot_performance_metrics
-import numpy as np
-
-# Generate sample metrics
-episodes = np.arange(1000)
-accuracy = 0.5 + 0.4 * (1 - np.exp(-episodes / 200))
-precision = 0.6 + 0.3 * (1 - np.exp(-episodes / 150))
-recall = 0.4 + 0.5 * (1 - np.exp(-episodes / 250))
-
-# Plot performance metrics
-plot_performance_metrics(
-    episodes=episodes,
-    metrics={
-        'Accuracy': accuracy,
-        'Precision': precision,
-        'Recall': recall
-    },
-    title="Performance Metrics",
-    xlabel="Episode",
-    ylabel="Score",
-    save_path="performance_metrics.png",
-    show_plot=True
-)
-\end{lstlisting}
-
-\subsection{Network Analysis}
-
-Analyze neural network weights and activations:
-
-\begin{lstlisting}[language=python, caption=Network Analysis Example]
-from toolkit.plotkit import plot_weight_distributions
-from toolkit.neural_toolkit import MLPPolicyNetwork
-import torch
-
-# Create a network
-network = MLPPolicyNetwork(
-    input_dim=10,
-    output_dim=4,
-    hidden_dims=[256, 256]
-)
-
-# Plot weight distributions
-plot_weight_distributions(
-    model=network,
-    title="Weight Distributions",
-    save_path="weight_distributions.png",
-    show_plot=True,
-    bins=50
-)
-\end{lstlisting}
-
-\section{Advanced Plotting}
-
-\subsection{Multi-Environment Comparison}
-
-Compare performance across different environments:
-
-\begin{lstlisting}[language=python, caption=Multi-Environment Comparison]
-from toolkit.plotkit import plot_multi_environment_comparison
-import numpy as np
-
-# Generate data for different environments
-episodes = np.arange(1000)
-env1_rewards = np.random.normal(0, 1, 1000).cumsum()
-env2_rewards = np.random.normal(0.5, 1, 1000).cumsum()
-env3_rewards = np.random.normal(-0.5, 1, 1000).cumsum()
-
-# Plot comparison
-plot_multi_environment_comparison(
-    episodes=episodes,
-    environment_data={
-        'Environment 1': env1_rewards,
-        'Environment 2': env2_rewards,
-        'Environment 3': env3_rewards
-    },
-    title="Multi-Environment Performance Comparison",
-    xlabel="Episode",
-    ylabel="Cumulative Reward",
-    save_path="multi_env_comparison.png",
-    show_plot=True
-)
-\end{lstlisting}
-
-\subsection{Algorithm Comparison}
-
-Compare different algorithms on the same environment:
-
-\begin{lstlisting}[language=python, caption=Algorithm Comparison]
-from toolkit.plotkit import plot_algorithm_comparison
-import numpy as np
-
-# Generate data for different algorithms
-episodes = np.arange(1000)
-ppo_rewards = np.random.normal(0, 1, 1000).cumsum()
-dqn_rewards = np.random.normal(0.2, 1, 1000).cumsum()
-a2c_rewards = np.random.normal(-0.1, 1, 1000).cumsum()
-
-# Plot comparison
-plot_algorithm_comparison(
-    episodes=episodes,
-    algorithm_data={
-        'PPO': ppo_rewards,
-        'DQN': dqn_rewards,
-        'A2C': a2c_rewards
-    },
-    title="Algorithm Performance Comparison",
-    xlabel="Episode",
-    ylabel="Cumulative Reward",
-    save_path="algorithm_comparison.png",
-    show_plot=True
-)
-\end{lstlisting}
-
-\subsection{Hyperparameter Analysis}
-
-Analyze the effect of different hyperparameters:
-
-\begin{lstlisting}[language=python, caption=Hyperparameter Analysis]
-from toolkit.plotkit import plot_hyperparameter_analysis
-import numpy as np
-
-# Generate data for different hyperparameters
-episodes = np.arange(1000)
-lr_001_rewards = np.random.normal(0, 1, 1000).cumsum()
-lr_01_rewards = np.random.normal(0.3, 1, 1000).cumsum()
-lr_1_rewards = np.random.normal(-0.2, 1, 1000).cumsum()
-
-# Plot analysis
-plot_hyperparameter_analysis(
-    episodes=episodes,
-    hyperparameter_data={
-        'LR=0.001': lr_001_rewards,
-        'LR=0.01': lr_01_rewards,
-        'LR=0.1': lr_1_rewards
-    },
-    hyperparameter_name="Learning Rate",
-    title="Learning Rate Analysis",
-    xlabel="Episode",
-    ylabel="Cumulative Reward",
-    save_path="hyperparameter_analysis.png",
-    show_plot=True
-)
-\end{lstlisting}
-
-\section{Specialized Plots}
-
-\subsection{Policy Visualization}
-
-Visualize policy distributions and action probabilities:
-
-\begin{lstlisting}[language=python, caption=Policy Visualization]
-from toolkit.plotkit import plot_policy_analysis
-import numpy as np
-
-# Generate sample policy data
-states = np.arange(100)
-action_probs = np.random.dirichlet([1, 1, 1, 1], size=100)
-
-# Plot policy analysis
-plot_policy_analysis(
-    states=states,
-    action_probabilities=action_probs,
-    action_names=['Up', 'Down', 'Left', 'Right'],
-    title="Policy Analysis",
-    xlabel="State",
-    ylabel="Action Probability",
-    save_path="policy_analysis.png",
-    show_plot=True
-)
-\end{lstlisting}
-
-\subsection{Value Function Visualization}
-
-Visualize value function estimates:
-
-\begin{lstlisting}[language=python, caption=Value Function Visualization]
-from toolkit.plotkit import plot_value_function
-import numpy as np
-
-# Generate sample value function data
-states = np.arange(100)
-values = np.sin(states / 10) + 0.1 * np.random.randn(100)
-
-# Plot value function
-plot_value_function(
-    states=states,
-    values=values,
-    title="Value Function",
-    xlabel="State",
-    ylabel="Value",
-    save_path="value_function.png",
-    show_plot=True
-)
-\end{lstlisting}
-
-\subsection{Q-Value Analysis}
-
-Analyze Q-value distributions and action-value functions:
-
-\begin{lstlisting}[language=python, caption=Q-Value Analysis]
-from toolkit.plotkit import plot_q_value_analysis
-import numpy as np
-
-# Generate sample Q-value data
-states = np.arange(50)
-actions = np.arange(4)
-q_values = np.random.randn(50, 4)
-
-# Plot Q-value analysis
-plot_q_value_analysis(
-    states=states,
-    actions=actions,
-    q_values=q_values,
-    action_names=['Up', 'Down', 'Left', 'Right'],
-    title="Q-Value Analysis",
-    xlabel="State",
-    ylabel="Q-Value",
-    save_path="q_value_analysis.png",
-    show_plot=True
-)
-\end{lstlisting}
-
-\section{Command Line Interface}
-
-Plotkit provides a command-line interface for quick plotting:
-
-\subsection{Basic CLI Usage}
-
-\begin{lstlisting}[language=bash, caption=Basic CLI Usage]
-# Plot training curves from CSV file
-python -m toolkit.plotkit --input training_data.csv --type training_curves --output training_plot.png
-
-# Plot performance metrics
-python -m toolkit.plotkit --input metrics.csv --type performance --output performance_plot.png
-
-# Plot network analysis
-python -m toolkit.plotkit --input model.pth --type network_analysis --output network_plot.png
-\end{lstlisting}
-
-\subsection{Advanced CLI Options}
-
-\begin{lstlisting}[language=bash, caption=Advanced CLI Options]
-# Custom plot with specific options
-python -m toolkit.plotkit \
-    --input data.csv \
-    --type training_curves \
-    --output plot.png \
-    --title "Custom Title" \
-    --xlabel "Episodes" \
-    --ylabel "Reward" \
-    --style seaborn \
-    --figsize 12 8 \
-    --dpi 300
-\end{lstlisting}
-
-\section{Configuration}
-
-\subsection{Plot Styles}
-
-Plotkit supports multiple plot styles:
-
-\begin{lstlisting}[language=python, caption=Plot Style Configuration]
-from toolkit.plotkit import set_plot_style
-
-# Set plot style
-set_plot_style('seaborn-v0_8')  # Modern, clean style
-set_plot_style('ggplot')        # R ggplot style
-set_plot_style('classic')       # Classic matplotlib style
-set_plot_style('bmh')           # Bayesian Methods for Hackers style
-\end{lstlisting}
-
-\subsection{Color Schemes}
-
-Customize color schemes for different plot types:
-
-\begin{lstlisting}[language=python, caption=Color Scheme Configuration]
-from toolkit.plotkit import set_color_scheme
-
-# Set color scheme
-set_color_scheme('viridis')     # Perceptually uniform
-set_color_scheme('plasma')      # High contrast
-set_color_scheme('inferno')     # Dark theme
-set_color_scheme('magma')       # Light theme
-\end{lstlisting}
-
-\subsection{Figure Settings}
-
-Configure figure appearance:
-
-\begin{lstlisting}[language=python, caption=Figure Configuration]
-from toolkit.plotkit import configure_figure
-
-# Configure figure settings
-configure_figure(
-    figsize=(12, 8),
-    dpi=300,
-    style='seaborn-v0_8',
-    rc_params={
-        'font.size': 12,
-        'axes.titlesize': 14,
-        'axes.labelsize': 12,
-        'xtick.labelsize': 10,
-        'ytick.labelsize': 10
-    }
-)
-\end{lstlisting}
-
-\section{Export Options}
-
-\subsection{Image Formats}
-
-Plotkit supports multiple image formats:
-
-\begin{lstlisting}[language=python, caption=Export Formats]
-from toolkit.plotkit import save_plot
-
-# Save in different formats
-save_plot('plot.png', dpi=300)      # High-resolution PNG
-save_plot('plot.pdf', dpi=300)      # Vector PDF
-save_plot('plot.svg', dpi=300)      # Scalable SVG
-save_plot('plot.jpg', dpi=300)      # JPEG format
-save_plot('plot.tiff', dpi=300)     # TIFF format
-\end{lstlisting}
-
-\subsection{Batch Export}
-
-Export multiple plots at once:
-
-\begin{lstlisting}[language=python, caption=Batch Export]
-from toolkit.plotkit import batch_export_plots
-
-# Define plots to export
-plots_config = [
-    {
-        'type': 'training_curves',
-        'data': training_data,
-        'output': 'training_curves.png',
-        'title': 'Training Progress'
-    },
-    {
-        'type': 'performance_metrics',
-        'data': metrics_data,
-        'output': 'performance.png',
-        'title': 'Performance Metrics'
-    },
-    {
-        'type': 'network_analysis',
-        'data': network_data,
-        'output': 'network.png',
-        'title': 'Network Analysis'
-    }
-]
-
-# Export all plots
-batch_export_plots(plots_config, output_dir='plots/')
-\end{lstlisting}
-
-\section{Integration with Other Tools}
-
-\subsection{Integration with Neural Toolkit}
-
-Seamless integration with neural network components:
-
-\begin{lstlisting}[language=python, caption=Neural Toolkit Integration]
-from toolkit.neural_toolkit import MLPPolicyNetwork
-from toolkit.plotkit import plot_network_analysis
-
-# Create and analyze network
-network = MLPPolicyNetwork(input_dim=10, output_dim=4)
-plot_network_analysis(network, save_path='network_analysis.png')
-\end{lstlisting}
-
-\subsection{Integration with Environment Library}
-
-Visualize environment interactions:
-
-\begin{lstlisting}[language=python, caption=Environment Integration]
-from env_lib import pistonball_env
-from toolkit.plotkit import plot_environment_analysis
-
-# Create environment
-env = pistonball_env.PistonballEnv()
-
-# Analyze environment
-plot_environment_analysis(
-    env=env,
-    num_episodes=100,
-    save_path='environment_analysis.png'
-)
-\end{lstlisting}
-
-\section{Best Practices}
-
-\subsection{Plot Design}
-
-\begin{enumerate}
-    \item Use clear, descriptive titles and labels
-    \item Choose appropriate color schemes for accessibility
-    \item Use consistent formatting across related plots
-    \item Include error bars and confidence intervals when appropriate
-    \item Use log scales for data spanning multiple orders of magnitude
-\end{enumerate}
-
-\subsection{Data Visualization}
-
-\begin{enumerate}
-    \item Plot raw data alongside smoothed curves
-    \item Use multiple metrics to provide comprehensive analysis
-    \item Include baseline comparisons when possible
-    \item Use appropriate plot types for different data types
-    \item Consider the audience when choosing visualization complexity
-\end{enumerate}
-
-\subsection{Export and Sharing}
-
-\begin{enumerate}
-    \item Use high-resolution formats for publications
-    \item Include source data or code when sharing plots
-    \item Use consistent naming conventions for files
-    \item Document plot generation parameters
-    \item Consider file size for web sharing
-\end{enumerate}
-
-\section{Troubleshooting}
-
-\subsection{Common Issues}
-
-\subsubsection{Memory Issues}
-
-For large datasets, use data sampling:
-
-\begin{lstlisting}[language=python, caption=Memory Management]
-# Sample data for plotting
-sampled_episodes = episodes[::10]  # Every 10th episode
-sampled_rewards = rewards[::10]
-
-plot_training_curves(
-    episodes=sampled_episodes,
-    rewards=sampled_rewards,
-    save_path="training_curves.png"
-)
-\end{lstlisting}
-
-\subsubsection{Style Issues}
-
-Reset plot style if encountering display problems:
-
-\begin{lstlisting}[language=python, caption=Style Reset]
+Length mismatches raise a \code{ValueError} that states both shapes and, when
+a 2-D input looks transposed, suggests transposing it. To pass a nested list
+as a single 2-D sample matrix to \code{plot\_shadow\_curve}, convert it with
+\code{np.asarray} first; otherwise it is read as several curves.
+
+\section{Common parameters}\label{sec:plotkit-common}
+
+The parameters in Table~\ref{tab:plotkit-common} have the same meaning in all
+plot functions (the heatmap functions have no \code{labels}, \code{colors},
+\code{legend} or \code{grid}).
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Parameters shared by the plot functions.}
+  \label{tab:plotkit-common}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{2.6cm}>{\raggedright\arraybackslash}p{2.5cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Parameter & Default & Meaning \\
+    \midrule
+    \code{labels} & \code{None} & Legend labels, one per series; default \code{"Curve 1"}, \code{"Series 1"}, \ldots. A wrong count gives a warning. \\
+    \code{colors} & \code{None} & \code{None} (the style's colour cycle), one colour, a list of colours (cycled), a palette name (\code{"okabe\_ito"}, \code{"research"}, \ldots) or a matplotlib colormap name. \\
+    \code{ax} & \code{None} & Axes to draw on; a new figure is created when \code{None}. \\
+    \code{figsize} & \code{(10, 6)} & Size in inches of a new figure (\code{(8, 6)} for heatmaps). \\
+    \code{title}, \code{xlabel}, \code{ylabel} & \code{None} & Axes title and axis labels. \\
+    \code{legend} & \code{True} & Show a legend when there are several series or labels were given; a string sets the location, e.g. \code{"lower right"}. \\
+    \code{grid} & \code{True} & Draw a major grid (only along the value axis for bars and histograms). \\
+    \code{style} & \code{"research"} & Style preset applied locally (Section~\ref{sec:plotkit-styles}), a matplotlib style name, a dict of \code{rcParams}, or \code{None}. \\
+    \code{**kwargs} & & Passed to the underlying matplotlib call (\code{plot}, \code{scatter}, \code{bar}, \code{hist}, \code{imshow}); \code{color} and \code{label} are accepted as aliases of \code{colors} and \code{labels}. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\section{Curves with uncertainty bands}\label{sec:plotkit-curves}
+
+\subsection{plot\_shadow\_curve}
+
+% norun
+\begin{pycode}
+plot_shadow_curve(y, x=None, y_std=None, labels=None, colors=None, alpha=0.2,
+                  ax=None, axis=0, figsize=(10, 6), title=None, xlabel=None,
+                  ylabel=None, legend=True, grid=True, style="research",
+                  legend_labels=None, x_tick_labels=None, y_tick_labels=None,
+                  *, band="std", smoothing=None, **kwargs) -> Axes
+\end{pycode}
+
+Each element of \code{y} gives one curve. A 2-D element holds samples of the
+curve (for example one row per seed) and is drawn as its mean with a band; a
+1-D element is drawn as it is, with a band only when \code{y\_std} is given.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Parameters specific to \code{plot\_shadow\_curve}.}
+  \label{tab:plotkit-shadow}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{2.8cm}>{\raggedright\arraybackslash}p{1.6cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Parameter & Default & Meaning \\
+    \midrule
+    \code{y} & required & One or several curves (see the input rules). \\
+    \code{x} & \code{None} & Shared x values or one array per curve. \\
+    \code{y\_std} & \code{None} & Explicit half-width of the band: a scalar, one array for all curves, or one entry per curve (entries may be \code{None}). Overrides \code{band}. \\
+    \code{alpha} & \code{0.2} & Band opacity; \code{0} hides the band. \\
+    \code{axis} & \code{0} & Sample axis of 2-D inputs: \code{0} means rows are samples and columns are steps; use \code{1} for the transposed layout. \\
+    \code{band} & \code{"std"} & \code{"std"}, \code{"sem"}, \code{"ci95"}, \code{"minmax"} or \code{None} (see below). Keyword only. \\
+    \code{smoothing} & \code{None} & \code{int}: trailing moving-average window; \code{float} in $(0,1)$: EMA weight. Keyword only. \\
+    \code{legend\_labels} & \code{None} & Alias of \code{labels} (takes precedence). \\
+    \code{x\_tick\_labels}, \code{y\_tick\_labels} & \code{None} & Custom tick labels: a mapping \code{\{position: label\}}, or a sequence (one label per x value of the first curve, otherwise spread evenly over the data range). \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\paragraph{Bands.}
+Let $y_{i,t}$ be sample $i$ (for example seed $i$) at step $t$, and let
+$\mathcal{I}_t$ be the set of samples that are not NaN at step $t$, with
+$n_t = |\mathcal{I}_t|$. The drawn curve is the mean
+\begin{equation}
+  \bar{y}_t = \frac{1}{n_t} \sum_{i \in \mathcal{I}_t} y_{i,t},
+\end{equation}
+and the band is $[\bar{y}_t - h_t,\, \bar{y}_t + h_t]$ with
+\begin{align}
+  \texttt{"std"}:\quad  h_t &= \sigma_t = \sqrt{\frac{1}{n_t}\sum_{i \in \mathcal{I}_t} (y_{i,t} - \bar{y}_t)^2}, \\
+  \texttt{"sem"}:\quad  h_t &= \frac{s_t}{\sqrt{n_t}}, \qquad
+     s_t = \sqrt{\frac{1}{n_t - 1}\sum_{i \in \mathcal{I}_t} (y_{i,t} - \bar{y}_t)^2}, \\
+  \texttt{"ci95"}:\quad h_t &= z_{0.975}\,\frac{s_t}{\sqrt{n_t}}, \qquad z_{0.975} \approx 1.96,
+\end{align}
+while \code{"minmax"} draws $[\min_{i} y_{i,t},\, \max_{i} y_{i,t}]$ over
+$\mathcal{I}_t$. The \code{"std"} band uses the population standard deviation;
+the SEM-based bands use the sample standard deviation and are undefined (not
+drawn) where fewer than two samples exist. The \code{"ci95"} band is the
+normal approximation of a 95\,\% confidence interval of the mean; with few
+seeds (fewer than about ten) it is narrower than the exact Student-$t$
+interval, a fact worth stating in a figure caption. Because the statistics
+ignore NaN, runs of different length can be padded with NaN.
+
+\paragraph{Smoothing.}
+Smoothing is applied along the step axis \emph{after} the statistics, with the
+same filter for the mean and both band edges. An integer $w \geq 1$ selects a
+trailing moving average with the same output length; the window shrinks at
+the start of the series:
+\begin{equation}
+  \tilde{y}_t = \frac{1}{|W_t|} \sum_{s \in W_t} y_s, \qquad
+  W_t = \{\, s : \max(0, t - w + 1) \le s \le t,\ y_s \text{ finite} \,\}.
+\end{equation}
+A float $\beta \in (0, 1)$ selects a debiased exponential moving average with
+smoothing weight $\beta$, the convention of TensorBoard's smoothing slider
+(larger values are smoother):
+\begin{equation}
+  \tilde{y}_t = \frac{\sum_{s \le t,\ y_s \text{ finite}} \beta^{\,t-s}\, y_s}
+                     {\sum_{s \le t,\ y_s \text{ finite}} \beta^{\,t-s}} .
+\end{equation}
+The normalisation removes the bias towards zero of the plain recursion
+$m_t = \beta m_{t-1} + (1-\beta) y_t$, $m_{-1} = 0$; for finite data the
+result equals \code{pandas.Series(y).ewm(alpha=1 - beta).mean()}. Non-finite
+values are skipped. Note that smoothing the band edges does not turn them into a
+confidence band of the smoothed curve; it is a visual aid.
+
+\subsection{plot\_learning\_curves}
+
+% norun
+\begin{pycode}
+plot_learning_curves(runs, x=None, *, band="ci95", smoothing=None, colors=None,
+                     alpha=0.2, ax=None, figsize=(10, 6), title=None,
+                     xlabel="Step", ylabel="Return", legend=True, grid=True,
+                     style="research", **kwargs) -> Axes
+\end{pycode}
+
+\code{runs} maps a method name to its results: a 2-D array
+\code{(n\_seeds, n\_steps)}, a 1-D array (a single seed), or a list of 1-D
+arrays of possibly different lengths, which are padded with NaN. \code{x} is
+either shared or a mapping \code{\{method: x\}}. The function is a thin layer
+over \code{plot\_shadow\_curve} with a 95\,\% confidence band by default, and
+always shows the legend when \code{legend} is true.
+
+\section{Lines, scatter plots, bars and histograms}\label{sec:plotkit-basic}
+
+\code{plot\_line(x, y, ...)} and \code{plot\_scatter(x, y, ...)} draw one or
+several series with the input rules of Section~\ref{sec:plotkit-inputs}.
+\code{plot\_scatter} uses \code{s=50} and \code{alpha=0.7} unless they are
+given; passing per-point values \code{c=...} (for a colormap)
+disables the series colour.
+
+\subsection{plot\_bar}
+
+% norun
+\begin{pycode}
+plot_bar(x, height, labels=None, colors=None, ax=None, figsize=(10, 6),
+         title=None, xlabel=None, ylabel=None, legend=True, grid=True,
+         style="research", *, width=0.8, yerr=None, value_labels=False,
+         horizontal=False, capsize=3.0, **kwargs) -> Axes
+\end{pycode}
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Parameters specific to \code{plot\_bar}.}
+  \label{tab:plotkit-bar}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{2.6cm}>{\raggedright\arraybackslash}p{1.6cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Parameter & Default & Meaning \\
+    \midrule
+    \code{x} & required & Category labels (strings or numbers), or \code{None} for the indices. Bars are placed at \code{0, \ldots, n\_categories - 1}. \\
+    \code{height} & required & One series (1-D), a list of series, or a 2-D array \code{(n\_series, n\_categories)}. Several series are grouped side by side. \\
+    \code{width} & \code{0.8} & Total width of a group in category units; each bar is \code{width / n\_series} wide. \\
+    \code{yerr} & \code{None} & Error bars: a scalar, one array per series (or one shared array), or a \code{(2, n\_categories)} array of lower and upper errors for a single series. \\
+    \code{value\_labels} & \code{False} & Annotate the bars: \code{True} (format \code{".3g"}), a format string such as \code{".1f"}, \code{"\{:.1\%\}"} or \code{"\%.2f"}, or a callable. \\
+    \code{horizontal} & \code{False} & Horizontal bars, first category at the top. \\
+    \code{capsize} & \code{3.0} & Error-bar cap size in points. \\
+    \code{colors} & \code{None} & As usual; for a single series a list with one colour per category colours each bar. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\subsection{plot\_histogram}
+
+\code{plot\_histogram(data, bins="auto", ..., *, density=False, alpha=0.45,
+histtype="stepfilled", **kwargs)} overlays one histogram per series. The bin
+edges are computed once from the pooled data (\code{numpy.histogram\_bin\_edges})
+so that all series share the same bins; NaN and infinite values are dropped.
+\code{density=True} normalises each histogram to unit area, and the default
+y-label is \code{"Density"} or \code{"Count"} accordingly. For the filled
+types the fill uses \code{alpha} while the outline stays opaque.
+
+\section{Heatmaps}\label{sec:plotkit-heatmaps}
+
+% norun
+\begin{pycode}
+plot_heatmap(data, xlabels=None, ylabels=None, cmap="viridis", annot=False,
+             ax=None, figsize=(8, 6), title=None, xlabel=None, ylabel=None,
+             cbar=True, cbar_label=None, style="research", *, fmt=None,
+             vmin=None, vmax=None, center=None, robust=False, mask=None,
+             nan_color=None, aspect="auto", square=False, linewidths=None,
+             linecolor="white", annot_kws=None, cbar_kws=None, **kwargs) -> Axes
+\end{pycode}
+
+\code{plot\_heatmap} draws a 2-D array with row 0 at the top (a 1-D array is
+drawn as one row). It is implemented with matplotlib's \code{imshow} and
+accepts the most common seaborn arguments, so existing seaborn calls usually
+work unchanged.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Parameters specific to \code{plot\_heatmap}.}
+  \label{tab:plotkit-heatmap}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{2.8cm}>{\raggedright\arraybackslash}p{1.6cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Parameter & Default & Meaning \\
+    \midrule
+    \code{xlabels}, \code{ylabels} & \code{None} & One tick label per column / row. \code{None} labels cells with their index (up to 30 cells, otherwise automatic integer ticks); \code{False} hides the ticks. Long x labels are rotated. seaborn's \code{xticklabels} / \code{yticklabels} are aliases. \\
+    \code{cmap} & \code{"viridis"} & Colormap name or object; use a diverging map (\code{"RdBu\_r"}) with \code{center}. \\
+    \code{annot} & \code{False} & \code{True} writes each value into its cell; an array of the same shape writes its entries instead. Text is black or white, whichever contrasts better with the cell colour. \\
+    \code{fmt} & \code{None} & Annotation format (\code{".2g"}, \code{"\{:.1\%\}"}, \code{"\%.2f"} or a callable). Default \code{".0f"} for integer-valued data, else \code{".2g"}. \\
+    \code{cbar}, \code{cbar\_label} & \code{True}, \code{None} & Colorbar and its label (also \code{cbar\_kws=\{"label": ...\}}). The colorbar is available as \code{ax.images[-1].colorbar}. \\
+    \code{vmin}, \code{vmax} & \code{None} & Colour limits (default: data range). \\
+    \code{center} & \code{None} & Value mapped to the middle of the colormap; missing limits are chosen symmetrically around it. \\
+    \code{robust} & \code{False} & Use the 2nd and 98th percentiles for missing limits. \\
+    \code{mask} & \code{None} & Boolean array; cells where it is \code{True} are hidden. \\
+    \code{nan\_color} & \code{None} & Colour of NaN and masked cells (default transparent). \\
+    \code{aspect}, \code{square} & \code{"auto"}, \code{False} & Cell aspect ratio; \code{square=True} equals \code{aspect="equal"}. \\
+    \code{linewidths}, \code{linecolor} & \code{None}, \code{"white"} & Lines between cells; by default 0.5 for matrices of up to 50 cells per side and none for larger ones. \\
+    \code{annot\_kws}, \code{cbar\_kws} & \code{None} & Text properties of the annotations (a \code{color} entry disables the automatic contrast colour) and arguments of \code{Figure.colorbar}. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\code{plot\_gray\_scale(data, ...)} is \code{plot\_heatmap} with
+\code{cmap="gray"} (black is low, white is high), convenient for images,
+occupancy grids and attention maps; it accepts all keyword arguments of
+\code{plot\_heatmap}.
+
+\section{Styles}\label{sec:plotkit-styles}
+
+A style preset is a set of \code{rcParams} overrides applied on top of the
+active configuration. Table~\ref{tab:plotkit-styles} summarises the presets;
+\code{STYLE\_PRESETS[name]} is a read-only view of the exact values.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Style presets. Font sizes are in points.}
+  \label{tab:plotkit-styles}
+  \begin{tabular}{@{}lllll@{}}
+    \toprule
+     & \code{"research"} & \code{"presentation"} & \code{"minimal"} & \code{"default"} \\
+    \midrule
+    Font family          & serif & sans-serif & sans-serif & unchanged \\
+    Base / label size    & 12 / 12 & 16 / 18 & 10 / 10 & unchanged \\
+    Title size, weight   & 14, bold & 20, bold & 11, normal & unchanged \\
+    Tick / legend size   & 10 / 10 & 14 / 14 & 9 / 9 & unchanged \\
+    Line width           & 2.0 & 3.0 & 1.5 & unchanged \\
+    Axes line width      & 1.2 & 1.5 & 0.8 (dark grey) & unchanged \\
+    Top and right spines & hidden & hidden & hidden & unchanged \\
+    Legend frame         & framed & framed, no edge & none & unchanged \\
+    Grid opacity         & 0.3 & 0.3 & 0.2 & unchanged \\
+    Colour cycle         & \code{research} & \code{research} & \code{research} & unchanged \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\code{"research"} is the paper-ready default of every function.
+\code{"presentation"} enlarges everything for slides and posters,
+\code{"minimal"} produces small, quiet figures, and \code{"default"} (or
+\code{None}) leaves the active configuration untouched. The \code{style}
+argument also accepts any name from \code{matplotlib.style.available} and a
+dictionary of \code{rcParams}.
+
+Three functions apply styles outside the plot functions:
+
+\begin{pycode}
 import matplotlib.pyplot as plt
+from toolkit.plotkit import reset_style, set_research_style, style_context
 
-# Reset to default style
-plt.style.use('default')
-plt.rcParams.update(plt.rcParamsDefault)
-\end{lstlisting}
+# 1. Locally, for any matplotlib code (rcParams are restored on exit).
+with style_context("presentation"):
+    fig, ax = plt.subplots()
+    ax.plot([0, 1, 2], [0, 1, 4])
 
-\subsubsection{Export Issues}
+# 2. Globally, as an explicit opt-in; also sets savefig.dpi=300 and
+#    savefig.bbox="tight". reset_style() restores the previous rcParams.
+set_research_style()
+fig, ax = plt.subplots()
+ax.plot([0, 1, 2], [0, 1, 4])
+reset_style()
+\end{pycode}
 
-Ensure proper file permissions and paths:
+Library code should prefer the \code{style} argument or
+\code{style\_context}; \code{set\_research\_style} is meant for the top level
+of a plotting script.
 
-\begin{lstlisting}[language=python, caption=Export Troubleshooting]
-import os
+\section{Colour palettes}\label{sec:plotkit-palettes}
 
-# Create output directory if it doesn't exist
-os.makedirs('plots', exist_ok=True)
+\code{get\_palette(name="research", n=None)} returns a list of hex colours:
 
-# Use absolute paths for reliability
-save_path = os.path.abspath('plots/training_curves.png')
-plot_training_curves(rewards=rewards, save_path=save_path)
-\end{lstlisting} 
+\begin{itemize}
+  \item \code{"research"} (alias \code{"tab10"}): matplotlib's ten default
+    colours, also available as the dictionary \code{RESEARCH\_COLORS}
+    (\code{"blue"}, \code{"orange"}, \ldots) and the list
+    \code{RESEARCH\_COLOR\_LIST}. It is the colour cycle of all presets.
+  \item \code{"okabe\_ito"} (alias \code{"colorblind"}): the eight colours of
+    Okabe and Ito (2008), designed to remain distinguishable for the common
+    forms of colour-vision deficiency; available as \code{OKABE\_ITO\_COLORS}
+    and \code{OKABE\_ITO\_COLOR\_LIST}.
+  \item Any matplotlib colormap name. Qualitative colormaps (\code{"tab20"},
+    \code{"Set2"}, \ldots) return their colours; continuous colormaps
+    (\code{"viridis"}, \ldots) are sampled at \code{n} evenly spaced points in
+    $[0.1, 0.9]$ (eight by default).
+\end{itemize}
+Palettes are cycled when \code{n} exceeds their length. A palette name can be
+passed directly as \code{colors} to every plot function.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{The Okabe-Ito palette in plotting order.}
+  \label{tab:plotkit-okabe}
+  \begin{tabular}{@{}lllll@{}}
+    \toprule
+    Name & Hex & & Name & Hex \\
+    \midrule
+    \code{blue}           & \code{\#0072B2} & & \code{reddish\_purple} & \code{\#CC79A7} \\
+    \code{orange}         & \code{\#E69F00} & & \code{sky\_blue}       & \code{\#56B4E9} \\
+    \code{bluish\_green}  & \code{\#009E73} & & \code{yellow}          & \code{\#F0E442} \\
+    \code{vermillion}     & \code{\#D55E00} & & \code{black}           & \code{\#000000} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Colour-blind guidance.}
+About one in twelve men has a red-green colour-vision deficiency. Several
+pairs of the default \code{tab10} colours, notably its red and green, are hard
+to tell apart with protanopia or deuteranopia, so for papers we recommend
+\code{colors="okabe\_ito"}. In addition:
+\begin{itemize}
+  \item use the first six Okabe-Ito colours for curves; yellow has low
+    contrast on white and black carries no hue, so they come last;
+  \item keep the colour of a method identical in every panel and figure, by
+    passing the same list of colours (Section~\ref{sec:plotkit-recipes});
+  \item do not rely on colour alone: vary line styles or markers, or label the
+    curves directly, so that the figure also works in greyscale print;
+  \item for heatmaps use perceptually uniform colormaps (\code{"viridis"},
+    \code{"cividis"}) for magnitudes and a diverging map with \code{center}
+    for signed quantities; avoid \code{"jet"} and red-green diverging maps.
+\end{itemize}
+
+\section{Saving figures}\label{sec:plotkit-saving}
+
+% norun
+\begin{pycode}
+save_figure(fig_or_ax, path, formats=None, dpi=300, transparent=False,
+            **savefig_kwargs) -> list[Path]
+\end{pycode}
+
+\code{save\_figure} accepts a \code{Figure}, a \code{SubFigure}, an
+\code{Axes} or an array of axes (the whole parent figure is saved), creates
+missing parent directories and returns the written paths. With
+\code{formats} given, the extension of \code{path} is replaced by (or, if it
+has no recognised extension, extended with) each format, so
+\code{save\_figure(fig, "results/curve", formats=("pdf", "png"))} writes
+\code{results/curve.pdf} and \code{results/curve.png}. Without
+\code{formats} the extension of \code{path} is used, or
+\code{rcParams["savefig.format"]} if it has none. \code{dpi} applies to raster
+formats and to rasterised parts of vector files. The defaults
+\code{bbox\_inches="tight"} and \code{pad\_inches=0.05} can be overridden
+through \code{**savefig\_kwargs}.
+
+For LaTeX documents, save vector PDF at the final size of the figure (set
+\code{figsize} to the column or text width, for example $3.5 \times 2.5$
+inches for a two-column paper, and include it without scaling), so that the
+font sizes of the style preset are the sizes that appear in print. Some
+publishers require TrueType instead of Type~3 fonts in PDF files; set
+\code{pdf.fonttype} while saving:
+
+\begin{pycode}
+import matplotlib as mpl
+
+with mpl.rc_context({"pdf.fonttype": 42, "ps.fonttype": 42}):
+    save_figure(ax, "renders/curve_truetype.pdf")
+\end{pycode}
+
+\section{Recipes}\label{sec:plotkit-recipes}
+
+\subsection{Reinforcement-learning training curves}
+
+Episode returns logged for several seeds form a 2-D array
+\code{(n\_seeds, n\_episodes)}. Smoothing with an EMA weight between 0.6 and
+0.9 makes the trend visible without hiding the variability between seeds:
+
+\begin{pycode}
+import numpy as np
+from toolkit.plotkit import plot_shadow_curve
+
+rng = np.random.default_rng(1)
+episodes = np.arange(500)
+returns = 100 * (1 - np.exp(-episodes / 150)) + rng.normal(0, 15, (10, 500))
+
+ax = plot_shadow_curve(returns, x=episodes, band="ci95", smoothing=0.9,
+                       labels="PPO", colors="okabe_ito",
+                       xlabel="Episode", ylabel="Episode return",
+                       title="Training progress (10 seeds, 95% CI)")
+\end{pycode}
+
+\subsection{Comparing methods, including unfinished runs}
+
+\code{plot\_learning\_curves} takes one entry per method. Runs of different
+length, for example episodes that ended early or seeds that are still
+training, are passed as lists and padded with NaN. The following recipe
+combines an environment of \pkg{env\_lib} with \pkg{plotkit}: it records the
+order parameter $r$ of the Kuramoto model for three coupling strengths and
+eight seeds. Runs with strong coupling synchronise and terminate early, so the
+curves end at different steps, and the band of the strongest coupling is
+computed from the seeds that are still running.
+
+\begin{pycode}
+import numpy as np
+import env_lib
+from toolkit.plotkit import plot_learning_curves
+
+def order_parameter_trace(coupling, seed, steps=300):
+    env = env_lib.KuramotoOscillatorEnv(n_oscillators=10, coupling_mode="constant",
+                                        coupling_strength=coupling, max_steps=steps)
+    obs, info = env.reset(seed=seed)
+    trace = [info["order_parameter"]]
+    action = np.zeros(env.action_space.shape, dtype=np.float32)  # no control input
+    for _ in range(steps):
+        obs, reward, terminated, truncated, info = env.step(action)
+        trace.append(info["order_parameter"])
+        if terminated or truncated:
+            break
+    env.close()
+    return np.asarray(trace)
+
+runs = {f"K = {k}": [order_parameter_trace(k, seed) for seed in range(8)]
+        for k in (0.1, 0.2, 0.5)}
+ax = plot_learning_curves(runs, band="ci95", colors="okabe_ito",
+                          xlabel="Step", ylabel="Order parameter r",
+                          legend="lower right")
+\end{pycode}
+
+\subsection{Several panels with consistent colours}
+
+Create the axes yourself, pass them as \code{ax}, and give every panel the
+same list of colours. Creating the figure inside \code{style\_context} also
+applies the preset to anything drawn directly with matplotlib, such as a
+figure title.
+
+\begin{pycode}
+import matplotlib.pyplot as plt
+import numpy as np
+from toolkit.plotkit import (get_palette, plot_bar, plot_learning_curves,
+                             save_figure, style_context)
+
+rng = np.random.default_rng(0)
+methods = ["Baseline", "Method A", "Method B"]
+colors = get_palette("okabe_ito", len(methods))
+runs = {m: rng.normal(size=(8, 200)).cumsum(axis=1) + 0.1 * i * np.arange(200)
+        for i, m in enumerate(methods)}
+finals = np.array([r[:, -1].mean() for r in runs.values()])     # one per method
+
+with style_context("research"):
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.8), layout="constrained")
+    plot_learning_curves(runs, colors=colors, smoothing=0.8, ax=axes[0],
+                         title="(a) Learning curves")
+    plot_bar(methods, finals, colors=colors, ax=axes[1], value_labels=".1f",
+             title="(b) Final return")          # one colour per bar
+save_figure(fig, "renders/comparison", formats=("pdf", "png"))
+\end{pycode}
+
+\subsection{Distinguishing series without colour}
+
+Keyword arguments apply to all series of one call. To give each method its
+own line style, call the function once per method on the same axes and pass
+the colours explicitly:
+
+\begin{pycode}
+fig, ax = plt.subplots(figsize=(6, 4))
+for method, color, linestyle in zip(methods, colors, ["-", "--", ":"]):
+    plot_shadow_curve(runs[method], labels=method, colors=color, ax=ax,
+                      band="sem", linestyle=linestyle)
+\end{pycode}
+
+\subsection{Bar chart of final performance}
+
+\begin{pycode}
+from toolkit.plotkit import plot_bar
+
+methods = ["DQN", "PPO", "SAC", "Ours"]
+accuracy = np.array([71.2, 78.5, 80.1, 84.3])
+std_err = np.array([1.8, 1.2, 1.5, 1.1])
+ax = plot_bar(methods, accuracy, yerr=std_err, value_labels=".1f",
+              colors="okabe_ito", ylabel="Success rate (%)")
+
+# Several environments: height has shape (n_methods, n_environments).
+scores = rng.uniform(40, 90, size=(3, 4))
+ax = plot_bar(["Env 1", "Env 2", "Env 3", "Env 4"], scores,
+              labels=["A", "B", "C"], yerr=rng.uniform(1, 4, size=(3, 4)))
+\end{pycode}
+
+\subsection{Confusion and correlation matrices}
+
+\begin{pycode}
+from toolkit.plotkit import plot_heatmap
+
+classes = ["left", "stay", "right"]
+cm = np.array([[48, 5, 2], [4, 40, 6], [1, 7, 52]])
+ax = plot_heatmap(cm, xlabels=classes, ylabels=classes, annot=True,
+                  cmap="Blues", square=True, xlabel="Predicted",
+                  ylabel="True", cbar_label="Count")
+
+# Correlations: diverging colormap centred at zero, upper triangle hidden.
+corr = np.corrcoef(rng.normal(size=(6, 200)))
+mask = np.triu(np.ones_like(corr, dtype=bool), k=1)
+ax = plot_heatmap(corr, annot=True, fmt=".2f", cmap="RdBu_r", center=0,
+                  vmin=-1, vmax=1, mask=mask, square=True, cbar_label="r")
+\end{pycode}
+
+\subsection{Distributions of returns}
+
+\begin{pycode}
+from toolkit.plotkit import plot_histogram
+
+ax = plot_histogram([rng.normal(0, 1, 1000), rng.normal(1.5, 0.7, 1000)],
+                    labels=["Policy A", "Policy B"], density=True,
+                    colors="okabe_ito", xlabel="Return")
+\end{pycode}
+
+\subsection{Plotting tensors and data frames}
+
+Tensors can be passed without conversion; the functions detach them and copy
+them to the CPU. A pandas \code{DataFrame} gives one series per column, which
+suits logs read with \code{pandas.read\_csv}.
+
+\begin{pycode}
+import torch
+from toolkit.plotkit import plot_line
+
+losses = torch.rand(3, 100, requires_grad=True).cumsum(dim=1)   # (n_series, n_points)
+ax = plot_line(None, losses, labels=["actor", "critic", "entropy"])
+\end{pycode}
+
+\section{Command-line gallery}\label{sec:plotkit-cli}
+
+The module is executable and shows every plot type with synthetic data. The
+same program is installed as the console script \code{plotkit-gallery}.
+
+\begin{shellcode}
+python -m toolkit.plotkit --demo all                    # all eight demos in one window
+plotkit-gallery --demo heatmap --style presentation \
+    --save renders/plotkit --format png pdf             # renders/plotkit/plotkit_heatmap.*
+\end{shellcode}
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Options of \code{python -m toolkit.plotkit} and \code{plotkit-gallery}.}
+  \label{tab:plotkit-cli}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.0cm}>{\raggedright\arraybackslash}p{2.1cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Option & Default & Meaning \\
+    \midrule
+    \code{--demo} & \code{all} & \code{shadow}, \code{learning}, \code{heatmap}, \code{grayscale}, \code{line}, \code{bar}, \code{scatter}, \code{histogram}, or \code{all} for a $2 \times 4$ grid of all demos. \\
+    \code{--style} & \code{research} & Style preset. \\
+    \code{--save DIR} & none & Save to \code{DIR/plotkit\_<demo>.<format>} instead of showing a window. \\
+    \code{--format} & \code{png} & One or more output formats. \\
+    \code{--dpi} & \code{150} & Resolution of raster output. \\
+    \code{--seed} & \code{0} & Seed of the synthetic data. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Without \code{--save} the figure is shown with \code{plt.show()}; when the
+active matplotlib backend is non-interactive (for example with
+\code{MPLBACKEND=Agg}), the figure is saved to \code{renders/plotkit/}
+instead. The script \code{examples/plotkit\_gallery.py} builds the
+three-panel figure of Figure~\ref{fig:plotkit-gallery} and is a good starting
+point for a paper figure; run it with \code{--help} for its options.

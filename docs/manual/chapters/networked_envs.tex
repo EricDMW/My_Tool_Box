@@ -1,0 +1,432 @@
+% ---------------------------------------------------------------------------
+% Networked communication environments: LineMsg and WirelessComm
+% ---------------------------------------------------------------------------
+\begingroup
+% Extra interword stretch for paragraphs with long, unbreakable identifiers
+% (local to this chapter).
+\setlength{\emergencystretch}{2em}
+\chapter{Networked Communication Environments}\label{chap:networked}
+
+This chapter documents two discrete multi-agent benchmarks in which agents on a
+network cooperate under local observations:
+
+\begin{itemize}
+  \item \textbf{LineMsg} (\code{env\_lib.linemsg\_env.LineMsgEnv}): agents on
+        a line relay a message from a source to a sink;
+  \item \textbf{WirelessComm}
+        (\code{env\_lib.wireless\_comm\_env.WirelessCommEnv}): agents on a grid
+        send deadline-constrained packets to shared access points and must avoid
+        collisions.
+\end{itemize}
+
+Both environments have small discrete state and action spaces, local
+observation windows controlled by \code{n\_obs\_neighbors}, per-agent rewards
+and a fixed episode length. They are designed for research on decentralised
+and networked multi-agent reinforcement learning: exploiting the locality of
+interactions (policies and value functions that depend on a $\kappa$-hop
+neighbourhood), credit assignment, communication and coordination protocols,
+scalability in the number of agents, and robustness to failing agents. The
+WirelessComm environment is the Gymnasium joint-action port of an earlier
+PettingZoo implementation used in the DSDP project.
+
+% ===========================================================================
+\section{LineMsg}\label{sec:linemsg}
+
+% ---------------------------------------------------------------------------
+\subsection{Model}\label{sec:linemsg-model}
+
+$N$ agents sit on a line. Agent $N-1$ at the right end is the source, agent 0
+at the left end is the sink. Each agent holds a binary state $s_i \in \{0, 1\}$
+(1: it holds the message) and chooses a binary action $a_i \in \{0, 1\}$ at
+every step. All states are updated synchronously from the previous states:
+\begin{align}
+  s_0 &\leftarrow s_1, \nonumber\\
+  s_i &\leftarrow a_i \wedge \bigl(s_{i+1} \vee [u_i < 0.8]\bigr),
+       \qquad 0 < i < N-1,\; u_i \sim \mathcal{U}(0, 1), \label{eq:linemsg}\\
+  s_{N-1} &\leftarrow a_{N-1}. \nonumber
+\end{align}
+An active middle agent ($a_i = 1$) therefore receives the message from its
+right neighbour for sure and otherwise obtains one with probability 0.8; an
+inactive agent loses its message. The sink copies agent 1 and its own action
+has no effect; the source holds the message exactly when it acts. At reset all
+agents hold the message ($s_i = 1$).
+
+\paragraph{Reward.} Agent $i$ receives
+\begin{equation}
+  r_i = w_i\, s_i, \qquad w_0 = 1.0, \quad w_i = 0.1 \;\; (i > 0),
+\end{equation}
+evaluated on the new states, and the team reward is $R = \sum_i r_i$. The
+maximum per step is $1 + 0.1(N - 1)$, which the ``always relay'' policy
+($a_i = 1$ for all $i$) attains at every step.
+
+\paragraph{Episode end.} \code{terminated} is always \code{False};
+\code{truncated} becomes \code{True} after \code{max\_iter} steps.
+
+% ---------------------------------------------------------------------------
+\subsection{Spaces}\label{sec:linemsg-spaces}
+
+\paragraph{Action.} The joint action can be given in two formats, both of
+which \code{step()} always accepts:
+\begin{itemize}
+  \item an integer in \code{Discrete(2**N)} whose bit $i$ is the action of
+        agent $i$ (the declared space for \code{action\_space\_type="discrete"},
+        the default; only possible for $N \le 62$);
+  \item an array of $N$ values in $\{0, 1\}$ (integer or boolean), the
+        declared space \code{MultiBinary(N)} for
+        \code{action\_space\_type="multibinary"}, which has no limit on $N$.
+\end{itemize}
+Out-of-range integers, arrays of the wrong shape and values other than 0 and 1
+raise \code{ValueError}.
+
+\paragraph{Observation.} \code{Box(0, 3, (N, 2k+1), float32)} with
+$k$ = \code{n\_obs\_neighbors}. The state vector is padded with $k$ boundary
+cells on each side, and row $i$ is the window of the $2k + 1$ cells centred on
+agent $i$:
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{LineMsg observation (row $i$).}
+  \label{tab:linemsg-obs}
+  \begin{tabularx}{\textwidth}{@{}lX@{}}
+    \toprule
+    Column & Content \\
+    \midrule
+    \code{0 : k} & states of agents $i-k, \dots, i-1$ (left neighbours, towards the sink) \\
+    \code{k} & own state $s_i$ \\
+    \code{k+1 : 2k+1} & states of agents $i+1, \dots, i+k$ (right neighbours, towards the source) \\
+    \midrule
+    Values & 0: no message, 1: message, 2: boundary cell beyond the end of the line \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\subsection{Parameters and info}\label{sec:linemsg-params}
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Constructor parameters of \code{LineMsgEnv}.}
+  \label{tab:linemsg-params}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.25\textwidth}>{\raggedright\arraybackslash}p{0.14\textwidth}X@{}}
+    \toprule
+    Parameter & Default & Description \\
+    \midrule
+    \code{num\_agents} & \code{10} & Number of agents $N$ ($\ge 3$: a sink, a source and at least one relay). \\
+    \code{n\_obs\_neighbors} & \code{1} & Observation radius $k$; $0$ is treated as $1$ with a warning. \\
+    \code{max\_iter} & \code{50} & Episode length; reaching it sets \code{truncated}. \\
+    \code{render\_mode} & \code{None} & \code{None}, \code{"human"}, \code{"rgb\_array"} or \code{"ansi"}. \\
+    \code{action\_space\_type} & \code{"discrete"} & Declared action space: \code{"discrete"} (\code{Discrete(2**N)}, $N \le 62$) or \code{"multibinary"} (\code{MultiBinary(N)}). \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+The info dictionary of \code{reset()} and \code{step()} contains a single key,
+\code{"agent\_rewards"}: the \code{float64} per-agent rewards $r_i$ (zeros at
+reset). The attribute \code{state} holds the padded state vector (agent $i$ is
+\code{state[k + i]}), \code{actions} the last joint action with the same padding
+(2 before the first step), and \code{num\_moves} the number of steps taken.
+\code{step()} before \code{reset()} raises \code{RuntimeError}.
+
+% ---------------------------------------------------------------------------
+\subsection{Rendering}\label{sec:linemsg-render}
+
+The dashboard (Figure~\ref{fig:linemsg}) shows the line of agents at the top,
+coloured by state, with a halo under agents that act and arrows on the active
+links, which point in the direction of message flow towards the sink. Below it
+a space-time raster (one row per step, one column per agent) makes message
+fronts visible, and the right panel traces the team reward with its maximum.
+The header reports the step, the last reward, the episode return and the number
+of agents holding the message. \code{render\_mode="ansi"} returns a text line
+with the action and state of every agent.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\figwidth]{linemsg.png}
+  \caption{LineMsg dashboard (12 agents, step 30 of 50).
+    Top: agent states and active links. Bottom left: space-time raster of the
+    agent states. Bottom right: team reward per step.}
+  \label{fig:linemsg}
+\end{figure}
+
+% ---------------------------------------------------------------------------
+\subsection{Usage}\label{sec:linemsg-usage}
+
+\begin{pycode}
+import numpy as np
+from env_lib.linemsg_env import LineMsgEnv
+
+env = LineMsgEnv(num_agents=10, action_space_type="multibinary")
+obs, info = env.reset(seed=0)                 # obs: (10, 3) float32
+rng = np.random.default_rng(0)
+episode_return = 0.0
+while True:
+    action = (rng.random(env.num_agents) < 0.9).astype(np.int64)  # duty-cycled relays
+    obs, reward, terminated, truncated, info = env.step(action)
+    episode_return += reward
+    if terminated or truncated:
+        break
+print(episode_return, info["agent_rewards"])
+
+env.reset(seed=1)
+env.step(0b1111111110)          # integer joint action: every agent except the sink acts
+\end{pycode}
+
+The example script compares a random policy, duty-cycled relays and the
+always-relay policy and can record an episode:
+
+\begin{shellcode}
+python examples/linemsg_demo.py --policy relay --save renders/linemsg.gif
+python examples/linemsg_demo.py --num-agents 30 --action-space-type multibinary
+python examples/linemsg_demo.py --render-mode ansi
+\end{shellcode}
+
+Over 20 episodes with $N = 10$ and \code{max\_iter=50} the mean returns are
+44.1 for uniformly random actions, 85.2 for duty-cycled relays that act with
+probability 0.9, and 95.0 for the always-relay policy (the maximum).
+
+% ===========================================================================
+\section{WirelessComm}\label{sec:wireless}
+
+% ---------------------------------------------------------------------------
+\subsection{Model}\label{sec:wireless-model}
+
+$G_x \times G_y$ agents sit on a grid (\code{grid\_x} rows, \code{grid\_y}
+columns); agent $(i, j)$ has index $i G_y + j$. Access points sit at the
+$(G_x - 1)(G_y - 1)$ interior corners of the grid: access point $(a, b)$ lies
+between agents $(a, b)$, $(a+1, b)$, $(a, b+1)$ and $(a+1, b+1)$. Every agent
+holds a packet queue with $D$ = \code{ddl} deadline slots; slot 0 holds the
+packet with the earliest deadline. Each agent chooses one of five actions per
+step (Table~\ref{tab:wireless-actions}).
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{WirelessComm actions of agent $(i, j)$. A direction without an
+    access point (at the border of the grid) is a failed attempt.}
+  \label{tab:wireless-actions}
+  \begin{tabular}{@{}cll@{}}
+    \toprule
+    Action & Meaning & Access point \\
+    \midrule
+    0 & stay idle & none \\
+    1 & transmit up-left & $(i-1, j-1)$ \\
+    2 & transmit down-left & $(i, j-1)$ \\
+    3 & transmit up-right & $(i-1, j)$ \\
+    4 & transmit down-right & $(i, j)$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Transition.} Let $\ell_m$ be the load of access point $m$, the
+number of agents that transmit to it in the step; every transmitting agent
+counts, whether or not it holds a packet. The transmission of agent $k$ is
+\emph{eligible} when the agent transmits, holds at least one packet, its access
+point exists and that access point has load exactly $\ell_m = 1$. Each eligible
+transmission succeeds with probability $q$; one uniform draw is made per
+eligible agent, in agent order. A success removes the agent's earliest-deadline
+packet and earns reward 1. Afterwards every queue shifts one slot towards the
+deadline (packets in slot 0 expire and are lost), and a new packet arrives in
+the last slot with probability $p$. At reset every queue slot is occupied
+independently with probability $1/2$.
+
+\paragraph{Reward and outcomes.} The per-agent reward is 1 for a delivered
+packet and 0 otherwise; the team reward is the number of packets delivered in
+the step. The outcome of every agent is reported in \code{info["outcomes"]}
+(Table~\ref{tab:wireless-info}): idle (0), success (1), collision (2: the
+access point exists and has load $\ge 2$) or lost (3: any other failed attempt,
+that is no packet, no access point or a channel loss).
+
+\paragraph{Episode end.} \code{terminated} is always \code{False};
+\code{truncated} becomes \code{True} after \code{max\_iter} steps.
+
+% ---------------------------------------------------------------------------
+\subsection{Spaces}\label{sec:wireless-spaces}
+
+\paragraph{Action.} \code{MultiDiscrete([5] * n)} with $n = G_x G_y$. An action
+of shape \code{(n,)} or \code{(grid\_x, grid\_y)} is accepted; other shapes and
+values outside $0, \dots, 4$ raise \code{ValueError}.
+
+\paragraph{Observation.} \code{Box(0, 2, (n, D w\^{}2), float32)} with
+$w = 2k + 1$ and $k$ = \code{n\_obs\_neighbors}. The queues form a
+$(D, G_x, G_y)$ array that is padded with $k$ cells of value 2 on every side of
+the grid. Row $m$ of the observation is the $(D, w, w)$ window centred on agent
+$m$, flattened in C order (slot, then row, then column). Values are 0 (empty
+slot), 1 (packet) and 2 (outside the grid). The agent's own slot $d$ is column
+$d w^2 + k w + k$. The default configuration ($D = 2$, $k = 1$) has 18 columns.
+
+% ---------------------------------------------------------------------------
+\subsection{Parameters and info}\label{sec:wireless-params}
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Constructor parameters of \code{WirelessCommEnv}.}
+  \label{tab:wireless-params}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.36\textwidth}>{\raggedright\arraybackslash}p{0.1\textwidth}X@{}}
+    \toprule
+    Parameter & Default & Description \\
+    \midrule
+    \code{grid\_x}, \code{grid\_y} & \code{6}, \code{6} & Number of agent rows and columns (each $\ge 2$, so that at least one access point exists). \\
+    \code{ddl} & \code{2} & Deadline horizon $D$: queue slots per agent ($\ge 1$). \\
+    \code{packet\_arrival\_probability} & \code{0.8} & Arrival probability $p$ of a new packet per agent and step. \\
+    \code{success\_transmission\_probability} & \code{0.8} & Success probability $q$ of an eligible transmission. \\
+    \code{n\_obs\_neighbors} & \code{1} & Observation radius $k$ (Chebyshev distance, $\ge 0$). \\
+    \code{max\_iter} & \code{50} & Episode length; reaching it sets \code{truncated}. \\
+    \code{render\_mode} & \code{None} & \code{None}, \code{"human"}, \code{"rgb\_array"} or \code{"ansi"}. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{WirelessComm info dictionary (the same keys, all zero, at reset).}
+  \label{tab:wireless-info}
+  \begin{tabularx}{\textwidth}{@{}lX@{}}
+    \toprule
+    Key & Content \\
+    \midrule
+    \code{agent\_rewards} & \code{float64} array \code{(n,)}: 1 for a delivered packet, else 0 \\
+    \code{outcomes} & \code{int8} array \code{(n,)}: 0 idle, 1 success, 2 collision, 3 lost
+      (constants \code{OUTCOME\_IDLE}, \code{OUTCOME\_SUCCESS}, \code{OUTCOME\_COLLISION},
+      \code{OUTCOME\_LOST} and \code{OUTCOME\_LABELS} in \code{env\_lib.wireless\_comm\_env.wireless\_comm\_env}) \\
+    \code{ap\_load} & \code{int64} array \code{(grid\_x - 1, grid\_y - 1)}: number of agents that transmitted to each access point \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+The environment also exposes \code{last\_outcomes} and \code{last\_ap\_load}
+(the values of the last step), \code{access\_point\_mapping(i, j, action)},
+which returns the access point $(a, b)$ reached by agent $(i, j)$ or
+\code{(None, None)}, and \code{check\_transmission\_fail(a, b, load)}.
+\code{step()} before \code{reset()} raises \code{RuntimeError}.
+
+% ---------------------------------------------------------------------------
+\subsection{Rendering}\label{sec:wireless-render}
+
+The dashboard (Figure~\ref{fig:wireless}) draws the agent grid on the left.
+Every agent is a circle coloured by the outcome of its last action, with a
+small queue bar below it (one cell per deadline slot; the left cell expires
+first). Access points are squares at the interior corners, coloured by their
+load (idle, one transmitter, collision), and a line joins every transmitting
+agent to the access point it chose, coloured by the outcome; attempts towards a
+missing access point point out of the grid. The right panels show the packets
+delivered per step with a rolling mean and the rolling collision count, and the
+cumulative return. \code{render\_mode="ansi"} returns the action and queue of
+every agent as text.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\figwidth]{wireless.png}
+  \caption{WirelessComm dashboard ($6 \times 6$ agents, 25 access points,
+    step 25 of 50). Left: agents coloured by outcome with their packet queues,
+    access points coloured by load and transmission links. Right: packets
+    delivered and collisions per step (10-step means) and the cumulative
+    return.}
+  \label{fig:wireless}
+\end{figure}
+
+% ---------------------------------------------------------------------------
+\subsection{Usage}\label{sec:wireless-usage}
+
+The following policy is a collision-free rotating schedule: at step $t$ every
+agent that holds a packet uses the same direction $(4, 1, 2, 3)[t \bmod 4]$ if
+an access point exists in that direction. A common direction maps agents to
+access points one-to-one, so no collisions occur.
+
+\begin{pycode}
+import numpy as np
+from env_lib.wireless_comm_env import WirelessCommEnv
+
+env = WirelessCommEnv(grid_x=6, grid_y=6)
+obs, info = env.reset(seed=0)                     # obs: (36, 18) float32
+k, w = env.n_obs_nghbr, env.window
+own = [d * w * w + k * w + k for d in range(env.ddl)]  # own queue columns
+directions = (4, 1, 2, 3)
+reachable = {d: np.array([env.access_point_mapping(i, j, d)[0] is not None
+                          for i in range(env.grid_x) for j in range(env.grid_y)])
+             for d in directions}
+episode_return = 0.0
+for t in range(env.max_iter):
+    d = directions[t % 4]
+    has_packet = obs[:, own].max(axis=1) > 0.5
+    action = np.where(has_packet & reachable[d], d, 0)
+    obs, reward, terminated, truncated, info = env.step(action)
+    episode_return += reward
+print(episode_return, np.bincount(info["outcomes"], minlength=4))
+\end{pycode}
+
+The example script compares uniformly random actions, $p$-persistent slotted
+ALOHA and the rotating schedule:
+
+\begin{shellcode}
+python examples/wireless_comm_demo.py --policy schedule --save renders/wireless.gif
+python examples/wireless_comm_demo.py --grid 8 8 --tau 0.5 --episodes 50
+\end{shellcode}
+
+Over 20 episodes on the $6 \times 6$ grid the mean returns are 385 for random
+actions, 398 for ALOHA with transmit probability 0.6 and 910 for the rotating
+schedule, which causes no collisions.
+
+% ===========================================================================
+\section{Registered ids}\label{sec:networked-ids}
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Registered ids of the networked environments.}
+  \label{tab:networked-ids}
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    Id & Class & Configuration \\
+    \midrule
+    \envid{LineMsg-v0} & \code{LineMsgEnv} & defaults (10 agents) \\
+    \envid{WirelessComm-v0} & \code{WirelessCommEnv} & defaults ($6 \times 6$ grid, 36 agents) \\
+    \envid{WirelessComm-v1} & \code{WirelessCommEnv} & \code{grid\_x=4}, \code{grid\_y=4} (16 agents) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% ===========================================================================
+\section{Reproducibility and performance}\label{sec:networked-perf}
+
+Both environments draw all randomness (relay successes in LineMsg; initial
+queues, transmission successes and packet arrivals in WirelessComm) from
+\code{self.np\_random}, seeded by \code{reset(seed=...)}. Seeded trajectories
+are bit-identical to those of the implementation before version 1.0, so
+earlier results can be reproduced exactly.
+
+Measured on the development machine without rendering, a LineMsg step with 10
+agents takes 0.013\,ms (0.019\,ms before 1.0), and a WirelessComm step takes
+0.05\,ms on the $6 \times 6$ grid (0.154\,ms before) and 0.046\,ms on a
+$12 \times 12$ grid (0.56\,ms before). Rendering a dashboard frame in
+\code{"rgb\_array"} mode takes about 15\,ms for either environment; the history
+needed by the dashboards is only recorded when a render mode is set.
+
+% ===========================================================================
+\section{Changes in 1.0}\label{sec:networked-changes}
+
+The seeded dynamics of both environments are unchanged. Interface changes are
+summarised below; see Appendix~\ref{app:migration} for migration advice.
+
+\paragraph{LineMsg.}
+\begin{itemize}
+  \item Action decoding and observations are vectorised.
+  \item Actions may be an integer in \code{Discrete(2**N)} or an array of $N$
+        bits; \code{action\_space\_type="multibinary"} supports more than 62
+        agents.
+  \item \code{step()} before \code{reset()} raises instead of resetting
+        implicitly.
+  \item The former text output is \code{render\_mode="ansi"}; \code{"human"}
+        and \code{"rgb\_array"} show the new dashboard.
+\end{itemize}
+
+\paragraph{WirelessComm.}
+\begin{itemize}
+  \item \code{step()} is fully vectorised (up to 37 times faster on large grids).
+  \item Fixed: the stored actions were never updated, so rendering showed no
+        actions. Per-agent outcomes and access-point loads are reported in
+        \code{info}.
+  \item Arguments and actions are validated; \code{"ansi"} text mode and a new
+        dashboard were added.
+  \item \code{env\_lib.wireless\_comm\_env.register()} is deprecated; the ids
+        are registered when \pkg{env\_lib} is imported.
+\end{itemize}
+
+\endgroup

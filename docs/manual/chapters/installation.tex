@@ -1,296 +1,244 @@
-\chapter{Installation and Setup}
+% ---------------------------------------------------------------------------
+% Chapter: Installation
+% ---------------------------------------------------------------------------
+\chapter{Installation}\label{chap:install}
 
-\section{System Requirements}
+My Tool Box is a standard Python project described by a single
+\code{pyproject.toml} file. It is installed from its source repository with
+\code{pip}; heavy dependencies are optional and grouped into \emph{extras}.
 
-\subsection{Operating System}
-The toolkit supports the following operating systems:
+\section{Requirements}\label{sec:install-requirements}
+
 \begin{itemize}
-    \item Linux (Ubuntu 18.04+, CentOS 7+)
-    \item macOS (10.14+)
-    \item Windows (10+)
+  \item Python 3.9 or newer. The package is tested with CPython 3.9 to 3.13;
+    continuous integration runs the test suite on 3.9, 3.10, 3.11 and 3.12.
+  \item Any operating system supported by the dependencies (Linux, macOS and
+    Windows). Development and continuous integration use Linux.
+  \item The core dependencies below, installed automatically by \code{pip}.
 \end{itemize}
 
-\subsection{Python Requirements}
-\begin{itemize}
-    \item Python 3.7 or higher
-    \item pip package manager
-    \item virtual environment (recommended)
-\end{itemize}
-
-\subsection{Hardware Requirements}
-\begin{itemize}
-    \item \textbf{Minimum}: 4GB RAM, 2GB free disk space
-    \item \textbf{Recommended}: 8GB+ RAM, 5GB+ free disk space
-    \item \textbf{GPU}: Optional but recommended for neural network training
-\end{itemize}
-
-\section{Environment Setup}
-
-\subsection{Creating a Virtual Environment}
-
-It's recommended to use a virtual environment to avoid dependency conflicts:
-
-\begin{lstlisting}[language=bash, caption=Creating virtual environment]
-# Create virtual environment
-python -m venv my_toolbox_env
-
-# Activate virtual environment
-# On Linux/macOS:
-source my_toolbox_env/bin/activate
-
-# On Windows:
-my_toolbox_env\Scripts\activate
-\end{lstlisting}
-
-\subsection{Installing Dependencies}
-
-\subsubsection{Core Dependencies}
-
-The toolkit requires several core Python packages:
-
-\begin{lstlisting}[language=bash, caption=Installing core dependencies]
-pip install torch>=1.9.0
-pip install tensorflow>=2.6.0
-pip install numpy>=1.20.0
-pip install matplotlib>=3.5.0
-pip install seaborn>=0.11.0
-pip install scikit-learn>=1.0.0
-pip install pandas>=1.3.0
-pip install gym>=0.21.0
-\end{lstlisting}
-
-\subsubsection{Optional Dependencies}
-
-For enhanced functionality, install these optional packages:
-
-\begin{lstlisting}[language=bash, caption=Installing optional dependencies]
-# For advanced plotting
-pip install plotly>=5.0.0
-pip install bokeh>=2.4.0
-
-# For Jupyter notebook support
-pip install jupyter>=1.0.0
-pip install ipywidgets>=7.6.0
-
-# For experiment tracking
-pip install wandb>=0.12.0
-pip install tensorboard>=2.8.0
-
-# For parallel processing
-pip install joblib>=1.1.0
-pip install multiprocessing-logging>=0.3.0
-\end{lstlisting}
-
-\section{Installing the Toolkit}
-
-\subsection{Installing Toolkit Project}
-
-Navigate to the toolkit project directory and install in development mode:
-
-\begin{lstlisting}[language=bash, caption=Installing toolkit project]
-cd toolkit_project
-pip install -e .
-\end{lstlisting}
-
-This installs the unified \texttt{toolkit} package containing:
-\begin{itemize}
-    \item \texttt{neural\_toolkit}: Neural network components
-    \item \texttt{plotkit}: Plotting utilities
-    \item \texttt{parakit}: Parameter management
-\end{itemize}
-
-\subsection{Installing Environment Library}
-
-Install the environment library components:
-
-\begin{lstlisting}[language=bash, caption=Installing environment library]
-cd envlib_project
-pip install -e .
-\end{lstlisting}
-
-\subsection{Installing Individual Environments}
-
-You can also install environments individually:
-
-\begin{lstlisting}[language=bash, caption=Installing individual environments]
-# Pistonball environment
-cd envlib_project/env_lib/pistonball_env
-pip install -e .
-
-# Kuramoto oscillator environment
-cd envlib_project/env_lib/kos_env
-pip install -e .
-
-# Wireless communication environment
-cd envlib_project/env_lib/wireless_comm_env
-pip install -e .
-
-# Agent-based lattice environment
-cd envlib_project/env_lib/ajlatt_env
-pip install -e .
-
-# Linear message passing environment
-cd envlib_project/env_lib/linemsg_env
-pip install -e .
-\end{lstlisting}
-
-\section{Verification}
-
-\subsection{Testing the Installation}
-
-Create a simple test script to verify the installation:
-
-\begin{lstlisting}[language=python, caption=Test installation script]
-#!/usr/bin/env python3
-
-def test_toolkit_imports():
-    """Test toolkit imports"""
-    try:
-        import toolkit
-        print("✓ Toolkit imported successfully")
-        
-        from toolkit import neural_toolkit
-        print("✓ Neural toolkit imported successfully")
-        
-        from toolkit import plotkit
-        print("✓ Plotkit imported successfully")
-        
-        return True
-    except ImportError as e:
-        print(f"✗ Import error: {e}")
-        return False
-
-def test_envlib_imports():
-    """Test environment library imports"""
-    try:
-        import env_lib
-        print("✓ Environment library imported successfully")
-        
-        # Test individual environments
-        from env_lib import pistonball_env
-        print("✓ Pistonball environment imported successfully")
-        
-        from env_lib import kos_env
-        print("✓ Kuramoto environment imported successfully")
-        
-        return True
-    except ImportError as e:
-        print(f"✗ Import error: {e}")
-        return False
-
-if __name__ == "__main__":
-    print("Testing My Tool Box installation...")
-    print()
-    
-    toolkit_ok = test_toolkit_imports()
-    print()
-    envlib_ok = test_envlib_imports()
-    
-    if toolkit_ok and envlib_ok:
-        print("\n🎉 All components installed successfully!")
-    else:
-        print("\n❌ Some components failed to install. Check the errors above.")
-\end{lstlisting}
-
-\subsection{Running the Test}
-
-\begin{lstlisting}[language=bash, caption=Running installation test]
-python test_installation.py
-\end{lstlisting}
-
-\section{Configuration}
-
-\subsection{Environment Variables}
-
-Set these environment variables for optimal performance:
-
-\begin{lstlisting}[language=bash, caption=Setting environment variables]
-# For PyTorch
-export CUDA_VISIBLE_DEVICES=0  # Use first GPU
-export OMP_NUM_THREADS=4       # Number of OpenMP threads
-
-# For TensorFlow
-export TF_CPP_MIN_LOG_LEVEL=2  # Reduce TensorFlow logging
-
-# For matplotlib (if using headless server)
-export MPLBACKEND=Agg
-\end{lstlisting}
-
-\subsection{Configuration Files}
-
-Create configuration files for custom settings:
-
-\begin{lstlisting}[language=python, caption=config.py example]
-# Default configuration
-DEFAULT_CONFIG = {
-    'neural_toolkit': {
-        'device': 'cuda' if torch.cuda.is_available() else 'cpu',
-        'default_dtype': torch.float32,
-        'seed': 42
-    },
-    'plotkit': {
-        'style': 'seaborn-v0_8',
-        'figure_size': (10, 6),
-        'dpi': 100
-    },
-    'environments': {
-        'render_mode': 'rgb_array',
-        'max_episode_steps': 1000
-    }
-}
-\end{lstlisting}
-
-\section{Troubleshooting Installation}
-
-\subsection{Common Issues}
-
-\subsubsection{PyTorch Installation Issues}
-
-If you encounter PyTorch installation problems:
-
-\begin{lstlisting}[language=bash, caption=Fixing PyTorch installation]
-# Remove existing PyTorch
-pip uninstall torch torchvision torchaudio
-
-# Install PyTorch with CUDA support (if available)
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-
-# Or install CPU-only version
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-\end{lstlisting}
-
-\subsubsection{TensorFlow Installation Issues}
-
-For TensorFlow problems:
-
-\begin{lstlisting}[language=bash, caption=Fixing TensorFlow installation]
-# Install TensorFlow with specific version
-pip install tensorflow==2.10.0
-
-# For GPU support
-pip install tensorflow-gpu==2.10.0
-\end{lstlisting}
-
-\subsubsection{Permission Issues}
-
-If you encounter permission errors:
-
-\begin{lstlisting}[language=bash, caption=Fixing permission issues]
-# Use user installation
-pip install --user -e toolkit_project/
-
-# Or use sudo (not recommended)
-sudo pip install -e toolkit_project/
-\end{lstlisting}
-
-\subsection{Getting Help}
-
-If installation issues persist:
-
-\begin{enumerate}
-    \item Check the system requirements
-    \item Verify Python version compatibility
-    \item Ensure all dependencies are installed
-    \item Check for conflicting packages
-    \item Review the troubleshooting chapter
-\end{enumerate} 
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Core dependencies (always installed).}
+  \label{tab:install-core}
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    Package & Minimum version & Used for \\
+    \midrule
+    \pkg{numpy}      & 1.23 & all numerical code \\
+    \pkg{scipy}      & 1.9  & AJLATT estimation, plotkit smoothing \\
+    \pkg{matplotlib} & 3.6  & environment renderers, plotkit \\
+    \pkg{gymnasium}  & 0.29 & environment API and registration \\
+    \pkg{pyyaml}     & 6.0  & AJLATT map files and map specifications \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Installing from the repository}\label{sec:install-pip}
+
+The recommended procedure creates a virtual environment, clones the
+repository and installs the package with all optional features:
+
+\begin{shellcode}
+git clone https://github.com/EricDMW/My_Tool_Box.git
+cd My_Tool_Box
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+python -m pip install --upgrade pip
+pip install ".[all]"
+\end{shellcode}
+
+\code{pip} can also install directly from the Git URL without a local clone,
+which is convenient for a project that only uses the package:
+
+\begin{shellcode}
+pip install "my-tool-box[all] @ git+https://github.com/EricDMW/My_Tool_Box.git"
+\end{shellcode}
+
+With conda, create the environment first and then use \code{pip} inside it:
+
+\begin{shellcode}
+conda create -n mytoolbox python=3.11
+conda activate mytoolbox
+conda install tk                   # only for Tk windows (see below)
+pip install ".[all]"
+\end{shellcode}
+
+\subsection{Optional extras}\label{sec:install-extras}
+
+The extras of Table~\ref{tab:install-extras} are selected in square brackets
+and can be combined, for example \code{pip install ".[pistonball,video]"}. The
+quotes prevent shells such as \code{zsh} from interpreting the brackets.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Optional extras defined in \code{pyproject.toml}.}
+  \label{tab:install-extras}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}p{4.3cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Extra & Installs & Enables \\
+    \midrule
+    \code{pistonball} & \pkg{pygame} $\geq$ 2.1, \pkg{pymunk} $\geq$ 6.4 &
+      \code{PistonballEnv} (\pkg{pymunk} for the physics, \pkg{pygame} for
+      rendering and keyboard control) \\
+    \code{torch} & \pkg{torch} $\geq$ 2.0 &
+      \code{KuramotoOscillatorEnvTorch}, \pkg{toolkit.neural\_toolkit} \\
+    \code{video} & \pkg{imageio} $\geq$ 2.20, \pkg{imageio-ffmpeg} $\geq$ 0.4 &
+      MP4, WebM, AVI, MOV and MKV export in \code{save\_animation} and
+      \code{record\_episode} (GIF export needs no extra) \\
+    \code{all} & the three extras above & every feature of the package \\
+    \code{dev} & \pkg{pytest} $\geq$ 7, \pkg{pytest-cov} $\geq$ 4, \pkg{ruff} $\geq$ 0.5 &
+      running the test suite and the linter; combine with \code{all} \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\subsection{PyTorch}\label{sec:install-torch}
+
+The \code{torch} extra installs the default PyTorch wheel for the platform.
+To choose a specific build, install PyTorch first, following the selector at
+\url{https://pytorch.org/get-started/}, and then install the package; \code{pip}
+keeps the PyTorch that is already present. For example, a CPU-only build
+(much smaller, and the one used in continuous integration) is obtained with
+
+\begin{shellcode}
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install ".[all]"
+\end{shellcode}
+
+GPU use is covered in Section~\ref{sec:trouble-torch}.
+
+\subsection{Tk}\label{sec:install-tk}
+
+Tk is not installable with \code{pip}. It is needed only for the
+\pkg{parakit} editor window (Section~\ref{sec:parakit-gui}) and for
+\code{render\_mode="human"} with matplotlib's TkAgg backend; everything else,
+including off-screen rendering, works without it. Install it with the system
+package manager (\code{sudo apt-get install python3-tk} on Debian and Ubuntu,
+\code{sudo dnf install python3-tkinter} on Fedora, \code{brew install
+python-tk} with Homebrew on macOS) or with \code{conda install tk}. The
+official Python installers for Windows and macOS already include Tk.
+
+\section{Development installation}\label{sec:install-dev}
+
+Contributors install the package in \emph{editable} mode, so that changes to
+the sources under \code{src/} take effect without reinstalling, together with
+the development tools:
+
+\begin{shellcode}
+git clone https://github.com/EricDMW/My_Tool_Box.git
+cd My_Tool_Box
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[all,dev]"
+\end{shellcode}
+
+The console scripts and the version number are generated at installation
+time; after changing \code{pyproject.toml} (for example adding an entry
+point), run the \code{pip install -e} command again. The testing and linting
+workflow is described in Section~\ref{sec:examples-contributing}.
+
+\section{Verifying the installation}\label{sec:install-verify}
+
+The following commands check, from quickest to most thorough, that the
+package is installed correctly:
+
+\begin{shellcode}
+# 1. Versions of both import packages
+python -c "import env_lib, toolkit; print(env_lib.__version__, toolkit.__version__)"
+
+# 2. Registered environment ids
+python -c "import env_lib; print(env_lib.list_envs())"
+
+# 3. Create every environment and take a few random steps
+python examples/quickstart.py --steps 5
+
+# 4. Full test suite (requires the dev extra)
+pytest -q
+\end{shellcode}
+
+The first command prints \code{1.0.0 1.0.0}. The quick-start script prints one
+line per environment and skips, with a message, environments whose optional
+dependencies are missing. The test suite skips tests of missing optional
+dependencies in the same way.
+
+The installation also provides three console scripts:
+
+\begin{center}
+  \small
+  \begin{tabular}{@{}ll@{}}
+    \toprule
+    Command & Purpose \\
+    \midrule
+    \code{ajlatt-build-map} & build an AJLATT map from a YAML specification (Chapter~\ref{chap:ajlatt}) \\
+    \code{ajlatt-plot-map}  & list and plot the bundled AJLATT maps (Chapter~\ref{chap:ajlatt}) \\
+    \code{plotkit-gallery}  & gallery of plotkit figures (Section~\ref{sec:plotkit-cli}) \\
+    \bottomrule
+  \end{tabular}
+\end{center}
+
+\section{Optional dependency matrix}\label{sec:install-matrix}
+
+Table~\ref{tab:install-matrix} summarises which features need which optional
+packages. Because the package imports optional dependencies lazily, a missing
+dependency only affects the feature that needs it; the error message names the
+extra to install.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Features and their optional requirements.}
+  \label{tab:install-matrix}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{3.8cm}>{\raggedright\arraybackslash}p{2.5cm}@{}}
+    \toprule
+    Feature & Requires & Provided by \\
+    \midrule
+    NumPy environments (Kuramoto, LineMsg, WirelessComm, Consensus, AJLATT),
+      \code{rgb\_array} rendering, GIF export & core only & core \\
+    \code{PistonballEnv} & \pkg{pymunk} & \code{pistonball} \\
+    Pistonball rendering and \code{ManualPolicy} & \pkg{pygame} & \code{pistonball} \\
+    \code{KuramotoOscillatorEnvTorch} & \pkg{torch} & \code{torch} \\
+    \pkg{toolkit.neural\_toolkit} & \pkg{torch} & \code{torch} \\
+    MP4 and other video formats & \pkg{imageio}, \pkg{imageio-ffmpeg} & \code{video} \\
+    \pkg{toolkit.plotkit} & core only & core \\
+    Plotting pandas, PyTorch, TensorFlow or JAX data & the respective library & not required \\
+    \pkg{toolkit.parakit} headless API & standard library & core \\
+    \pkg{parakit} editor window & Tk and a display & system package \\
+    \code{render\_mode="human"} (matplotlib environments) &
+      an interactive backend (TkAgg, QtAgg, \ldots) and a display & system package or \pkg{PyQt}/\pkg{PySide} \\
+    Test suite and linting & \pkg{pytest}, \pkg{pytest-cov}, \pkg{ruff} & \code{dev} \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\section{Upgrading and uninstalling}\label{sec:install-upgrade}
+
+To upgrade a clone, pull the latest sources and reinstall:
+\code{git pull} followed by \code{pip install ".[all]"} (or
+\code{pip install -e ".[all,dev]"} for an editable installation).
+\code{pip uninstall my-tool-box} removes the package. Users of versions before
+1.0, which were installed from two separate project folders, should first
+uninstall the old distributions and then follow Appendix~\ref{app:migration}.
+
+\section{Building this manual}\label{sec:install-manual}
+
+The manual is written in LaTeX and lives in \code{docs/manual/}. Building it
+requires a TeX distribution that provides \code{pdflatex} and \code{latexmk},
+such as TeX Live (\code{sudo apt-get install texlive-latex-extra
+texlive-fonts-recommended latexmk} on Debian and Ubuntu) or MacTeX. The
+document uses only standard packages (\pkg{listings}, \pkg{booktabs},
+\pkg{tabularx}, \pkg{hyperref}, \pkg{fancyhdr} and similar).
+
+\begin{shellcode}
+cd docs/manual
+./build.sh                                   # writes output/main.pdf
+# equivalently:
+latexmk -pdf -interaction=nonstopmode -halt-on-error -outdir=output main.tex
+latexmk -C -outdir=output                    # remove build products
+\end{shellcode}
+
+\code{latexmk} runs \code{pdflatex} as often as needed to resolve cross
+references. All build products are written to \code{docs/manual/output/},
+which is ignored by Git. The file \code{docs/manual/README.md} describes the
+source layout of the manual.

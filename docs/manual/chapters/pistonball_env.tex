@@ -1,569 +1,326 @@
-\chapter{Pistonball Environment}
+% ---------------------------------------------------------------------------
+% Pistonball environment
+% ---------------------------------------------------------------------------
+\begingroup
+% Extra interword stretch for paragraphs with long, unbreakable identifiers
+% (local to this chapter).
+\setlength{\emergencystretch}{2em}
+\chapter{Pistonball}\label{chap:pistonball}
 
-\section{Overview}
+Pistonball is a cooperative physics game. A row of pistons forms the floor of a
+walled arena and a ball is dropped near the right wall; every piston is an
+agent that moves up or down, and together the pistons must roll the ball to
+the left wall. Each piston observes the ball only when it is close to it, and
+the reward of a piston depends on the ball's progress while it observes the
+ball. The environment is used to study cooperation under local observability,
+credit assignment with local rewards, scalability in the number of agents and
+the effect of the observation radius $\kappa$ on learning. The physics is
+simulated with \pkg{pymunk}; \pkg{pygame} is only needed for rendering and
+keyboard control (extra \code{pistonball}).
 
-The Pistonball Environment is a multi-agent physics-based environment where agents control pistons to collaboratively move a ball. This environment is designed to study cooperative behavior, coordination, and emergent strategies in multi-agent systems.
+The class is \code{env\_lib.pistonball\_env.PistonballEnv}; the package also
+exports \code{ManualPolicy}, \code{PistonballRenderer} and
+\code{PistonballLayout}.
 
-\section{Environment Description}
+% ---------------------------------------------------------------------------
+\section{Arena and physics}\label{sec:pistonball-physics}
 
-\subsection{Physics Simulation}
+All coordinates are pygame screen pixels with $y$ growing downwards. With $n$
+pistons the screen is $W = 160 + 40n$ pixels wide and 560 pixels high; the
+walls are 80 pixels from each screen edge, so the arena spans
+$x \in [80, W - 80]$ and $y \in [80, 480]$. The left wall is the goal.
 
-The environment simulates a 2D physics world with:
 \begin{itemize}
-    \item \textbf{Multiple Pistons}: Agents control individual pistons that can move up and down
-    \item \textbf{Ball Physics}: A ball that bounces off pistons and walls
-    \item \textbf{Gravity}: Realistic gravitational effects
-    \item \textbf{Collision Detection}: Accurate collision handling between ball and pistons
+  \item \textbf{Pistons.} Piston $i$ is 40 pixels wide with its left edge at
+        $x = 80 + 40i$. Its height $y_i$ (the $y$ coordinate of the piston
+        head) moves by 4 pixels per unit action and is limited to
+        $y_i \in [387, 451]$, a travel of 64 pixels around the middle position
+        419. At reset every piston starts at $451 - d_i$ with $d_i$ drawn
+        uniformly from $\{0, 4, \dots, 28\}$.
+  \item \textbf{Ball.} A disc of radius 40 pixels with mass
+        \code{ball\_mass}, friction \code{ball\_friction} and elasticity
+        \code{ball\_elasticity}. It starts at
+        $x = W - 150 + \delta_x$, $y = 370 + \delta_y$, where
+        $\delta_x \in \{-30, \dots, 30\}$ and $\delta_y \in \{-15, \dots, 15\}$
+        are uniform integers when \code{random\_drop=True} and zero otherwise,
+        with an angular velocity drawn uniformly from $[-6\pi, 6\pi]$\,rad/s
+        when \code{random\_rotate=True}.
+  \item \textbf{Simulation.} Gravity is 750\,px/s$^2$ downwards, walls and
+        pistons have friction 0.64, and one environment step is one physics
+        step of $\Delta t = 1/20$\,s. The pistons are kinematic bodies that are
+        moved to their new height before the physics step; the ball speed is
+        capped at 1000\,px/s and its position is kept inside the screen.
 \end{itemize}
 
-\subsection{Objective}
+% ---------------------------------------------------------------------------
+\section{Spaces}\label{sec:pistonball-spaces}
 
-The goal is to move the ball from one side of the environment to the other by coordinating piston movements. Agents must learn to:
+\paragraph{Action.} One value per piston, stacked in an array of shape
+\code{(n,)}:
 \begin{itemize}
-    \item \textbf{Coordinate Timing}: Move pistons at the right moments
-    \item \textbf{Maintain Ball Momentum}: Keep the ball moving in the desired direction
-    \item \textbf{Avoid Obstacles}: Prevent the ball from getting stuck
-    \item \textbf{Work Together}: Coordinate with other agents for optimal performance
+  \item continuous (\code{continuous=True}, default):
+        \code{Box(-1, 1, (n,), float32)}; the value is clipped to $[-1, 1]$ and
+        moves the piston by $4 a_i$ pixels, where $+1$ moves it up;
+  \item discrete (\code{continuous=False}): \code{MultiDiscrete([3] * n)} with
+        0 = down, 1 = stay and 2 = up (4 pixels).
 \end{itemize}
+Actions of the wrong shape, NaN or infinite values, and discrete values outside
+$\{0, 1, 2\}$ raise \code{ValueError}.
 
-\section{Installation}
+\paragraph{Observation.} \code{float32} array of shape \code{(n, 7)} in an
+unbounded \code{Box}. Row $i$ is the observation of piston $i$
+(Table~\ref{tab:pistonball-obs}). The piston under the ball has index
+\begin{equation}
+  p(x) = \operatorname{clip}\bigl(\lfloor (x - 85)/40 \rfloor,\; 0,\; n - 1\bigr),
+\end{equation}
+and piston $i$ observes the ball when $|i - p(x)| \le \kappa$, where $x$ is the
+ball centre and $\kappa$ = \code{kappa}. Columns 2--6 are zero for pistons that
+do not observe the ball. \code{env.observable\_mask(ball\_x=None)} returns the
+boolean mask of observing pistons for the current ball (or for a given $x$).
 
-\subsection{Basic Installation}
-
-\begin{lstlisting}[language=bash, caption=Basic Installation]
-cd envlib_project/env_lib/pistonball_env
-pip install -e .
-\end{lstlisting}
-
-\subsection{Dependencies}
-
-The environment requires:
-\begin{itemize}
-    \item \textbf{PyGame}: For rendering and physics simulation
-    \item \textbf{NumPy}: For numerical computations
-    \item \textbf{Gym}: For the environment interface
-\end{itemize}
-
-\section{Basic Usage}
-
-\subsection{Creating the Environment}
-
-\begin{lstlisting}[language=python, caption=Basic Environment Creation]
-from env_lib import pistonball_env
-
-# Create environment with default settings
-env = pistonball_env.PistonballEnv()
-
-# Get environment information
-print(f"Number of agents: {env.num_agents}")
-print(f"Observation space: {env.observation_space}")
-print(f"Action space: {env.action_space}")
-\end{lstlisting}
-
-\subsection{Running a Simple Episode}
-
-\begin{lstlisting}[language=python, caption=Simple Episode]
-import numpy as np
-
-# Reset environment
-observations = env.reset()
-
-# Run episode
-done = False
-total_reward = 0
-
-while not done:
-    # Random actions for all agents
-    actions = {agent_id: env.action_space.sample() 
-              for agent_id in env.agent_ids}
-    
-    # Take step
-    observations, rewards, dones, infos = env.step(actions)
-    
-    # Accumulate reward
-    total_reward += sum(rewards.values())
-    
-    # Check if episode is done
-    done = all(dones.values())
-
-print(f"Episode completed with total reward: {total_reward}")
-\end{lstlisting}
-
-\section{Configuration Options}
-
-\subsection{Environment Parameters}
-
-\begin{lstlisting}[language=python, caption=Environment Configuration]
-# Configure environment
-config = {
-    'num_agents': 4,              # Number of pistons/agents
-    'max_steps': 1000,            # Maximum steps per episode
-    'ball_speed': 5.0,            # Initial ball speed
-    'gravity': 0.5,               # Gravity strength
-    'piston_speed': 2.0,          # Piston movement speed
-    'reward_scale': 1.0,          # Reward scaling factor
-    'observation_type': 'vector', # Observation type
-    'render_mode': 'rgb_array'    # Rendering mode
-}
-
-env = pistonball_env.PistonballEnv(**config)
-\end{lstlisting}
-
-\subsection{Parameter Descriptions}
-
-\begin{table}[H]
-\centering
-\begin{tabular}{|l|l|l|}
-\hline
-\textbf{Parameter} & \textbf{Type} & \textbf{Description} \\
-\hline
-num\_agents & int & Number of pistons/agents (default: 4) \\
-max\_steps & int & Maximum steps per episode (default: 1000) \\
-ball\_speed & float & Initial ball velocity (default: 5.0) \\
-gravity & float & Gravity strength (default: 0.5) \\
-piston\_speed & float & Piston movement speed (default: 2.0) \\
-reward\_scale & float & Reward scaling factor (default: 1.0) \\
-observation\_type & str & Observation type (default: 'vector') \\
-render\_mode & str & Rendering mode (default: 'rgb_array') \\
-\hline
-\end{tabular}
-\caption{Environment parameters}
+\begin{table}[htbp]
+  \centering\small
+  \caption{Pistonball observation (row $i$). $(x, y)$ is the ball centre,
+    $(v_x, v_y)$ its velocity in px/s and $\dot\phi$ its angular velocity.}
+  \label{tab:pistonball-obs}
+  \begin{tabularx}{\textwidth}{@{}clX@{}}
+    \toprule
+    Column & Value & Meaning \\
+    \midrule
+    0 & $(y_i - 419)/32$ & piston height in $[-1, 1]$; $+1$ is the lowest position \\
+    1 & $(5 + 40i)/(40n)$ & piston position along the arena in $[0, 1]$ \\
+    2 & $(x - 80)/(40n)$ & ball $x$ position (observers only) \\
+    3 & $(y - 80)/400$ & ball $y$ position (observers only) \\
+    4 & $v_x / 15$ & ball $x$ velocity (observers only) \\
+    5 & $v_y / 8$ & ball $y$ velocity (observers only) \\
+    6 & $\dot\phi / 8$ & ball angular velocity (observers only) \\
+    \bottomrule
+  \end{tabularx}
 \end{table}
 
-\section{Observation Spaces}
+% ---------------------------------------------------------------------------
+\section{Reward and episode end}\label{sec:pistonball-reward}
 
-\subsection{Vector Observations}
+Let $b_t = \lfloor x_t - 40 \rfloor$ be the $x$ coordinate of the ball's left
+edge after step $t$ and $\Delta b = b_{t-1} - b_t$ its leftward displacement.
+The ball term rewards leftward progress at half rate and penalises rightward
+motion in full:
+\begin{equation}
+  g_t =
+  \begin{cases}
+    0.5\,\Delta b, & \Delta b > 0,\\
+    \Delta b, & \text{otherwise.}
+  \end{cases}
+\end{equation}
+The local reward of piston $i$ is
+\begin{equation}
+  r_i = \tau
+      + g_t\, \mathbb{1}\bigl[i \in O(b_{t-1}) \cup O(b_t)\bigr]
+      + \rho_T\, \mathbb{1}\bigl[\text{goal},\; i \in O(x_t)\bigr]
+      + \rho_L\, \mathbb{1}\bigl[\text{goal},\; i = 0\bigr]
+      + \mu\, \frac{|\Delta y_i|}{4}\, \mathbb{1}\bigl[|\Delta y_i| > \epsilon_\mu\bigr],
+  \label{eq:pistonball-reward}
+\end{equation}
+where $O(z) = \{ i : |i - p(z)| \le \kappa \}$ is the set of pistons within
+$\kappa$ hops of the piston under position $z$ (the ball term uses the left-edge
+positions $b$, the goal bonus the ball centre $x_t$), $\tau$ =
+\code{time\_penalty}, $\rho_T$ = \code{termination\_reward}, $\rho_L$ =
+\code{leftmost\_piston\_reward}, $\mu$ = \code{movement\_penalty},
+$\epsilon_\mu$ = \code{movement\_penalty\_threshold} and $\Delta y_i$ the
+movement of piston $i$ in pixels. The team reward returned by \code{step()} is
+$R = \sum_i r_i$.
 
-Vector observations provide numerical state information:
+\paragraph{Goal and episode end.} With \code{terminated\_condition=True}
+(default) the goal is reached when the ball's left edge will reach the left wall
+within one step, $x_t - 40 + v_x \Delta t \le 80.5$; the episode then
+terminates. \code{truncated} becomes \code{True} after \code{max\_cycles}
+steps. For example, with \code{leftmost\_piston\_reward=1.0} and the default
+termination reward, piston 0 receives $0.5 + 1.0 = 1.5$ on reaching the goal,
+the other pistons that observe the ball receive 0.5, and the remaining pistons
+receive no bonus.
 
-\begin{lstlisting}[language=python, caption=Vector Observations]
-# Vector observation space
-observation_space = spaces.Box(
-    low=-np.inf, high=np.inf, 
-    shape=(observation_dim,), dtype=np.float32
-)
+% ---------------------------------------------------------------------------
+\section{Parameters}\label{sec:pistonball-params}
 
-# Observation components
-observation = [
-    ball_x, ball_y,           # Ball position
-    ball_vx, ball_vy,         # Ball velocity
-    piston1_y, piston1_vy,    # Piston 1 position and velocity
-    piston2_y, piston2_vy,    # Piston 2 position and velocity
-    # ... for all pistons
-]
-\end{lstlisting}
+\begingroup\small
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.33\textwidth}>{\raggedright\arraybackslash}p{0.1\textwidth}>{\raggedright\arraybackslash}p{0.51\textwidth}@{}}
+  \caption{Constructor parameters of \code{PistonballEnv}.}\label{tab:pistonball-params}\\
+  \toprule
+  Parameter & Default & Description \\
+  \midrule
+  \endfirsthead
+  \toprule
+  Parameter & Default & Description \\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  \code{n\_pistons} & \code{20} & Number of pistons (agents), $\ge 1$. \\
+  \code{time\_penalty} & \code{-0.1} & Reward $\tau$ added to every piston at every step. \\
+  \code{continuous} & \code{True} & Continuous actions in $[-1, 1]$; \code{False} for \code{MultiDiscrete([3] * n)}. \\
+  \code{random\_drop} & \code{True} & Randomise the initial ball position ($\pm 30$\,px horizontally, $\pm 15$\,px vertically). \\
+  \code{random\_rotate} & \code{True} & Random initial angular velocity in $[-6\pi, 6\pi]$\,rad/s. \\
+  \code{ball\_mass} & \code{0.75} & Ball mass ($> 0$). \\
+  \code{ball\_friction} & \code{0.3} & Ball friction ($\ge 0$). \\
+  \code{ball\_elasticity} & \code{1.5} & Ball elasticity ($\ge 0$). \\
+  \code{max\_cycles} & \code{125} & Episode length; reaching it sets \code{truncated}. \\
+  \code{render\_mode} & \code{None} & \code{None}, \code{"human"} (pygame window) or \code{"rgb\_array"}. \\
+  \code{movement\_penalty} & \code{0.0} & Reward $\mu$ per 4 pixels of piston movement, typically negative; 0 disables it. \\
+  \code{movement\_penalty\_threshold} & \code{0.01} & Movements of at most this many pixels are not penalised. \\
+  \code{kappa} & \code{1} & Observation radius $\kappa$ in pistons ($\ge 0$). \\
+  \code{terminated\_condition} & \code{True} & End the episode when the ball reaches the left wall. \\
+  \code{leftmost\_piston\_reward} & \code{0.0} & Bonus $\rho_L$ for piston 0 when the goal is reached. \\
+  \code{termination\_reward} & \code{0.5} & Bonus $\rho_T$ for every piston that observes the ball when the goal is reached. \\
+\end{longtable}
+\endgroup
 
-\subsection{Image Observations}
+\paragraph{Physics presets.} The ball parameters change the character of the
+task considerably. A heavy, damped ball (\code{ball\_mass=2.0},
+\code{ball\_friction=0.8}, \code{ball\_elasticity=0.5}) rolls slowly and rewards
+coordinated ramps; a light, bouncy ball (\code{ball\_mass=0.5},
+\code{ball\_friction=0.1}, \code{ball\_elasticity=2.0}) is harder to control.
 
-Image observations provide visual representations:
+\paragraph{Info dictionary.} \code{step()} returns \code{"local\_rewards"} and
+\code{"agent\_rewards"} (both the \code{float64} local rewards $r_i$, shape
+\code{(n,)}) and \code{"total\_reward"} (their sum, equal to the returned
+reward). The info dictionary of \code{reset()} is empty. \code{step()} before
+\code{reset()} raises \code{RuntimeError}.
 
-\begin{lstlisting}[language=python, caption=Image Observations]
-# Image observation space
-observation_space = spaces.Box(
-    low=0, high=255, 
-    shape=(height, width, 3), dtype=np.uint8
-)
+% ---------------------------------------------------------------------------
+\section{Keyboard control}\label{sec:pistonball-manual}
 
-# RGB image of the environment
-observation = env.render(mode='rgb_array')
-\end{lstlisting}
+\code{ManualPolicy(env, agent\_id=0, show\_obs=False)} lets a person control one
+piston at a time in a window. Create the environment with
+\code{render\_mode="human"} so that the pygame window exists and receives the
+key presses, and call the policy once per step: \code{W} or \code{Up} raises
+the selected piston, \code{S} or \code{Down} lowers it (hold the key to keep
+moving), \code{A}/\code{Left} and \code{D}/\code{Right} select the previous or
+next piston, \code{Backspace} resets the environment, and \code{Esc} or closing
+the window sets \code{policy.running} to \code{False}. All other pistons stay
+in place.
 
-\subsection{Multi-Modal Observations}
+\begin{pycode}
+from env_lib.pistonball_env import ManualPolicy, PistonballEnv
 
-Combination of vector and image observations:
+env = PistonballEnv(n_pistons=8, render_mode="human")
+policy = ManualPolicy(env)
+obs, info = env.reset(seed=0)
+while policy.running:
+    obs, reward, terminated, truncated, info = env.step(policy(obs))
+    if terminated or truncated:
+        obs, info = env.reset()
+env.close()
+\end{pycode}
 
-\begin{lstlisting}[language=python, caption=Multi-Modal Observations]
-# Multi-modal observation space
-observation_space = spaces.Dict({
-    'vector': spaces.Box(low=-np.inf, high=np.inf, shape=(vector_dim,)),
-    'image': spaces.Box(low=0, high=255, shape=(height, width, 3))
-})
-\end{lstlisting}
+% ---------------------------------------------------------------------------
+\section{Rendering}\label{sec:pistonball-render}
 
-\section{Action Spaces}
+The renderer draws with pygame and needs no image assets
+(Figure~\ref{fig:pistonball}). It shows a gradient background with shaded walls
+and a highlighted goal strip on the left wall, the pistons as rounded
+rectangles (pistons that observe the ball in the accent colour with a glow),
+the ball with shading, a rotation marker and a fading motion trail, a
+heads-up display with the step counter, episode return, ball $x$ velocity and
+number of observing pistons, and a progress bar with the ball's distance to the
+goal. Frames have the screen size, $(160 + 40n) \times 560$ pixels. The
+\code{"rgb\_array"} mode never initialises the display and works on headless
+machines; \code{"human"} mode opens a window capped at 20 frames per second.
+Colours follow the active theme (Section~\ref{sec:envlib-rendering}).
 
-\subsection{Discrete Actions}
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.62\textwidth]{pistonball.png}
+  \caption{Pistonball with 12 pistons (light theme) at the moment the ball
+    reaches the goal. The three pistons that observe the ball ($\kappa = 1$)
+    are highlighted; the ramp formed by the pistons rolls the ball to the
+    left wall.}
+  \label{fig:pistonball}
+\end{figure}
 
-Simple discrete action space:
+% ---------------------------------------------------------------------------
+\section{Registered id}\label{sec:pistonball-ids}
 
-\begin{lstlisting}[language=python, caption=Discrete Actions]
-# Discrete action space
-action_space = spaces.Discrete(3)
+\envid{Pistonball-v0} creates \code{PistonballEnv} with its defaults (20
+pistons, continuous actions, $\kappa = 1$). Creating it requires \pkg{pymunk};
+rendering also requires \pkg{pygame}.
 
-# Actions: 0 = no movement, 1 = move up, 2 = move down
-actions = {
-    'agent_0': 1,  # Move up
-    'agent_1': 2,  # Move down
-    'agent_2': 0,  # No movement
-    'agent_3': 1   # Move up
-}
-\end{lstlisting}
+% ---------------------------------------------------------------------------
+\section{Usage}\label{sec:pistonball-usage}
 
-\subsection{Continuous Actions}
+The following heuristic reads the ball position from the observing pistons and
+shapes the pistons into a ramp that falls towards the left: pistons right of
+the ball move up, pistons left of it move down.
 
-Continuous action space for smoother control:
+\begin{pycode}
+import numpy as np
+from env_lib.pistonball_env import PistonballEnv
 
-\begin{lstlisting}[language=python, caption=Continuous Actions]
-# Continuous action space
-action_space = spaces.Box(
-    low=-1.0, high=1.0, 
-    shape=(1,), dtype=np.float32
-)
+env = PistonballEnv(n_pistons=12, kappa=1)
+obs, info = env.reset(seed=0)                     # obs: (12, 7) float32
+episode_return = 0.0
+while True:
+    action = np.zeros(env.n_pistons, dtype=np.float32)
+    observers = np.any(obs[:, 2:] != 0.0, axis=1)
+    if observers.any():
+        ball_x = obs[observers, 2].mean()          # (x - 80) / (40 n)
+        offset = (obs[:, 1] - ball_x) * env.n_pistons  # distance to the ball in pistons
+        action = np.clip(2.0 * offset, -1.0, 1.0).astype(np.float32)
+    obs, reward, terminated, truncated, info = env.step(action)
+    episode_return += reward
+    if terminated or truncated:
+        break
+print(episode_return, terminated, info["agent_rewards"].shape)   # goal after 99 steps
+env.close()
+\end{pycode}
 
-# Actions: -1 = move down, 0 = no movement, 1 = move up
-actions = {
-    'agent_0': [0.5],   # Move up
-    'agent_1': [-0.3],  # Move down slightly
-    'agent_2': [0.0],   # No movement
-    'agent_3': [1.0]    # Move up fully
-}
-\end{lstlisting}
+The example script evaluates a similar heuristic against random actions,
+records episodes and offers keyboard control:
 
-\section{Reward System}
+\begin{shellcode}
+python examples/pistonball_demo.py --save renders/pistonball.gif
+python examples/pistonball_demo.py --discrete --kappa 2 --movement-penalty -0.05
+python examples/pistonball_demo.py --manual --n-pistons 8
+\end{shellcode}
 
-\subsection{Reward Components}
+Over 20 episodes with the default configuration the heuristic of the script
+reaches a mean return of $857.1 \pm 254.3$ and brings the ball to the goal in
+95\,\% of the episodes, whereas random actions obtain $-290.5$ and never reach
+the goal.
 
-The reward system includes multiple components:
+% ---------------------------------------------------------------------------
+\section{Reproducibility and performance}\label{sec:pistonball-perf}
+
+\code{reset(seed=...)} seeds \code{self.np\_random}, from which the initial
+piston heights, the ball position and its angular velocity are drawn; the
+physics itself is deterministic. The random draws are made in the same order as
+before version 1.0, so seeded episodes start from the same states as in earlier
+versions.
+
+Measured on the development machine with 20 pistons, a step without rendering
+takes 0.06\,ms (1.11\,ms before 1.0, when the screen was drawn at every step).
+Rendering an \code{"rgb\_array"} frame takes about 3\,ms.
+
+% ---------------------------------------------------------------------------
+\section{Changes in 1.0}\label{sec:pistonball-changes}
+
+See Appendix~\ref{app:migration} for migration advice.
 
 \begin{itemize}
-    \item \textbf{Ball Progress}: Reward for ball moving toward the goal
-    \item \textbf{Collision Reward}: Reward for successful ball-piston collisions
-    \item \textbf{Coordination Bonus}: Bonus for coordinated movements
-    \item \textbf{Time Penalty}: Small penalty per step to encourage efficiency
+  \item Nothing is drawn unless rendering is requested; pygame is initialised
+        lazily. Together with vectorised observations and rewards this makes
+        steps 16 to 30 times faster.
+  \item In discrete mode the declared action space is
+        \code{MultiDiscrete([3] * n)}, one entry per piston. The per-piston
+        action arrays accepted by \code{step()} are unchanged; the former
+        single-integer \code{Discrete(3**n)} declaration was removed.
+  \item Actions are validated (shape, range, NaN), and \code{step()} before
+        \code{reset()} raises.
+  \item New vector renderer (shaded pistons, highlighted $\kappa$-hop
+        observers, ball trail, heads-up display, progress bar); the PNG sprites
+        were removed. The former drawing methods (\code{draw()},
+        \code{draw\_background()}, \code{draw\_pistons()},
+        \code{enable\_render()}) are deprecated no-ops.
+  \item Compatible with pymunk 6 and 7.
 \end{itemize}
 
-\subsection{Reward Calculation}
-
-\begin{lstlisting}[language=python, caption=Reward Calculation]
-def calculate_reward(self, ball_progress, collisions, coordination):
-    """Calculate reward for the current state"""
-    
-    # Base reward from ball progress
-    progress_reward = ball_progress * self.reward_scale
-    
-    # Collision reward
-    collision_reward = collisions * 0.1
-    
-    # Coordination bonus
-    coordination_bonus = coordination * 0.05
-    
-    # Time penalty
-    time_penalty = -0.001
-    
-    # Total reward
-    total_reward = progress_reward + collision_reward + coordination_bonus + time_penalty
-    
-    return total_reward
-\end{lstlisting}
-
-\section{Advanced Features}
-
-\subsection{Multi-Agent Coordination}
-
-The environment supports sophisticated multi-agent interactions:
-
-\begin{lstlisting}[language=python, caption=Multi-Agent Coordination]
-# Get agent information
-agent_ids = env.agent_ids
-num_agents = env.num_agents
-
-# Agent-specific observations
-agent_observations = {}
-for agent_id in agent_ids:
-    agent_observations[agent_id] = observations[agent_id]
-
-# Coordinated actions
-def coordinated_policy(observations):
-    """Policy that considers other agents"""
-    actions = {}
-    
-    for agent_id in agent_ids:
-        # Consider other agents' positions
-        other_positions = [observations[other_id][:2] 
-                          for other_id in agent_ids if other_id != agent_id]
-        
-        # Make decision based on coordination
-        actions[agent_id] = decide_action(observations[agent_id], other_positions)
-    
-    return actions
-\end{lstlisting}
-
-\subsection{Physics Customization}
-
-Customize physics parameters for different scenarios:
-
-\begin{lstlisting}[language=python, caption=Physics Customization]
-# Custom physics configuration
-physics_config = {
-    'gravity': 0.3,           # Reduced gravity
-    'friction': 0.1,          # Ball friction
-    'restitution': 0.8,       # Ball bounciness
-    'piston_mass': 1.0,       # Piston mass
-    'ball_mass': 0.5          # Ball mass
-}
-
-env = pistonball_env.PistonballEnv(physics_config=physics_config)
-\end{lstlisting}
-
-\section{Training Examples}
-
-\subsection{PPO Training}
-
-\begin{lstlisting}[language=python, caption=PPO Training Example]
-import torch
-from toolkit.neural_toolkit import MLPPolicyNetwork, MLPValueNetwork
-from env_lib import pistonball_env
-
-# Create environment
-env = pistonball_env.PistonballEnv(num_agents=4)
-
-# Create networks for each agent
-policy_networks = {}
-value_networks = {}
-
-for agent_id in env.agent_ids:
-    policy_networks[agent_id] = MLPPolicyNetwork(
-        input_dim=env.observation_space.shape[0],
-        output_dim=env.action_space.n,
-        hidden_dims=[256, 256]
-    )
-    value_networks[agent_id] = MLPValueNetwork(
-        input_dim=env.observation_space.shape[0],
-        hidden_dims=[256, 256]
-    )
-
-# Training loop
-for episode in range(1000):
-    observations = env.reset()
-    episode_rewards = {agent_id: 0 for agent_id in env.agent_ids}
-    
-    done = False
-    while not done:
-        # Get actions from policy networks
-        actions = {}
-        for agent_id in env.agent_ids:
-            action_probs = policy_networks[agent_id](observations[agent_id])
-            actions[agent_id] = torch.multinomial(action_probs, 1).item()
-        
-        # Take step
-        observations, rewards, dones, infos = env.step(actions)
-        
-        # Accumulate rewards
-        for agent_id in env.agent_ids:
-            episode_rewards[agent_id] += rewards[agent_id]
-        
-        done = all(dones.values())
-    
-    # Log episode results
-    avg_reward = sum(episode_rewards.values()) / len(episode_rewards)
-    print(f"Episode {episode}: Average reward = {avg_reward:.2f}")
-\end{lstlisting}
-
-\subsection{MADDPG Training}
-
-\begin{lstlisting}[language=python, caption=MADDPG Training Example]
-import torch
-from toolkit.neural_toolkit import MLPPolicyNetwork, MLPQNetwork
-from env_lib import pistonball_env
-
-# Create environment
-env = pistonball_env.PistonballEnv(num_agents=4)
-
-# Create MADDPG networks
-actors = {}
-critics = {}
-
-for agent_id in env.agent_ids:
-    actors[agent_id] = MLPPolicyNetwork(
-        input_dim=env.observation_space.shape[0],
-        output_dim=env.action_space.n,
-        hidden_dims=[256, 256]
-    )
-    critics[agent_id] = MLPQNetwork(
-        input_dim=env.observation_space.shape[0] * env.num_agents,
-        output_dim=env.action_space.n,
-        hidden_dims=[256, 256]
-    )
-
-# Training loop
-for episode in range(1000):
-    observations = env.reset()
-    episode_rewards = {agent_id: 0 for agent_id in env.agent_ids}
-    
-    done = False
-    while not done:
-        # Get actions from actors
-        actions = {}
-        for agent_id in env.agent_ids:
-            action_probs = actors[agent_id](observations[agent_id])
-            actions[agent_id] = torch.multinomial(action_probs, 1).item()
-        
-        # Take step
-        next_observations, rewards, dones, infos = env.step(actions)
-        
-        # Update critics with global state
-        global_state = torch.cat([observations[agent_id] 
-                                 for agent_id in env.agent_ids])
-        
-        for agent_id in env.agent_ids:
-            # Critic update (simplified)
-            q_values = critics[agent_id](global_state)
-            target_q = rewards[agent_id] + 0.99 * q_values.max()
-            # ... training code here
-        
-        observations = next_observations
-        for agent_id in env.agent_ids:
-            episode_rewards[agent_id] += rewards[agent_id]
-        
-        done = all(dones.values())
-    
-    avg_reward = sum(episode_rewards.values()) / len(episode_rewards)
-    print(f"Episode {episode}: Average reward = {avg_reward:.2f}")
-\end{lstlisting}
-
-\section{Visualization and Analysis}
-
-\subsection{Environment Rendering}
-
-\begin{lstlisting}[language=python, caption=Environment Rendering]
-import matplotlib.pyplot as plt
-
-# Render environment
-env = pistonball_env.PistonballEnv(render_mode='rgb_array')
-
-# Run episode with rendering
-observations = env.reset()
-done = False
-
-while not done:
-    actions = {agent_id: env.action_space.sample() 
-              for agent_id in env.agent_ids}
-    observations, rewards, dones, infos = env.step(actions)
-    
-    # Render current state
-    frame = env.render()
-    plt.imshow(frame)
-    plt.axis('off')
-    plt.show()
-    
-    done = all(dones.values())
-\end{lstlisting}
-
-\subsection{Performance Analysis}
-
-\begin{lstlisting}[language=python, caption=Performance Analysis]
-from toolkit.plotkit import plot_training_curves
-import numpy as np
-
-# Collect training data
-episode_rewards = []
-episode_lengths = []
-
-for episode in range(100):
-    observations = env.reset()
-    episode_reward = 0
-    episode_length = 0
-    
-    done = False
-    while not done:
-        actions = {agent_id: env.action_space.sample() 
-                  for agent_id in env.agent_ids}
-        observations, rewards, dones, infos = env.step(actions)
-        
-        episode_reward += sum(rewards.values())
-        episode_length += 1
-        done = all(dones.values())
-    
-    episode_rewards.append(episode_reward)
-    episode_lengths.append(episode_length)
-
-# Plot results
-plot_training_curves(
-    episodes=np.arange(100),
-    rewards=episode_rewards,
-    losses=episode_lengths,
-    title="Pistonball Training Progress",
-    save_path="pistonball_training.png"
-)
-\end{lstlisting}
-
-\section{Troubleshooting}
-
-\subsection{Common Issues}
-
-\subsubsection{Rendering Issues}
-
-If you encounter rendering problems:
-
-\begin{lstlisting}[language=python, caption=Rendering Troubleshooting]
-# Disable rendering for training
-env = pistonball_env.PistonballEnv(render_mode=None)
-
-# Use headless rendering
-env = pistonball_env.PistonballEnv(render_mode='rgb_array')
-
-# Check display settings
-import os
-os.environ['SDL_VIDEODRIVER'] = 'dummy'
-\end{lstlisting}
-
-\subsubsection{Performance Issues}
-
-For performance optimization:
-
-\begin{lstlisting}[language=python, caption=Performance Optimization]
-# Reduce physics complexity
-env = pistonball_env.PistonballEnv(
-    physics_config={'gravity': 0.1, 'friction': 0.05}
-)
-
-# Use vector observations instead of images
-env = pistonball_env.PistonballEnv(observation_type='vector')
-
-# Limit episode length
-env = pistonball_env.PistonballEnv(max_steps=500)
-\end{lstlisting}
-
-\subsubsection{Training Issues}
-
-For training problems:
-
-\begin{lstlisting}[language=python, caption=Training Troubleshooting]
-# Adjust reward scaling
-env = pistonball_env.PistonballEnv(reward_scale=0.1)
-
-# Use simpler action space
-env = pistonball_env.PistonballEnv(action_type='discrete')
-
-# Increase exploration
-epsilon = 0.1  # Epsilon-greedy exploration
-\end{lstlisting}
-
-\section{Best Practices}
-
-\subsection{Environment Configuration}
-
-\begin{enumerate}
-    \item Start with fewer agents (2-3) for initial experiments
-    \item Use vector observations for faster training
-    \item Adjust reward scaling to match your learning rates
-    \item Set appropriate episode lengths for your training setup
-\end{enumerate}
-
-\subsection{Training Strategies}
-
-\begin{enumerate}
-    \item Use centralized training with decentralized execution
-    \item Implement experience replay for multi-agent learning
-    \item Consider using parameter sharing between agents
-    \item Monitor coordination metrics during training
-\end{enumerate}
-
-\subsection{Evaluation}
-
-\begin{enumerate}
-    \item Evaluate on multiple random seeds
-    \item Measure both individual and team performance
-    \item Analyze coordination patterns in successful episodes
-    \item Compare against baseline policies
-\end{enumerate} 
+\endgroup

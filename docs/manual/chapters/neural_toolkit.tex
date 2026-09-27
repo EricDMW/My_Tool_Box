@@ -1,679 +1,625 @@
-\chapter{Neural Toolkit}
+% ---------------------------------------------------------------------------
+% Chapter: neural_toolkit
+% ---------------------------------------------------------------------------
+\chapter{neural\_toolkit: Networks and Tabular Tools}\label{chap:neural}
 
-\section{Overview}
+\pkg{toolkit.neural\_toolkit} provides configurable PyTorch modules for
+reinforcement learning: policy, value and Q-networks with MLP, convolutional,
+recurrent and transformer trunks, encoders and decoders (including a
+variational autoencoder), factories that build them by name, a collection of
+utilities for initialisation, optimisation and checkpoints, and NumPy-based
+tools for tabular methods. It does not implement learning algorithms; the
+modules are ordinary \code{torch.nn.Module} objects meant to be combined with
+your own training code.
 
-The \texttt{neural\_toolkit} is the core component of the toolkit, providing comprehensive neural network architectures and utilities for reinforcement learning. It includes policy networks, value networks, Q-networks, encoders, decoders, and discrete tools.
+The subpackage requires PyTorch (\code{pip install ".[torch]"}). Importing it
+without PyTorch raises an \code{ImportError} that explains how to install it;
+the rest of \pkg{toolkit} does not need PyTorch.
 
-\section{Network Architectures}
+\section{Conventions}\label{sec:neural-conventions}
 
-\subsection{Policy Networks}
+\begin{itemize}
+  \item \emph{Batch first.} Inputs have a leading batch dimension \code{B}:
+    feature vectors \code{(B, D)}, images \code{(B, C, H, W)} and sequences
+    \code{(B, T, D)}.
+  \item \emph{One MLP convention.} Every fully connected stack in the
+    toolkit consists of hidden blocks
+    \code{Linear -> [LayerNorm] -> activation -> [Dropout]} followed by a
+    linear output layer without activation.
+  \item \emph{Raw outputs.} Policies return unnormalised outputs of size
+    \code{output\_dim}: logits for a categorical policy, or distribution
+    parameters (for example means) for a continuous one. Turning them into a
+    distribution is left to the algorithm.
+  \item \emph{Devices.} Every constructor accepts \code{device} (default
+    \code{"cpu"}) and moves the module there at the end of construction;
+    \code{device=None} leaves it where PyTorch created it. Inputs must be on
+    the same device.
+  \item \emph{Validation.} Invalid sizes, dropout rates, activation names or
+    cell types raise \code{ValueError} or \code{TypeError} at construction,
+    with a message that lists the valid options.
+\end{itemize}
 
-Policy networks map states to action probabilities or continuous actions.
+\section{Building blocks}\label{sec:neural-blocks}
 
-\subsubsection{MLPPolicyNetwork}
+\paragraph{Activations.}
+\code{get\_activation(name)} returns a new activation module for a
+case-insensitive name, or instantiates an \code{nn.Module} subclass passed
+instead of a name. The valid names are available as \code{ACTIVATION\_NAMES}:
 
-Multi-layer perceptron policy network for discrete and continuous action spaces.
+\begin{center}
+  \small
+  \begin{tabular}{@{}llll@{}}
+    \toprule
+    Name & Module & Name & Module \\
+    \midrule
+    \code{relu}        & \code{nn.ReLU}      & \code{gelu}     & \code{nn.GELU} \\
+    \code{leaky\_relu} & \code{nn.LeakyReLU} & \code{silu}, \code{swish} & \code{nn.SiLU} \\
+    \code{elu}         & \code{nn.ELU}       & \code{mish}     & \code{nn.Mish} \\
+    \code{tanh}        & \code{nn.Tanh}      & \code{softplus} & \code{nn.Softplus} \\
+    \code{sigmoid}     & \code{nn.Sigmoid}   & \code{identity} & \code{nn.Identity} \\
+    \bottomrule
+  \end{tabular}
+\end{center}
 
-\begin{lstlisting}[language=python, caption=MLP Policy Network]
-from toolkit.neural_toolkit import MLPPolicyNetwork
+\paragraph{MLPs.}
+\code{build\_mlp(input\_dim, hidden\_dims, output\_dim=None, activation="relu",
+dropout=0.0, layer\_norm=False, output\_activation=None, bias=True)} returns an
+\code{nn.Sequential}. Without \code{output\_dim} only the hidden stack is
+built; its output width is \code{hidden\_dims[-1]}.
 
-# Discrete action space
-policy_network = MLPPolicyNetwork(
-    input_dim=10,
-    output_dim=4,  # Number of actions
-    hidden_dims=[256, 256],
-    activation='relu',
-    dropout=0.1,
-    layer_norm=False
-)
+\begin{pycode}
+import torch
+from toolkit.neural_toolkit import build_mlp, get_activation
 
-# Continuous action space
-policy_network = MLPPolicyNetwork(
-    input_dim=10,
-    output_dim=2,  # Action dimensions
-    hidden_dims=[256, 256],
-    activation='relu',
-    action_type='continuous',
-    action_std=1.0
-)
-\end{lstlisting}
+mlp = build_mlp(4, [32, 32], output_dim=2, activation="tanh", layer_norm=True)
+print(mlp(torch.zeros(8, 4)).shape)       # torch.Size([8, 2])
+print(get_activation("swish"))            # SiLU()
+\end{pycode}
 
-\subsubsection{CNPolicyNetwork}
+\paragraph{Positional encoding.}
+\code{PositionalEncoding(d\_model, dropout=0.1, max\_len=5000)} adds the
+sinusoidal table of Vaswani et al.\ (2017) to a batch-first sequence
+\code{(B, T, d\_model)}; position $t$ receives
+\begin{equation}
+  \mathrm{PE}_{t,2i} = \sin\!\left(\frac{t}{10000^{2i/d}}\right), \qquad
+  \mathrm{PE}_{t,2i+1} = \cos\!\left(\frac{t}{10000^{2i/d}}\right),
+\end{equation}
+for every batch element, followed by dropout. Sequences longer than
+\code{max\_len} raise a \code{ValueError}. The table is a non-persistent
+buffer and is not stored in \code{state\_dict}.
 
-Convolutional neural network policy for image-based observations.
+\section{Network families}\label{sec:neural-networks}
 
-\begin{lstlisting}[language=python, caption=CNN Policy Network]
-from toolkit.neural_toolkit import CNPolicyNetwork
+Table~\ref{tab:neural-shapes} lists all networks with their input and output
+shapes. The names without \code{N} (\code{CNPolicyNetwork},
+\code{RNQNetwork}, \ldots) are the historical class names; the \code{CNN} and
+\code{RNN} spellings are aliases of the same classes.
 
-policy_network = CNPolicyNetwork(
-    input_channels=3,
-    output_dim=4,
-    conv_dims=[32, 64, 128],
-    fc_dims=[256, 256],
-    kernel_sizes=[3, 3, 3],
-    strides=[2, 2, 2],
-    activation='relu'
-)
-\end{lstlisting}
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Networks, encoders and decoders with their shapes.
+    \code{B}: batch, \code{T}: sequence length, \code{A}: \code{action\_dim},
+    \code{O}: \code{output\_dim}, \code{L}: \code{latent\_dim}.}
+  \label{tab:neural-shapes}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{5.3cm}>{\raggedright\arraybackslash}p{3.3cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Class (alias) & Input & Output \\
+    \midrule
+    \multicolumn{3}{@{}l}{\emph{Policy networks} (\code{input\_dim}, \code{output\_dim})} \\
+    \code{MLPPolicyNetwork} & \code{(B, D)} & \code{(B, O)} \\
+    \code{CNPolicyNetwork} (\code{CNNPolicyNetwork}) & \code{(B, C, H, W)} & \code{(B, O)} \\
+    \code{RNPolicyNetwork} (\code{RNNPolicyNetwork}) & \code{(B, T, D)} or \code{(B, D)} & \code{((B, O), hidden)} \\
+    \code{TransformerPolicyNetwork} & \code{(B, T, D)}, mask \code{(B, T)} & \code{(B, O)} \\
+    \midrule
+    \multicolumn{3}{@{}l}{\emph{Value networks} (\code{input\_dim}, \code{output\_dim=1})} \\
+    \code{MLPValueNetwork} & \code{(B, D)} & \code{(B, O)} \\
+    \code{CNNValueNetwork} & \code{(B, C, H, W)} & \code{(B, O)} \\
+    \code{RNNValueNetwork} & \code{(B, T, D)} or \code{(B, D)} & \code{((B, O), hidden)} \\
+    \code{TransformerValueNetwork} & \code{(B, T, D)}, mask \code{(B, T)} & \code{(B, O)} \\
+    \midrule
+    \multicolumn{3}{@{}l}{\emph{Q-networks} (\code{state\_dim}, \code{action\_dim}); optional integer \code{action} \code{(B,)}} \\
+    \code{MLPQNetwork} & \code{(B, D)} & \code{(B, A)}, or \code{(B,)} with \code{action} \\
+    \code{MLPQNetwork(continuous\_action=True)} & \code{(B, D)}, \code{(B, A)} & \code{(B, 1)} \\
+    \code{DuelingQNetwork} & \code{(B, D)} & \code{(B, A)}, or \code{(B,)} with \code{action} \\
+    \code{CNQNetwork} (\code{CNNQNetwork}) & \code{(B, C, H, W)} & \code{(B, A)}, or \code{(B,)} with \code{action} \\
+    \code{RNQNetwork} (\code{RNNQNetwork}) & \code{(B, T, D)} or \code{(B, D)} & \code{(q, hidden)}, \code{q} as above \\
+    \code{TransformerQNetwork} & \code{(B, T, D)}, mask \code{(B, T)} & \code{(B, A)}, or \code{(B,)} with \code{action} \\
+    \midrule
+    \multicolumn{3}{@{}l}{\emph{Encoders} (\code{input\_dim} or \code{input\_channels}, \code{latent\_dim})} \\
+    \code{MLPEncoder} & \code{(B, D)} & \code{(B, L)} \\
+    \code{CNNEncoder} & \code{(B, C, H, W)} & \code{(B, L)} \\
+    \code{RNNEncoder} & \code{(B, T, D)} or \code{(B, D)} & \code{((B, L), hidden)} \\
+    \code{TransformerEncoder} & \code{(B, T, D)}, mask \code{(B, T)} & \code{(B, L)} \\
+    \code{VariationalEncoder} & \code{(B, D)} & \code{(z, mu, logvar)}, each \code{(B, L)} \\
+    \midrule
+    \multicolumn{3}{@{}l}{\emph{Decoders} (\code{latent\_dim}, \code{output\_dim} or \code{output\_channels})} \\
+    \code{MLPDecoder}, \code{VariationalDecoder} & \code{(B, L)} & \code{(B, O)} \\
+    \code{CNNDecoder} & \code{(B, L)} & \code{(B, C, S, S)}, $S = \text{\code{initial\_size}} \cdot \prod \text{\code{strides}}$ \\
+    \code{RNNDecoder}, \code{TransformerDecoder} & \code{(B, L)}, \code{seq\_len} & \code{(B, T, O)}, \code{T = seq\_len} or \code{max\_seq\_len} \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
 
-\subsubsection{RNNPolicyNetwork}
+\subsection{Constructor arguments}\label{sec:neural-arguments}
 
-Recurrent neural network policy for sequential decision making.
+All classes share the arguments \code{activation="relu"},
+\code{dropout=0.0}, \code{layer\_norm=False} and \code{device="cpu"}; the
+transformer classes default to \code{dropout=0.1} and \code{layer\_norm=True}.
+The remaining arguments depend on the trunk (Table~\ref{tab:neural-trunks}).
 
-\begin{lstlisting}[language=python, caption=RNN Policy Network]
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Trunk-specific constructor arguments and their defaults.}
+  \label{tab:neural-trunks}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{2.1cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Trunk & Arguments \\
+    \midrule
+    MLP & \code{hidden\_dims=(256, 256)}. For \code{DuelingQNetwork} the shared
+      trunk uses \code{hidden\_dims[:-1]} and each stream one hidden layer of
+      width \code{hidden\_dims[-1]}. \\
+    Convolutional &
+      \code{input\_channels}, \code{conv\_dims=(32, 64, 128)},
+      \code{fc\_dims=(256, 256)}, \code{kernel\_sizes} (int or one per layer,
+      default 3), \code{strides} (default 1). Padding is
+      \code{kernel\_size // 2}. The feature map is globally average-pooled, so
+      any image size works. \code{CNNEncoder}: \code{conv\_dims=(32, 64, 128,
+      256)}, \code{fc\_dims=(512, 256)}, strides 1 for the first layer and 2
+      afterwards, \code{pooled\_size=4} (the map is pooled to $4 \times 4$). \\
+    Transposed conv. &
+      \code{CNNDecoder}: \code{output\_channels}, \code{fc\_dims=(512, 256)},
+      \code{conv\_dims=(256, 128, 64, 32)}, \code{kernel\_sizes} (default 3),
+      \code{strides} (default 2), \code{initial\_size=4},
+      \code{output\_activation="sigmoid"}; the default output is
+      $64 \times 64$ (property \code{output\_size}). \\
+    Recurrent &
+      \code{hidden\_dim=256}, \code{num\_layers=2}, \code{rnn\_type="lstm"}
+      (or \code{"gru"}), \code{bidirectional=False} (\code{True} for
+      \code{RNNEncoder}; not available for \code{RNNDecoder}),
+      \code{fc\_dims=(256,)}; \code{RNNDecoder}: \code{max\_seq\_len=100}. \\
+    Transformer &
+      \code{d\_model=256} (divisible by \code{nhead}), \code{nhead=8},
+      \code{num\_layers=6}, \code{dim\_feedforward=1024}, \code{dropout=0.1},
+      \code{fc\_dims=(256,)}, \code{max\_len=5000};
+      \code{TransformerDecoder}: \code{max\_seq\_len=100},
+      \code{max\_len=None} (then \code{max(max\_seq\_len, 5000)}). \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\code{layer\_norm=True} inserts \code{LayerNorm} after every hidden linear
+layer; in convolutional trunks it additionally inserts \code{BatchNorm2d}
+after every convolution.
+
+\subsection{Architectures}\label{sec:neural-architectures}
+
+\paragraph{Convolutional trunk.}
+\code{Conv2d -> [BatchNorm2d] -> activation -> [Dropout2d]} blocks, adaptive
+average pooling to \code{pooled\_size} $\times$ \code{pooled\_size} (1 for
+policies, value and Q-networks), flattening and an MLP with \code{fc\_dims},
+followed by the output layer. Attribute names: \code{conv\_layers},
+\code{adaptive\_pool}, \code{fc\_layers}.
+
+\paragraph{Recurrent trunk.}
+A batch-first LSTM or GRU followed by an MLP head that reads the final hidden
+state of the last layer; for a bidirectional RNN the forward state after the
+last step and the backward state after the first step are concatenated, so
+both directions have seen the whole sequence. \code{forward(x, hidden=None)}
+accepts a sequence or a single step \code{(B, D)} and returns the new hidden
+state (\code{h\_n} for a GRU, \code{(h\_n, c\_n)} for an LSTM), which can be
+passed to the next call:
+
+\begin{pycode}
 from toolkit.neural_toolkit import RNNPolicyNetwork
 
-policy_network = RNNPolicyNetwork(
-    input_dim=10,
-    output_dim=4,
-    hidden_dim=256,
-    num_layers=2,
-    rnn_type='lstm',  # 'lstm' or 'gru'
-    fc_dims=[256],
-    activation='relu'
-)
-\end{lstlisting}
+policy = RNNPolicyNetwork(input_dim=5, output_dim=3, hidden_dim=32, rnn_type="gru")
+hidden = None
+for t in range(4):                         # one observation per call
+    logits, hidden = policy(torch.randn(8, 5), hidden)
+print(logits.shape, hidden.shape)          # (8, 3) and (num_layers, 8, 32)
+\end{pycode}
 
-\subsubsection{TransformerPolicyNetwork}
+\paragraph{Transformer trunk.}
+A linear projection to \code{d\_model}, the positional encoding, a batch-first
+\code{nn.TransformerEncoder}, mean pooling over the valid positions and an MLP
+head. The optional \code{mask} is a boolean \code{(B, T)} tensor in which
+\code{True} marks padding (PyTorch's \code{src\_key\_padding\_mask}
+convention); padded positions are excluded from attention and pooling.
+Any sequence length up to \code{max\_len} is accepted.
 
-Transformer-based policy network for complex sequential patterns.
-
-\begin{lstlisting}[language=python, caption=Transformer Policy Network]
+\begin{pycode}
 from toolkit.neural_toolkit import TransformerPolicyNetwork
 
-policy_network = TransformerPolicyNetwork(
-    input_dim=10,
-    output_dim=4,
-    d_model=256,
-    nhead=8,
-    num_layers=6,
-    dim_feedforward=1024,
-    dropout=0.1,
-    fc_dims=[256],
-    activation='relu'
-)
-\end{lstlisting}
-
-\subsection{Value Networks}
-
-Value networks estimate state values or state-action values.
-
-\subsubsection{MLPValueNetwork}
-
-Multi-layer perceptron value network.
-
-\begin{lstlisting}[language=python, caption=MLP Value Network]
-from toolkit.neural_toolkit import MLPValueNetwork
-
-value_network = MLPValueNetwork(
-    input_dim=10,
-    hidden_dims=[256, 256],
-    activation='relu',
-    dropout=0.1,
-    layer_norm=False
-)
-\end{lstlisting}
-
-\subsubsection{CNValueNetwork}
-
-Convolutional neural network value network.
-
-\begin{lstlisting}[language=python, caption=CNN Value Network]
-from toolkit.neural_toolkit import CNValueNetwork
-
-value_network = CNValueNetwork(
-    input_channels=3,
-    conv_dims=[32, 64, 128],
-    fc_dims=[256, 256],
-    kernel_sizes=[3, 3, 3],
-    strides=[2, 2, 2],
-    activation='relu'
-)
-\end{lstlisting}
-
-\subsubsection{RNNValueNetwork}
-
-Recurrent neural network value network.
-
-\begin{lstlisting}[language=python, caption=RNN Value Network]
-from toolkit.neural_toolkit import RNNValueNetwork
-
-value_network = RNNValueNetwork(
-    input_dim=10,
-    hidden_dim=256,
-    num_layers=2,
-    rnn_type='lstm',
-    fc_dims=[256],
-    activation='relu'
-)
-\end{lstlisting}
-
-\subsubsection{TransformerValueNetwork}
-
-Transformer-based value network.
-
-\begin{lstlisting}[language=python, caption=Transformer Value Network]
-from toolkit.neural_toolkit import TransformerValueNetwork
-
-value_network = TransformerValueNetwork(
-    input_dim=10,
-    d_model=256,
-    nhead=8,
-    num_layers=6,
-    dim_feedforward=1024,
-    dropout=0.1,
-    fc_dims=[256],
-    activation='relu'
-)
-\end{lstlisting}
-
-\subsection{Q-Networks}
-
-Q-networks estimate action-value functions for Q-learning algorithms.
-
-\subsubsection{MLPQNetwork}
-
-Multi-layer perceptron Q-network.
-
-\begin{lstlisting}[language=python, caption=MLP Q-Network]
-from toolkit.neural_toolkit import MLPQNetwork
-
-q_network = MLPQNetwork(
-    input_dim=10,
-    output_dim=4,  # Number of actions
-    hidden_dims=[256, 256],
-    activation='relu',
-    dropout=0.1
-)
-\end{lstlisting}
-
-\subsubsection{DuelingQNetwork}
-
-Dueling architecture Q-network with separate value and advantage streams.
-
-\begin{lstlisting}[language=python, caption=Dueling Q-Network]
-from toolkit.neural_toolkit import DuelingQNetwork
-
-q_network = DuelingQNetwork(
-    input_dim=10,
-    output_dim=4,
-    hidden_dims=[256, 256],
-    value_hidden_dims=[256],
-    advantage_hidden_dims=[256],
-    activation='relu'
-)
-\end{lstlisting}
-
-\section{State Encoders}
-
-State encoders transform raw observations into neural network inputs.
-
-\subsection{MLPEncoder}
-
-Multi-layer perceptron encoder for vector observations.
-
-\begin{lstlisting}[language=python, caption=MLP Encoder]
-from toolkit.neural_toolkit import MLPEncoder
-
-encoder = MLPEncoder(
-    input_dim=100,
-    output_dim=256,
-    hidden_dims=[512, 256],
-    activation='relu',
-    dropout=0.1,
-    layer_norm=False
-)
-\end{lstlisting}
-
-\subsection{CNNEncoder}
-
-Convolutional neural network encoder for image observations.
-
-\begin{lstlisting}[language=python, caption=CNN Encoder]
-from toolkit.neural_toolkit import CNNEncoder
-
-encoder = CNNEncoder(
-    input_channels=3,
-    output_dim=256,
-    conv_dims=[32, 64, 128, 256],
-    fc_dims=[512],
-    kernel_sizes=[3, 3, 3, 3],
-    strides=[2, 2, 2, 2],
-    activation='relu'
-)
-\end{lstlisting}
-
-\subsection{RNNEncoder}
-
-Recurrent neural network encoder for sequential observations.
-
-\begin{lstlisting}[language=python, caption=RNN Encoder]
-from toolkit.neural_toolkit import RNNEncoder
-
-encoder = RNNEncoder(
-    input_dim=10,
-    output_dim=256,
-    hidden_dim=256,
-    num_layers=2,
-    rnn_type='lstm',
-    fc_dims=[256],
-    activation='relu'
-)
-\end{lstlisting}
-
-\subsection{TransformerEncoder}
-
-Transformer-based encoder for complex sequential patterns.
-
-\begin{lstlisting}[language=python, caption=Transformer Encoder]
-from toolkit.neural_toolkit import TransformerEncoder
-
-encoder = TransformerEncoder(
-    input_dim=10,
-    output_dim=256,
-    d_model=256,
-    nhead=8,
-    num_layers=6,
-    dim_feedforward=1024,
-    dropout=0.1,
-    fc_dims=[256],
-    activation='relu'
-)
-\end{lstlisting}
-
-\section{Output Decoders}
-
-Output decoders transform network outputs into actions or values.
-
-\subsection{MLPDecoder}
-
-Multi-layer perceptron decoder.
-
-\begin{lstlisting}[language=python, caption=MLP Decoder]
-from toolkit.neural_toolkit import MLPDecoder
-
-decoder = MLPDecoder(
-    latent_dim=256,
-    output_dim=10,
-    hidden_dims=[256, 128],
-    activation='relu',
-    dropout=0.1
-)
-\end{lstlisting}
-
-\subsection{CNNDecoder}
-
-Convolutional neural network decoder for image generation.
-
-\begin{lstlisting}[language=python, caption=CNN Decoder]
-from toolkit.neural_toolkit import CNNDecoder
-
-decoder = CNNDecoder(
-    latent_dim=256,
-    output_channels=3,
-    fc_dims=[512, 256],
-    conv_dims=[256, 128, 64, 32],
-    kernel_sizes=[3, 3, 3, 3],
-    strides=[2, 2, 2, 2],
-    initial_size=4
-)
-\end{lstlisting}
-
-\subsection{RNNDecoder}
-
-Recurrent neural network decoder for sequential generation.
-
-\begin{lstlisting}[language=python, caption=RNN Decoder]
-from toolkit.neural_toolkit import RNNDecoder
-
-decoder = RNNDecoder(
-    latent_dim=256,
-    output_dim=10,
-    hidden_dim=256,
-    num_layers=2,
-    rnn_type='lstm',
-    max_seq_len=100,
-    fc_dims=[256],
-    activation='relu'
-)
-\end{lstlisting}
-
-\subsection{TransformerDecoder}
-
-Transformer-based decoder for complex sequential generation.
-
-\begin{lstlisting}[language=python, caption=Transformer Decoder]
-from toolkit.neural_toolkit import TransformerDecoder
-
-decoder = TransformerDecoder(
-    latent_dim=256,
-    output_dim=10,
-    d_model=256,
-    nhead=8,
-    num_layers=6,
-    dim_feedforward=1024,
-    max_seq_len=100,
-    dropout=0.1,
-    fc_dims=[256],
-    activation='relu'
-)
-\end{lstlisting}
-
-\section{Discrete Tools}
-
-Discrete tools provide tabular reinforcement learning methods.
-
-\subsection{QTable}
-
-Q-learning table for discrete state-action spaces.
-
-\begin{lstlisting}[language=python, caption=Q-Table Usage]
-from toolkit.neural_toolkit import QTable
-
-# Create Q-table
-q_table = QTable(
-    state_space_size=100,
-    action_space_size=4,
-    initial_value=0.0
-)
-
-# Get Q-value
-q_value = q_table.get_value(state=0, action=1)
-
-# Update Q-value
-q_table.update_value(state=0, action=1, value=0.5, learning_rate=0.1)
-
-# Get best action
-best_action = q_table.get_max_action(state=0)
-
-# Epsilon-greedy policy
-action = q_table.get_policy(state=0, epsilon=0.1)
-\end{lstlisting}
-
-\subsection{ValueTable}
-
-Value table for discrete state spaces.
-
-\begin{lstlisting}[language=python, caption=Value Table Usage]
-from toolkit.neural_toolkit import ValueTable
-
-# Create value table
-value_table = ValueTable(
-    state_space_size=100,
-    initial_value=0.0
-)
-
-# Get value
-value = value_table.get_value(state=0)
-
-# Update value
-value_table.update_value(state=0, value=0.5, learning_rate=0.1)
-
-# Get all values
-values = value_table.get_values()
-\end{lstlisting}
-
-\subsection{PolicyTable}
-
-Policy table for discrete state-action spaces.
-
-\begin{lstlisting}[language=python, caption=Policy Table Usage]
-from toolkit.neural_toolkit import PolicyTable
-
-# Create policy table
-policy_table = PolicyTable(
-    state_space_size=100,
-    action_space_size=4
-)
-
-# Get policy probability
-prob = policy_table.get_value(state=0, action=1)
-
-# Update policy
-policy_table.update_value(state=0, action=1, value=0.3, learning_rate=0.1)
-
-# Sample action
-action = policy_table.get_policy(state=0)
-
-# Get policy probabilities
-probs = policy_table.get_policy_probs(state=0)
-\end{lstlisting}
-
-\subsection{DiscreteTools}
-
-Utility functions for discrete reinforcement learning.
-
-\begin{lstlisting}[language=python, caption=Discrete Tools Usage]
-from toolkit.neural_toolkit import DiscreteTools
-
-# Q-learning update
-DiscreteTools.q_learning_update(
-    q_table=q_table,
-    state=0, action=1, reward=1.0,
-    next_state=2, gamma=0.99, alpha=0.1
-)
-
-# SARSA update
-DiscreteTools.sarsa_update(
-    q_table=q_table,
-    state=0, action=1, reward=1.0,
-    next_state=2, next_action=3,
-    gamma=0.99, alpha=0.1
-)
-
-# Expected SARSA update
-DiscreteTools.expected_sarsa_update(
-    q_table=q_table,
-    state=0, action=1, reward=1.0,
-    next_state=2, policy_table=policy_table,
-    gamma=0.99, alpha=0.1
-)
-
-# Epsilon-greedy policy
-action = DiscreteTools.epsilon_greedy_policy(
-    q_table=q_table, state=0, epsilon=0.1
-)
-
-# Softmax policy
-action = DiscreteTools.softmax_policy(
-    q_table=q_table, state=0, temperature=1.0
-)
-\end{lstlisting}
-
-\section{Training Examples}
-
-\subsection{PPO Training}
-
-\begin{lstlisting}[language=python, caption=PPO Training Example]
-import torch
-import torch.optim as optim
-from toolkit.neural_toolkit import MLPPolicyNetwork, MLPValueNetwork
-
-# Create networks
-policy_network = MLPPolicyNetwork(
-    input_dim=10, output_dim=4,
-    hidden_dims=[256, 256], activation='relu'
-)
-value_network = MLPValueNetwork(
-    input_dim=10, hidden_dims=[256, 256], activation='relu'
-)
-
-# Optimizers
-policy_optimizer = optim.Adam(policy_network.parameters(), lr=0.001)
-value_optimizer = optim.Adam(value_network.parameters(), lr=0.001)
-
-# Training loop
-for episode in range(1000):
-    # Collect experience
-    states, actions, rewards, next_states, dones = collect_experience()
-    
-    # Compute advantages
-    advantages = compute_advantages(states, rewards, value_network)
-    
-    # PPO update
-    for _ in range(10):  # Multiple epochs
-        # Policy loss
-        log_probs = policy_network.get_log_probs(states, actions)
-        ratio = torch.exp(log_probs - old_log_probs)
-        surr1 = ratio * advantages
-        surr2 = torch.clamp(ratio, 0.8, 1.2) * advantages
-        policy_loss = -torch.min(surr1, surr2).mean()
-        
-        # Value loss
-        value_pred = value_network(states)
-        value_loss = torch.nn.functional.mse_loss(value_pred, returns)
-        
-        # Update networks
-        policy_optimizer.zero_grad()
-        policy_loss.backward()
-        policy_optimizer.step()
-        
-        value_optimizer.zero_grad()
-        value_loss.backward()
-        value_optimizer.step()
-\end{lstlisting}
-
-\subsection{DQN Training}
-
-\begin{lstlisting}[language=python, caption=DQN Training Example]
-import torch
-import torch.optim as optim
-from toolkit.neural_toolkit import MLPQNetwork
-from collections import deque
-import random
-
-# Create Q-network
-q_network = MLPQNetwork(
-    input_dim=10, output_dim=4,
-    hidden_dims=[256, 256], activation='relu'
-)
-target_network = MLPQNetwork(
-    input_dim=10, output_dim=4,
-    hidden_dims=[256, 256], activation='relu'
-)
-target_network.load_state_dict(q_network.state_dict())
-
-# Replay buffer
-replay_buffer = deque(maxlen=10000)
-
-# Optimizer
-optimizer = optim.Adam(q_network.parameters(), lr=0.001)
-
-# Training loop
-for episode in range(1000):
+policy = TransformerPolicyNetwork(input_dim=6, output_dim=4, d_model=64, nhead=4,
+                                  num_layers=2, dim_feedforward=128)
+x = torch.randn(2, 10, 6)                          # two sequences of length 10
+mask = torch.zeros(2, 10, dtype=torch.bool)
+mask[1, 7:] = True                                 # second sequence has 7 steps
+print(policy(x, mask).shape)                       # torch.Size([2, 4])
+\end{pycode}
+
+\paragraph{Q-networks.}
+Discrete Q-networks return one value per action, \code{(B, A)}. Passing
+integer action indices of shape \code{(B,)} or \code{(B, 1)} as second
+argument returns the selected values $Q(s, a)$ with shape \code{(B,)}, which
+is what temporal-difference losses need. \code{MLPQNetwork} with
+\code{continuous\_action=True} is a critic for continuous actions (DDPG, TD3,
+SAC): it concatenates state and action and returns $Q(s, a)$ with shape
+\code{(B, 1)}. \code{DuelingQNetwork} (Wang et al., 2016) combines a value
+stream $V(s)$ and an advantage stream $A(s, a)$ as
+\begin{equation}
+  Q(s, a) = V(s) + A(s, a) - \frac{1}{|\mathcal{A}|}\sum_{a'} A(s, a').
+\end{equation}
+
+\begin{pycode}
+from toolkit.neural_toolkit import DuelingQNetwork, MLPQNetwork
+
+q = DuelingQNetwork(state_dim=6, action_dim=3, hidden_dims=(64, 64))
+states, actions = torch.randn(5, 6), torch.tensor([0, 1, 2, 1, 0])
+print(q(states).shape, q(states, actions).shape)   # (5, 3) and (5,)
+
+critic = MLPQNetwork(state_dim=6, action_dim=2, continuous_action=True)
+print(critic(states, torch.randn(5, 2)).shape)     # (5, 1)
+\end{pycode}
+
+\paragraph{Variational autoencoder.}
+\code{VariationalEncoder} returns \code{(z, mu, logvar)} with
+$z = \mu + \exp(\tfrac{1}{2}\log\sigma^2)\,\varepsilon$ and
+$\varepsilon \sim \mathcal{N}(0, I)$ drawn from PyTorch's default generator
+(the reparameterisation trick). The static method \code{kl\_divergence(mu,
+logvar)} returns the per-sample KL term of the evidence lower bound,
+\begin{equation}
+  \mathrm{KL}\big(\mathcal{N}(\mu, \operatorname{diag}\sigma^2)\,\big\|\,\mathcal{N}(0, I)\big)
+  = -\frac{1}{2}\sum_{j} \left(1 + \log\sigma_j^2 - \mu_j^2 - \sigma_j^2\right),
+\end{equation}
+with shape \code{(B,)}. \code{VariationalDecoder} is an MLP from $z$ to the
+reconstruction.
+
+\begin{pycode}
+import torch.nn.functional as F
+from toolkit.neural_toolkit import VariationalDecoder, VariationalEncoder
+
+encoder = VariationalEncoder(input_dim=64, latent_dim=8, hidden_dims=(128,))
+decoder = VariationalDecoder(latent_dim=8, output_dim=64, hidden_dims=(128,))
+x = torch.randn(32, 64)
+z, mu, logvar = encoder(x)
+reconstruction = F.mse_loss(decoder(z), x, reduction="none").sum(dim=1)
+loss = (reconstruction + encoder.kl_divergence(mu, logvar)).mean()
+\end{pycode}
+
+\paragraph{Sequence decoders.}
+\code{RNNDecoder} feeds the projected latent vector to a unidirectional LSTM
+or GRU at every time step and maps each output with a shared MLP head.
+\code{TransformerDecoder} is non-autoregressive: the queries are positional
+encodings of the output positions, the memory is the projected latent vector,
+and all positions are decoded in parallel. Both generate \code{max\_seq\_len}
+steps unless \code{forward(z, seq\_len=...)} asks for another length.
+
+\section{Factories}\label{sec:neural-factories}
+
+Four factories build networks from a type name, which is convenient when the
+architecture is a command-line option. Names are case-insensitive; an unknown
+name raises a \code{ValueError} that lists the valid names. The remaining
+keyword arguments are passed to the constructor of the selected class.
+
+\begin{center}
+  \small
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    Factory & Method & Valid names \\
+    \midrule
+    \code{PolicyFactory}   & \code{create\_policy(policy\_type, **kw)}         & \code{mlp}, \code{cnn}, \code{rnn}, \code{transformer} \\
+    \code{ValueFactory}    & \code{create\_value\_network(network\_type, **kw)} & \code{mlp}, \code{cnn}, \code{rnn}, \code{transformer} \\
+    \code{QNetworkFactory} & \code{create\_q\_network(network\_type, **kw)}     & \code{mlp}, \code{dueling}, \code{cnn}, \code{rnn}, \code{transformer} \\
+    \code{EncoderFactory}  & \code{create\_encoder(encoder\_type, **kw)}        & \code{mlp}, \code{cnn}, \code{rnn}, \code{transformer}, \code{vae} \\
+    \code{DecoderFactory}  & \code{create\_decoder(decoder\_type, **kw)}        & \code{mlp}, \code{cnn}, \code{rnn}, \code{transformer}, \code{vae} \\
+    \bottomrule
+  \end{tabular}
+\end{center}
+
+\begin{pycode}
+from toolkit.neural_toolkit import PolicyFactory, QNetworkFactory
+
+policy = PolicyFactory.create_policy("mlp", input_dim=8, output_dim=4, hidden_dims=(64, 64))
+q_net = QNetworkFactory.create_q_network("dueling", state_dim=8, action_dim=4)
+\end{pycode}
+
+\section{NetworkUtils}\label{sec:neural-utils}
+
+\code{NetworkUtils} groups helper functions as static methods
+(Table~\ref{tab:neural-utils}).
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Static methods of \code{NetworkUtils}.}
+  \label{tab:neural-utils}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{5.5cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Method & Description \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{Initialisation and parameters}} \\
+    \code{initialize\_weights(module, method="xavier\_uniform", gain=1.0)} &
+      Initialise every linear and (transposed) convolution layer recursively;
+      biases are set to zero. Methods: \code{xavier\_uniform},
+      \code{xavier\_normal}, \code{kaiming\_uniform}, \code{kaiming\_normal},
+      \code{orthogonal}, \code{uniform} ($U(-0.1, 0.1)$), \code{normal}
+      ($\mathcal{N}(0, 0.1^2)$). \\
+    \code{count\_parameters(model)} & Number of trainable parameters. \\
+    \code{count\_parameters\_by\_layer(model)} & Trainable parameters owned directly by each sub-module. \\
+    \code{freeze\_layers(model, names)}, \code{unfreeze\_layers(model, names)} &
+      Disable or enable gradients of parameters whose name contains any of
+      \code{names}. \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{Gradients}} \\
+    \code{get\_grad\_norm(model, norm\_type=2.0)} & Total gradient norm. \\
+    \code{clip\_grad\_norm(model, max\_norm, norm\_type=2.0)} & Clip in place; returns the norm before clipping. \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{Optimisation}} \\
+    \code{create\_optimizer(model, optimizer\_type="adam", lr=1e-3, weight\_decay=0.0, skip\_list=None, **kw)} &
+      \code{adam}, \code{adamw}, \code{sgd}, \code{rmsprop}, \code{adagrad},
+      \code{adamax}. With \code{weight\_decay > 0} the decay is applied to
+      weights only (see \code{apply\_weight\_decay}). \\
+    \code{apply\_weight\_decay(model, weight\_decay, skip\_list=None)} &
+      Parameter groups without decay for one-dimensional parameters (biases,
+      normalisation scales) and for names in \code{skip\_list}. \\
+    \code{create\_scheduler(optimizer, scheduler\_type="step", **kw)} &
+      \code{step}, \code{multistep}, \code{exponential}, \code{cosine},
+      \code{cosine\_warm\_restart}, \code{plateau}, \code{linear},
+      \code{polynomial}; \code{**kw} go to the PyTorch scheduler (for example
+      \code{step\_size} or \code{T\_max}). \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{Checkpoints}} \\
+    \code{save\_checkpoint(model, optimizer, epoch, loss, filepath, **extra)} &
+      Save model and optimizer state (\code{optimizer} may be \code{None}),
+      epoch, loss and any extra entries; atomic write; returns the path. \\
+    \code{load\_checkpoint(model, optimizer, filepath, map\_location=None, weights\_only=True, strict=True)} &
+      Restore a checkpoint and return \code{(epoch, loss)}. Tensors are loaded
+      onto the device of the model by default, so GPU checkpoints load on
+      CPU-only machines. \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{Layer construction}} \\
+    \code{create\_mlp\_layers}, \code{create\_conv\_layers}, \code{create\_transposed\_conv\_layers} &
+      MLP and (transposed) convolution stacks following the conventions of
+      Section~\ref{sec:neural-conventions}. \\
+    \code{create\_attention\_layer(input\_dim, num\_heads=8, dropout=0.1)} & Batch-first \code{nn.MultiheadAttention}. \\
+    \code{create\_positional\_encoding(d\_model, max\_len=5000)} & Frozen sinusoidal table \code{(1, max\_len, d\_model)}. \\
+    \code{get\_activation(activation)} & Same as the module-level function. \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{Shape arithmetic}} \\
+    \code{compute\_output\_size(n, k, s=1, p=0, d=1)} & $\lfloor (n + 2p - d(k-1) - 1)/s \rfloor + 1$ \\
+    \code{compute\_transposed\_output\_size(n, k, s=1, p=0, op=0, d=1)} & $(n-1)s - 2p + d(k-1) + op + 1$ \\
+    \code{compute\_conv\_output\_size((H, W), layers)} & Spatial size after a list of layer dictionaries. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\section{Tabular tools}\label{sec:neural-tabular}
+
+The tabular tools work on finite state and action spaces with NumPy arrays
+and do not need a GPU. Every table owns a \code{numpy.random.Generator}
+(argument \code{rng}: a generator, an integer seed, or \code{None} for fresh
+entropy) that is used for all sampling, so results are reproducible without
+touching the global random state. States and actions are integer indices;
+out-of-range indices raise \code{IndexError}.
+
+\begin{itemize}
+  \item \code{QTable(state\_space\_size, action\_space\_size, initial\_value=0.0,
+    dtype=np.float32, rng=None)}: action values $Q[s, a]$ with
+    \code{get\_value}, \code{set\_value}, \code{update\_value},
+    \code{get\_q\_values}, \code{get\_max\_q\_value}, \code{get\_max\_action}
+    (lowest index among ties), \code{get\_policy(state, epsilon)} (sampled
+    epsilon-greedy action), \code{get\_epsilon\_greedy\_probs},
+    \code{get\_softmax\_probs} and \code{get\_softmax\_policy}.
+  \item \code{ValueTable(state\_space\_size, ...)}: state values $V[s]$.
+  \item \code{PolicyTable(state\_space\_size, action\_space\_size, ...)}: a
+    stochastic policy $\pi[s, a]$ that starts uniform. \code{set\_value} and
+    \code{update\_value} change one probability and rescale the others so that
+    the row still sums to one; \code{set\_policy\_probs},
+    \code{set\_deterministic\_policy}, \code{get\_policy\_probs} and
+    \code{get\_policy} (sampling) complete the interface.
+  \item \code{DiscreteEnvironment(state\_space\_size, action\_space\_size,
+    rng=None)}: an abstract base class for small finite environments with
+    \code{reset() -> state} and \code{step(action) -> (state, reward, done,
+    info)}.
+\end{itemize}
+
+\code{update\_value(state, value, action, learning\_rate)} moves an entry
+towards a target: $x \leftarrow x + \alpha\,(\text{value} - x)$. The static
+methods of \code{DiscreteTools} implement the classic updates on top of it,
+with discount $\gamma$ (\code{gamma=0.99}) and step size $\alpha$
+(\code{alpha=0.1}). On a terminal transition (\code{done=True}) the bootstrap
+term is dropped.
+\begin{align}
+  \text{Q-learning:}\quad & Q(s,a) \leftarrow Q(s,a) + \alpha\big[r + \gamma \max_{a'} Q(s',a') - Q(s,a)\big], \\
+  \text{SARSA:}\quad & Q(s,a) \leftarrow Q(s,a) + \alpha\big[r + \gamma\, Q(s',a') - Q(s,a)\big], \\
+  \text{Expected SARSA:}\quad & Q(s,a) \leftarrow Q(s,a) + \alpha\Big[r + \gamma \sum_{a'} \pi(a' \mid s')\, Q(s',a') - Q(s,a)\Big].
+\end{align}
+For expected SARSA, $\pi$ is a given \code{PolicyTable} or, if none is given,
+the epsilon-greedy policy of the Q-table with the given \code{epsilon}.
+\code{value\_iteration\_update(value\_table, state, q\_table)} sets
+$V(s) = \max_a Q(s,a)$ (the Q-table must already hold one-step look-ahead
+values), and \code{policy\_iteration\_update(policy\_table, state, q\_table)}
+makes $\pi(\cdot \mid s)$ greedy with respect to $Q$.
+
+The exploration rules sample with the Q-table's generator:
+\begin{itemize}
+  \item \code{epsilon\_greedy\_policy(q, s, epsilon)}: a uniformly random
+    action with probability $\varepsilon$, otherwise the greedy one. The
+    corresponding probabilities (with ties sharing the greedy mass) are
+    $\pi(a \mid s) = \varepsilon/|\mathcal{A}| + (1-\varepsilon)\,
+    \mathbf{1}[a \in G_s]/|G_s|$, where $G_s$ is the set of greedy actions.
+  \item \code{softmax\_policy(q, s, temperature)} (alias
+    \code{boltzmann\_policy}): $\pi(a \mid s) \propto \exp(Q(s,a)/\tau)$,
+    computed in a numerically stable way.
+  \item \code{ucb\_policy(q, s, visit\_counts, exploration\_constant=1.0)}:
+    UCB1, $\arg\max_a Q(s,a) + c\sqrt{\ln N(s) / N(s,a)}$ with
+    $N(s) = \sum_a N(s,a)$; untried actions are chosen first, at random among
+    themselves. \code{visit\_counts} has the shape of the Q-table.
+  \item \code{thompson\_sampling\_policy(q, s, visit\_counts, prior\_alpha=1.0,
+    prior\_beta=1.0)}: a heuristic Beta-Bernoulli Thompson sampler with
+    $p = \operatorname{sigmoid}(Q(s,a))$ and posterior
+    $\mathrm{Beta}(\alpha_0 + n p,\ \beta_0 + n(1-p))$, $n = N(s,a)$. It is
+    exact only for Bernoulli rewards with $Q$ in logit space.
+\end{itemize}
+
+The following example learns to walk right on a six-state chain:
+
+\begin{pycode}
+import numpy as np
+from toolkit.neural_toolkit import DiscreteEnvironment, DiscreteTools
+
+class Chain(DiscreteEnvironment):
+    """States 0..n-1; action 1 moves right, 0 moves left; reward 1 at the right end."""
+
+    def reset(self):
+        self.current_state = 0
+        return self.current_state
+
+    def step(self, action):
+        move = 1 if action == 1 else -1
+        self.current_state = int(np.clip(self.current_state + move, 0, self.state_space_size - 1))
+        done = self.current_state == self.state_space_size - 1
+        return self.current_state, float(done), done, {}
+
+env = Chain(state_space_size=6, action_space_size=2, rng=0)
+q = DiscreteTools.create_q_table(6, 2, rng=0)
+for episode in range(200):
     state = env.reset()
-    done = False
-    
-    while not done:
-        # Epsilon-greedy action selection
-        if random.random() < epsilon:
-            action = env.action_space.sample()
-        else:
-            action = q_network.select_action(state)
-        
-        # Take action
+    for t in range(50):
+        action = DiscreteTools.epsilon_greedy_policy(q, state, epsilon=0.1)
         next_state, reward, done, _ = env.step(action)
-        
-        # Store experience
-        replay_buffer.append((state, action, reward, next_state, done))
-        
-        # Sample batch
-        if len(replay_buffer) >= batch_size:
-            batch = random.sample(replay_buffer, batch_size)
-            states, actions, rewards, next_states, dones = zip(*batch)
-            
-            # Convert to tensors
-            states = torch.FloatTensor(states)
-            actions = torch.LongTensor(actions)
-            rewards = torch.FloatTensor(rewards)
-            next_states = torch.FloatTensor(next_states)
-            dones = torch.BoolTensor(dones)
-            
-            # Compute Q-values
-            current_q_values = q_network(states).gather(1, actions.unsqueeze(1))
-            next_q_values = target_network(next_states).max(1)[0].detach()
-            target_q_values = rewards + (gamma * next_q_values * ~dones)
-            
-            # Compute loss
-            loss = torch.nn.functional.mse_loss(current_q_values.squeeze(), target_q_values)
-            
-            # Update network
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-        
+        DiscreteTools.q_learning_update(q, state, action, reward, next_state,
+                                        gamma=0.9, alpha=0.5, done=done)
         state = next_state
-    
-    # Update target network
-    if episode % target_update_freq == 0:
-        target_network.load_state_dict(q_network.state_dict())
-\end{lstlisting}
+        if done:
+            break
+print([q.get_max_action(s) for s in range(5)])    # [1, 1, 1, 1, 1]
+\end{pycode}
 
-\section{Network Utilities}
+\section{Example: a DQN agent for LineMsg}\label{sec:neural-example}
 
-\subsection{Weight Initialization}
+The following script trains a small deep Q-network on the LineMsg environment
+of Chapter~\ref{chap:networked} with four agents, treating the $2^4$ joint
+actions as one discrete action. It shows the pieces that a training loop
+typically needs: action-value selection with \code{q\_net(s, a)}, a target
+network, an optimizer created by name, gradient clipping and checkpointing.
+On a laptop CPU it runs in a few seconds and the greedy policy reaches the
+return of the always-relay strategy (about 65 per episode, compared with
+about 30 for random actions).
 
-\begin{lstlisting}[language=python, caption=Weight Initialization]
-from toolkit.neural_toolkit import initialize_weights
+% fresh
+\begin{pycode}
+from collections import deque
 
-# Initialize network weights
-initialize_weights(policy_network, method='xavier_uniform')
-initialize_weights(value_network, method='orthogonal')
-\end{lstlisting}
-
-\subsection{Model Saving and Loading}
-
-\begin{lstlisting}[language=python, caption=Model Persistence]
+import numpy as np
 import torch
+import torch.nn.functional as F
 
-# Save model
-torch.save({
-    'policy_state_dict': policy_network.state_dict(),
-    'value_state_dict': value_network.state_dict(),
-    'policy_optimizer_state_dict': policy_optimizer.state_dict(),
-    'value_optimizer_state_dict': value_optimizer.state_dict(),
-    'episode': episode,
-    'reward_history': reward_history
-}, 'checkpoint.pth')
+import env_lib
+from toolkit.neural_toolkit import MLPQNetwork, NetworkUtils
 
-# Load model
-checkpoint = torch.load('checkpoint.pth')
-policy_network.load_state_dict(checkpoint['policy_state_dict'])
-value_network.load_state_dict(checkpoint['value_state_dict'])
-policy_optimizer.load_state_dict(checkpoint['policy_optimizer_state_dict'])
-value_optimizer.load_state_dict(checkpoint['value_optimizer_state_dict'])
-episode = checkpoint['episode']
-reward_history = checkpoint['reward_history']
-\end{lstlisting}
+torch.manual_seed(0)
+rng = np.random.default_rng(0)
+env = env_lib.LineMsgEnv(num_agents=4, max_iter=50)
+obs_dim = int(np.prod(env.observation_space.shape))    # 4 agents x 3 cells
+n_actions = int(env.action_space.n)                     # 2**4 joint actions
 
-\section{Best Practices}
+q_net = MLPQNetwork(obs_dim, n_actions, hidden_dims=(64, 64))
+target_net = MLPQNetwork(obs_dim, n_actions, hidden_dims=(64, 64))
+target_net.load_state_dict(q_net.state_dict())
+optimizer = NetworkUtils.create_optimizer(q_net, "adam", lr=1e-3)
+buffer = deque(maxlen=10_000)
 
-\subsection{Network Architecture}
+obs, info = env.reset(seed=0)
+for step in range(4000):
+    epsilon = max(0.05, 1.0 - step / 2000)
+    if rng.random() < epsilon:
+        action = int(rng.integers(n_actions))
+    else:
+        with torch.no_grad():
+            action = int(q_net(torch.as_tensor(obs.reshape(1, -1))).argmax())
+    next_obs, reward, terminated, truncated, info = env.step(action)
+    buffer.append((obs.ravel(), action, reward, next_obs.ravel(), float(terminated)))
+    obs = next_obs
+    if terminated or truncated:
+        obs, info = env.reset()
 
-\begin{enumerate}
-    \item Start with simple architectures and gradually increase complexity
-    \item Use appropriate activation functions (ReLU for most cases, GELU for transformers)
-    \item Consider using layer normalization for training stability
-    \item Use dropout for regularization
-    \item Monitor gradient flow and weight distributions
-\end{enumerate}
+    if len(buffer) >= 500:
+        batch = [buffer[i] for i in rng.integers(len(buffer), size=64)]
+        s, a, r, s2, done = (torch.as_tensor(np.array(x)) for x in zip(*batch))
+        with torch.no_grad():
+            target = r.float() + 0.99 * (1.0 - done.float()) * target_net(s2).max(dim=1).values
+        loss = F.smooth_l1_loss(q_net(s, a), target)     # q_net(s, a) = Q(s, a), shape (B,)
+        optimizer.zero_grad()
+        loss.backward()
+        NetworkUtils.clip_grad_norm(q_net, max_norm=10.0)
+        optimizer.step()
+    if step % 500 == 0:
+        target_net.load_state_dict(q_net.state_dict())
 
-\subsection{Training}
+NetworkUtils.save_checkpoint(q_net, optimizer, epoch=step, loss=float(loss),
+                             filepath="checkpoints/dqn_linemsg.pt")
+\end{pycode}
 
-\begin{enumerate}
-    \item Use appropriate learning rates (typically 0.001 for Adam)
-    \item Implement learning rate scheduling
-    \item Use gradient clipping for stability
-    \item Monitor training progress with plots
-    \item Save checkpoints regularly
-\end{enumerate}
+Evaluating the greedy policy and restoring the checkpoint later:
 
-\subsection{Hyperparameter Tuning}
+\begin{pycode}
+def evaluate(policy, episodes=10):
+    returns = []
+    for episode in range(episodes):
+        obs, info = env.reset(seed=100 + episode)
+        total, done = 0.0, False
+        while not done:
+            obs, reward, terminated, truncated, info = env.step(policy(obs))
+            total += reward
+            done = terminated or truncated
+        returns.append(total)
+    return float(np.mean(returns))
 
-\begin{enumerate}
-    \item Use grid search or random search for hyperparameter optimization
-    \item Start with broad ranges and narrow down
-    \item Use cross-validation when possible
-    \item Monitor multiple metrics (reward, loss, convergence)
-    \item Document all hyperparameter settings
-\end{enumerate} 
+restored = MLPQNetwork(obs_dim, n_actions, hidden_dims=(64, 64))
+epoch, last_loss = NetworkUtils.load_checkpoint(restored, None, "checkpoints/dqn_linemsg.pt")
+with torch.no_grad():
+    greedy_return = evaluate(lambda o: int(restored(torch.as_tensor(o.reshape(1, -1))).argmax()))
+random_return = evaluate(lambda o: int(rng.integers(n_actions)))
+print(f"greedy {greedy_return:.1f}, random {random_return:.1f}")
+\end{pycode}
+
+Two larger examples ship with the repository:
+\code{examples/simple\_transformer\_example.py} trains a
+\code{TransformerPolicyNetwork} with REINFORCE on a memory task, and
+\code{examples/transformer\_rl\_example.py} trains transformer actor and
+critic networks with PPO on batched environments (Chapter~\ref{chap:examples}).
+
+\section{Changes in version 1.0}\label{sec:neural-changes}
+
+Version 1.0 fixed several defects that changed the computed functions. The
+most important ones are:
+
+\begin{itemize}
+  \item The MLP stacks of earlier versions applied no activation between
+    hidden layers, so deep ``MLPs'' were nearly linear. This affected every
+    policy, value and Q-network, encoder and decoder.
+  \item The positional encoding was indexed by batch position instead of
+    sequence position.
+  \item Convolutional networks with activations other than ReLU crashed; the
+    dueling head was combined incorrectly; Q-networks ignored the
+    \code{action} argument; \code{CNNEncoder} failed on $64 \times 64$ inputs;
+    \code{CNNDecoder} indexed its kernel sizes incorrectly; bidirectional RNNs
+    read a backward state that had seen only one time step.
+  \item Unknown activation names now raise instead of falling back silently,
+    and the \code{device} argument is honoured.
+  \item Tabular tools use a per-table random generator instead of the global
+    one; UCB, softmax and \code{PolicyTable.set\_value} were corrected.
+\end{itemize}
+
+\paragraph{Checkpoint compatibility.}
+Because the layer structure changed (activation modules now sit between the
+linear layers, so the indices of \code{nn.Sequential} entries differ), model
+checkpoints written by versions before 1.0 cannot be loaded into 1.0 networks:
+\code{load\_state\_dict} reports missing and unexpected keys. Even where the
+parameter shapes happen to match, the networks compute different functions.
+Retrain models with version 1.0; Appendix~\ref{app:migration} lists the other
+API changes.

@@ -1,113 +1,274 @@
-\chapter{Introduction}
+% ---------------------------------------------------------------------------
+% Chapter: Introduction
+% ---------------------------------------------------------------------------
+\chapter{Introduction}\label{chap:intro}
 
-\section{Overview}
+My Tool Box is a Python package for research on multi-agent reinforcement
+learning (MARL) and networked control. It is distributed as a single
+installable project, \pkg{my-tool-box}, that provides two import packages:
 
-My Tool Box is a comprehensive research toolkit designed for reinforcement learning, neural network development, and environment simulation. This project consists of two main components:
+\begin{description}[leftmargin=1.6cm,style=nextline]
+  \item[\pkg{env\_lib}] A collection of multi-agent environments that follow
+    the Gymnasium API: coupled oscillators, message passing and wireless
+    access on graphs, a cooperative physics game, consensus and formation
+    control, and multi-robot localisation and target tracking.
+  \item[\pkg{toolkit}] Research utilities that are independent of the
+    environments: \pkg{plotkit} for publication-quality figures,
+    \pkg{neural\_toolkit} for PyTorch network building blocks and tabular
+    reinforcement-learning tools, and \pkg{parakit} for managing
+    \pkg{argparse} parameters, with an optional graphical editor.
+\end{description}
 
-\begin{itemize}
-    \item \textbf{Toolkit Project}: A unified Python package containing neural network architectures, plotting utilities, and research tools
-    \item \textbf{Environment Library Project}: A collection of specialized reinforcement learning environments for various research domains
-\end{itemize}
+This manual describes version 1.0 of the package. It explains how to install
+it, documents every environment and toolkit module, collects practical recipes
+and troubleshooting advice, and ends with an API reference and a migration
+guide for code written against earlier versions.
 
-\section{Project Structure}
+\section{What the package provides}\label{sec:intro-provides}
 
-The project is organized as follows:
+Table~\ref{tab:intro-envs} lists the environments. Each one is available as a
+class in \pkg{env\_lib} and under one or more registered Gymnasium ids; the
+version suffix of an id selects a preset configuration (for example
+\envid{WirelessComm-v1} is the $4\times 4$ grid), not a newer revision.
+Figure~\ref{fig:intro-gallery} shows the built-in visualisations.
 
-\begin{figure}[H]
-\centering
-\begin{verbatim}
-My_Tool_Box/
-├── toolkit_project/
-│   └── toolkit/
-│       ├── neural_toolkit/     # Neural network components
-│       ├── plotkit/           # Plotting utilities
-│       └── parakit/           # Parameter management
-├── envlib_project/
-│   └── env_lib/
-│       ├── pistonball_env/    # Multi-agent physics environment
-│       ├── kos_env/           # Kuramoto oscillator environment
-│       ├── wireless_comm_env/ # Wireless communication environment
-│       ├── ajlatt_env/        # Agent-based lattice environment
-│       └── linemsg_env/       # Linear message passing environment
-└── manual/                    # This documentation
-\end{verbatim}
-\caption{Project directory structure}
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Environments provided by \pkg{env\_lib}. The last column names the
+    optional dependency group (see Chapter~\ref{chap:install}) required in
+    addition to the core installation.}
+  \label{tab:intro-envs}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{4.6cm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{1.7cm}c@{}}
+    \toprule
+    Registered ids & Task & Chapter & Extra \\
+    \midrule
+    \envid{KuramotoOscillator-*} &
+      Drive a network of coupled phase oscillators to synchronisation (NumPy). &
+      \ref{chap:kuramoto} & -- \\
+    \envid{KuramotoOscillatorTorch-*} &
+      The same model on PyTorch tensors, with many systems simulated in a batch. &
+      \ref{chap:kuramoto} & \code{torch} \\
+    \envid{LineMsg-v0} &
+      Relay a message along a line of agents with unreliable links. &
+      \ref{chap:networked} & -- \\
+    \envid{WirelessComm-v0}, \envid{-v1} &
+      Share wireless access points on a grid without collisions. &
+      \ref{chap:networked} & -- \\
+    \envid{Pistonball-v0} &
+      Pistons cooperate to roll a ball to the goal (2-D physics). &
+      \ref{chap:pistonball} & \code{pistonball} \\
+    \envid{Consensus-v0}, \envid{Formation-v0} &
+      Rendezvous or form a shape over a communication graph. &
+      \ref{chap:consensus} & -- \\
+    \envid{AJLATT-v0} &
+      Robots localise themselves and jointly track a moving target. &
+      \ref{chap:ajlatt} & -- \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{figure}[htbp]
+  \centering
+  \newcommand{\galleryimg}[2]{%
+    \begin{minipage}[t]{0.32\textwidth}\centering
+      \includegraphics[width=\linewidth,height=3.1cm,keepaspectratio]{#1}\\[2pt]
+      {\footnotesize #2}
+    \end{minipage}}%
+  \galleryimg{kuramoto.png}{(a) Kuramoto oscillators}\hfill
+  \galleryimg{linemsg.png}{(b) LineMsg}\hfill
+  \galleryimg{wireless.png}{(c) WirelessComm}\\[8pt]
+  \galleryimg{pistonball.png}{(d) Pistonball}\hfill
+  \galleryimg{formation.png}{(e) Formation control}\hfill
+  \galleryimg{ajlatt.png}{(f) AJLATT target tracking}
+  \caption{Frames rendered in \code{"rgb\_array"} mode by the environments of
+    \pkg{env\_lib}. Each renderer is a dashboard that combines the scene with
+    the quantities that matter for the task, such as the order parameter of the
+    oscillators, per-agent outcomes or covariance traces.}
+  \label{fig:intro-gallery}
 \end{figure}
 
-\section{Key Features}
-
-\subsection{Toolkit Project Features}
+The \pkg{toolkit} package contains three independent subpackages:
 
 \begin{itemize}
-    \item \textbf{Neural Networks}: Comprehensive collection of policy networks, value networks, and Q-networks
-    \item \textbf{Architectures}: Support for MLP, CNN, RNN, Transformer, and hybrid architectures
-    \item \textbf{Plotting Tools}: Advanced visualization utilities for research results
-    \item \textbf{Parameter Management}: Flexible parameter configuration and management
-    \item \textbf{Training Utilities}: Built-in training loops and evaluation tools
+  \item \pkg{toolkit.plotkit} (Chapter~\ref{chap:plotkit}): learning curves
+    with confidence bands and smoothing, grouped bar charts, histograms,
+    annotated heatmaps, style presets, colour-blind-safe palettes and
+    multi-format export. It depends on matplotlib only.
+  \item \pkg{toolkit.neural\_toolkit} (Chapter~\ref{chap:neural}): policy,
+    value and Q-networks with MLP, convolutional, recurrent and transformer
+    trunks, encoders and decoders (including a variational autoencoder),
+    factories, network utilities and tabular reinforcement-learning tools.
+    It requires PyTorch.
+  \item \pkg{toolkit.parakit} (Chapter~\ref{chap:toolkit}): saving, loading,
+    validating and applying the defaults of an \code{argparse.ArgumentParser},
+    and a Tk window for editing them.
 \end{itemize}
 
-\subsection{Environment Library Features}
+\section{Who this package is for}\label{sec:intro-audience}
+
+The package is written for researchers and students who
+\begin{itemize}
+  \item need small, fast and well-specified multi-agent benchmarks with a
+    standard interface, in particular for networked systems where agents
+    observe only their neighbourhood;
+  \item study synchronisation, consensus, distributed estimation or
+    cooperative control and want environments whose dynamics and rewards are
+    documented precisely enough to be cited in a paper;
+  \item want consistent, reproducible figures and reusable network components
+    without adopting a large framework.
+\end{itemize}
+The environments do not depend on any particular learning library; any
+algorithm that can drive a Gymnasium environment can use them.
+
+\section{Design principles}\label{sec:intro-principles}
+
+\paragraph{Gymnasium compatibility.}
+Every environment subclasses \code{gymnasium.Env}.
+\code{reset(*, seed=None, options=None)} returns \code{(observation, info)} and
+\code{step(action)} returns \code{(observation, reward, terminated, truncated,
+info)}, where \code{terminated} signals a task-defined end (success or
+failure) and \code{truncated} the episode limit. Observations are
+\code{float32} arrays contained in \code{observation\_space}. Multi-agent
+environments expose the whole team through joint spaces whose leading axis
+indexes the agents, and every environment reports per-agent rewards in
+\code{info["agent\_rewards"]}. Each environment enforces its own episode limit
+through a constructor argument; the registry does not add a \code{TimeLimit}
+wrapper that could silently override it. Chapter~\ref{chap:envlib} describes
+these conventions in detail.
+
+\paragraph{Vectorised implementations.}
+Dynamics, observations and rewards are computed with NumPy array expressions
+rather than Python loops over agents. The Kuramoto model additionally has a
+PyTorch backend that simulates many independent systems in one batch, on the
+CPU or a GPU. The networks of \pkg{neural\_toolkit} are batch-first PyTorch
+modules. Section~\ref{sec:examples-benchmarks} reports measured step times.
+
+\paragraph{Reproducibility.}
+All randomness of an environment comes from its own generator,
+\code{self.np\_random}, seeded through \code{reset(seed=...)}. No library code
+seeds or draws from the global NumPy, Python or PyTorch random state, and
+plotting functions never modify the global matplotlib configuration unless
+asked to. Section~\ref{sec:trouble-seeding} lists everything that must be
+seeded for an experiment to be repeatable.
+
+\paragraph{Headless rendering.}
+Rendering is optional and never performed unless requested. In
+\code{"rgb\_array"} mode figures are drawn off-screen and returned as
+\code{(H, W, 3)} \code{uint8} arrays, so episodes can be recorded to GIF or MP4
+on machines without a display, for example on a compute cluster or in
+continuous integration. In \code{"human"} mode an environment renders itself
+at the end of every \code{reset()} and \code{step()}, as Gymnasium prescribes.
+
+\paragraph{Lazy optional dependencies.}
+\code{import env\_lib} and \code{import toolkit} load only the core
+dependencies (NumPy, SciPy, matplotlib, Gymnasium and PyYAML). PyTorch,
+pygame, pymunk, imageio and Tk are imported only when a feature that needs
+them is used, and a missing dependency produces an error message that names
+the package extra to install.
+
+\section{Package layout}\label{sec:intro-layout}
+
+The repository uses the standard \code{src} layout:
+
+\begin{textcode}
+My_Tool_Box/
+  pyproject.toml           packaging metadata, optional extras, tool settings
+  CHANGELOG.md             release notes and migration notes
+  LICENSE                  MIT licence
+  src/
+    env_lib/               environments (import name env_lib)
+      registration.py      Gymnasium ids, env_lib.make(), env_lib.list_envs()
+      utils/               themes, renderers, GIF/MP4 recording
+      kos_env/             Kuramoto oscillators (NumPy and PyTorch)
+      linemsg_env/         LineMsg
+      wireless_comm_env/   WirelessComm
+      pistonball_env/      Pistonball
+      consensus_env/       Consensus and Formation
+      ajlatt_env/          AJLATT (configuration, estimation, maps, rendering)
+    toolkit/               research utilities (import name toolkit)
+      plotkit/             plotting
+      neural_toolkit/      PyTorch networks and tabular tools
+      parakit/             argparse parameter management
+  examples/                runnable, documented example scripts
+  benchmarks/              performance measurements
+  tests/                   pytest suite
+  docs/manual/             this manual (LaTeX sources)
+\end{textcode}
+
+A first program creates an environment through the registry, runs the
+distributed controller that ships with the consensus environment and renders
+the final state:
+
+\begin{pycode}
+import env_lib
+
+env = env_lib.make("Consensus-v0", render_mode="rgb_array")
+obs, info = env.reset(seed=0)
+for _ in range(200):
+    action = env.unwrapped.laplacian_policy()   # baseline controller
+    obs, reward, terminated, truncated, info = env.step(action)
+    if terminated or truncated:
+        break
+frame = env.render()                            # (H, W, 3) uint8 image
+print(info["error"], info["agent_rewards"].shape, frame.shape)
+env.close()
+\end{pycode}
+
+\section{Conventions used in this manual}\label{sec:intro-conventions}
+
+Python identifiers are set in \code{monospace}, package and module names in
+\pkg{sans-serif}, and registered environment ids as \envid{Consensus-v0}.
+Shell commands are meant to be run from the repository root in a POSIX shell;
+on Windows, replace \code{export VAR=value} by \code{set VAR=value}
+(\code{cmd}) or \code{\$env:VAR="value"} (PowerShell). Code examples use the
+public API of version 1.0 and were executed with it. Array shapes are written
+as tuples, for example \code{(n\_agents, obs\_dim)}; \code{B} denotes a batch
+size and \code{T} a sequence length.
+
+\section{How this manual is organised}\label{sec:intro-organisation}
 
 \begin{itemize}
-    \item \textbf{Multi-Agent Environments}: Collaborative and competitive scenarios
-    \item \textbf{Physics Simulations}: Realistic physics-based environments
-    \item \textbf{Communication Networks}: Wireless and message passing environments
-    \item \textbf{Complex Systems}: Kuramoto oscillators and lattice-based systems
-    \item \textbf{Modular Design}: Easy to extend and customize environments
+  \item Chapter~\ref{chap:install} covers requirements, installation with
+    optional extras, verification and building this manual.
+  \item Part~I documents the environments: the common interface
+    (Chapter~\ref{chap:envlib}), the Kuramoto oscillators
+    (Chapter~\ref{chap:kuramoto}), LineMsg and WirelessComm
+    (Chapter~\ref{chap:networked}), Pistonball (Chapter~\ref{chap:pistonball}),
+    consensus and formation control (Chapter~\ref{chap:consensus}) and AJLATT
+    (Chapter~\ref{chap:ajlatt}).
+  \item Part~II documents the toolkit: its structure and \pkg{parakit}
+    (Chapter~\ref{chap:toolkit}), \pkg{plotkit} (Chapter~\ref{chap:plotkit})
+    and \pkg{neural\_toolkit} (Chapter~\ref{chap:neural}).
+  \item Part~III is practical: the example scripts, recording, benchmarks and
+    the contributor workflow (Chapter~\ref{chap:examples}), and
+    troubleshooting (Chapter~\ref{chap:troubleshooting}).
+  \item Appendix~\ref{app:api} is a compact API reference and
+    Appendix~\ref{app:migration} explains how to migrate code written for
+    versions before 1.0.
 \end{itemize}
 
-\section{Target Audience}
+\section{Licence and citation}\label{sec:intro-licence}
 
-This toolkit is designed for:
+My Tool Box is free software distributed under the MIT licence; the full
+text is in the file \code{LICENSE} at the root of the repository. The source
+code is hosted at \url{https://github.com/EricDMW/My_Tool_Box}, where bugs
+and feature requests can be reported as issues.
 
-\begin{itemize}
-    \item \textbf{Researchers}: Working in reinforcement learning, multi-agent systems, and neural networks
-    \item \textbf{Students}: Learning advanced machine learning concepts
-    \item \textbf{Developers}: Building custom environments and algorithms
-    \item \textbf{Engineers}: Implementing practical AI solutions
-\end{itemize}
+If the package contributes to published work, please cite it as follows:
 
-\section{Prerequisites}
+\begin{textcode}
+@software{wang2026mytoolbox,
+  author  = {Wang, Dongming},
+  title   = {My Tool Box: Multi-Agent Reinforcement Learning
+             Environments and Research Utilities},
+  version = {1.0.0},
+  year    = {2026},
+  url     = {https://github.com/EricDMW/My_Tool_Box}
+}
+\end{textcode}
 
-Before using this toolkit, you should have:
-
-\begin{itemize}
-    \item Python 3.7 or higher
-    \item Basic knowledge of reinforcement learning concepts
-    \item Familiarity with PyTorch and TensorFlow
-    \item Understanding of neural network architectures
-\end{itemize}
-
-\section{Quick Start}
-
-To get started quickly:
-
-\begin{enumerate}
-    \item Install the toolkit: \texttt{pip install -e toolkit\_project/}
-    \item Install the environment library: \texttt{pip install -e envlib\_project/}
-    \item Run the example scripts in the \texttt{examples/} directory
-    \item Explore the documentation for detailed usage
-\end{enumerate}
-
-\section{Documentation Organization}
-
-This manual is organized as follows:
-
-\begin{itemize}
-    \item \textbf{Chapters 1-2}: Introduction and installation
-    \item \textbf{Chapters 3-5}: Toolkit components (neural networks, plotting, overview)
-    \item \textbf{Chapters 6-10}: Environment library components
-    \item \textbf{Chapters 11-13}: Examples, troubleshooting, and advanced usage
-    \item \textbf{Appendices}: API reference, configuration, and benchmarks
-\end{itemize}
-
-\section{Getting Help}
-
-If you encounter issues or need help:
-
-\begin{itemize}
-    \item Check the troubleshooting chapter (Chapter 12)
-    \item Review the example code in the \texttt{examples/} directory
-    \item Examine the test files for usage patterns
-    \item Consult the individual README files in each component
-\end{itemize} 
+When results depend on a particular environment, please also cite the
+original description of the underlying model or benchmark (for example the
+Kuramoto model of coupled oscillators), as given in the corresponding
+environment chapter.

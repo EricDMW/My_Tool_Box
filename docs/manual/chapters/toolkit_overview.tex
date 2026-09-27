@@ -1,366 +1,405 @@
-\chapter{Toolkit Overview}
+% ---------------------------------------------------------------------------
+% Chapter: Toolkit overview and parakit
+% ---------------------------------------------------------------------------
+\chapter{Toolkit Overview and Parameter Management}\label{chap:toolkit}
 
-\section{Introduction to the Toolkit}
+The \pkg{toolkit} package collects research utilities that are independent of
+the environments. This chapter describes its structure and then documents
+\pkg{toolkit.parakit}, the parameter-management module. The plotting and
+neural-network subpackages have their own chapters.
 
-The \texttt{toolkit} package is a unified Python package that combines neural network components, plotting utilities, and parameter management tools into a single, cohesive research toolkit. It's designed to provide researchers and developers with a comprehensive set of tools for reinforcement learning and machine learning experiments.
+\section{Structure of the toolkit}\label{sec:toolkit-structure}
 
-\section{Package Structure}
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Subpackages of \pkg{toolkit}.}
+  \label{tab:toolkit-subpackages}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{3.3cm}l@{}}
+    \toprule
+    Subpackage & Contents & Dependencies & Chapter \\
+    \midrule
+    \pkg{toolkit.plotkit} & Learning curves, bars, histograms, heatmaps,
+      style presets, palettes, figure export, gallery CLI &
+      matplotlib (core) & \ref{chap:plotkit} \\
+    \pkg{toolkit.neural\_toolkit} & Policy, value and Q-networks, encoders,
+      decoders, factories, \code{NetworkUtils}, tabular tools &
+      PyTorch (\code{torch} extra) & \ref{chap:neural} \\
+    \pkg{toolkit.parakit} & Save, load, validate and apply \pkg{argparse}
+      defaults; Tk editor window & standard library; Tk for the window &
+      \ref{chap:toolkit} \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
 
-The toolkit is organized into three main subpackages:
+The subpackages are imported lazily: \code{import toolkit} only defines
+\code{toolkit.\_\_version\_\_}, and the first access to
+\code{toolkit.plotkit}, \code{toolkit.neural\_toolkit} or
+\code{toolkit.parakit} imports that subpackage. A script that only plots
+therefore never imports PyTorch, and \pkg{parakit}'s headless functions work
+on systems without Tk. The usual import style names the subpackage
+explicitly:
 
-\begin{figure}[H]
-\centering
-\begin{verbatim}
-toolkit/
-├── __init__.py              # Main package initialization
-├── neural_toolkit/          # Neural network components
-│   ├── networks/            # Network architectures
-│   ├── encoders/            # State encoders
-│   ├── decoders/            # Output decoders
-│   ├── discrete_tools/      # Tabular methods
-│   └── utils/               # Utility functions
-├── plotkit/                 # Plotting utilities
-│   ├── core.py              # Core plotting functions
-│   └── __main__.py          # Command-line interface
-└── parakit/                 # Parameter management
-\end{verbatim}
-\caption{Toolkit package structure}
-\end{figure}
+\begin{pycode}
+from toolkit.plotkit import plot_learning_curves, save_figure
+from toolkit.parakit import apply_parameters, load_parameters
+from toolkit.neural_toolkit import MLPPolicyNetwork, NetworkUtils  # needs torch
+\end{pycode}
 
-\section{Neural Toolkit}
+All three subpackages follow the conventions of the environments: they never
+print, never configure logging (diagnostics go to \code{logging} loggers named
+after the module), never touch the global random state, and report problems
+with exceptions or \code{warnings} whose messages say how to fix them.
 
-The \texttt{neural\_toolkit} subpackage provides comprehensive neural network components for reinforcement learning.
+\section{parakit: managing argparse parameters}\label{sec:parakit}
 
-\subsection{Network Architectures}
+Research scripts are usually configured through an
+\code{argparse.ArgumentParser}. \pkg{parakit} treats the parser as the single
+source of truth for the parameters, their types and their allowed values, and
+adds four operations on top of it: reading the current defaults, saving them
+to a JSON file, loading a file, and installing validated values as the new
+defaults. Because the values become \emph{defaults}, flags given on the
+command line still override them. An optional Tk window
+(Section~\ref{sec:parakit-gui}) lets users edit the values interactively.
 
-\subsubsection{Policy Networks}
+\subsection{Quick start}\label{sec:parakit-quickstart}
 
-Policy networks implement different policy architectures:
+The typical workflow saves the configuration of a run next to its results and
+later restores it:
 
-\begin{itemize}
-    \item \textbf{MLPPolicyNetwork}: Multi-layer perceptron policy
-    \item \textbf{CNPolicyNetwork}: Convolutional neural network policy
-    \item \textbf{RNNPolicyNetwork}: Recurrent neural network policy
-    \item \textbf{TransformerPolicyNetwork}: Transformer-based policy
-    \item \textbf{HybridPolicyNetwork}: Combination of different architectures
-\end{itemize}
-
-\subsubsection{Value Networks}
-
-Value networks for state-value and action-value estimation:
-
-\begin{itemize}
-    \item \textbf{MLPValueNetwork}: MLP-based value network
-    \item \textbf{CNValueNetwork}: CNN-based value network
-    \item \textbf{RNNValueNetwork}: RNN-based value network
-    \item \textbf{TransformerValueNetwork}: Transformer-based value network
-\end{itemize}
-
-\subsubsection{Q-Networks}
-
-Q-networks for action-value function approximation:
-
-\begin{itemize}
-    \item \textbf{MLPQNetwork}: MLP-based Q-network
-    \item \textbf{CNQNetwork}: CNN-based Q-network
-    \item \textbf{RNNQNetwork}: RNN-based Q-network
-    \item \textbf{TransformerQNetwork}: Transformer-based Q-network
-    \item \textbf{DuelingQNetwork}: Dueling architecture Q-network
-\end{itemize}
-
-\subsection{State Encoders}
-
-State encoders transform raw observations into neural network inputs:
-
-\begin{itemize}
-    \item \textbf{MLPEncoder}: Multi-layer perceptron encoder
-    \item \textbf{CNNEncoder}: Convolutional neural network encoder
-    \item \textbf{RNNEncoder}: Recurrent neural network encoder
-    \item \textbf{TransformerEncoder}: Transformer-based encoder
-    \item \textbf{HybridEncoder}: Combination of different encoders
-\end{itemize}
-
-\subsection{Output Decoders}
-
-Output decoders transform network outputs into actions or values:
-
-\begin{itemize}
-    \item \textbf{MLPDecoder}: Multi-layer perceptron decoder
-    \item \textbf{CNNDecoder}: Convolutional neural network decoder
-    \item \textbf{RNNDecoder}: Recurrent neural network decoder
-    \item \textbf{TransformerDecoder}: Transformer-based decoder
-    \item \textbf{VariationalDecoder}: Variational autoencoder decoder
-\end{itemize}
-
-\subsection{Discrete Tools}
-
-Tools for tabular reinforcement learning methods:
-
-\begin{itemize}
-    \item \textbf{QTable}: Q-learning table implementation
-    \item \textbf{ValueTable}: Value iteration table
-    \item \textbf{PolicyTable}: Policy table for discrete actions
-    \item \textbf{DiscreteTools}: Utility functions for discrete RL
-\end{itemize}
-
-\section{Plotkit}
-
-The \texttt{plotkit} subpackage provides advanced plotting utilities for research visualization.
-
-\subsection{Core Features}
-
-\begin{itemize}
-    \item \textbf{Training Plots}: Loss curves, reward plots, and convergence analysis
-    \item \textbf{Performance Metrics}: Accuracy, precision, recall, and F1-score plots
-    \item \textbf{Network Analysis}: Weight distributions, activation maps, and gradients
-    \item \textbf{Environment Visualization}: State representations and action distributions
-    \item \textbf{Comparison Plots}: Multi-algorithm and multi-environment comparisons
-\end{itemize}
-
-\subsection{Plot Types}
-
-\subsubsection{Training Visualization}
-
-\begin{lstlisting}[language=python, caption=Training plot example]
-from toolkit.plotkit import plot_training_curves
-
-# Plot training progress
-plot_training_curves(
-    rewards=rewards_history,
-    losses=loss_history,
-    title="Training Progress",
-    save_path="training_curves.png"
-)
-\end{lstlisting}
-
-\subsubsection{Performance Analysis}
-
-\begin{lstlisting}[language=python, caption=Performance analysis example]
-from toolkit.plotkit import plot_performance_metrics
-
-# Plot performance metrics
-plot_performance_metrics(
-    metrics={
-        'accuracy': accuracy_history,
-        'precision': precision_history,
-        'recall': recall_history
-    },
-    title="Performance Metrics",
-    save_path="performance.png"
-)
-\end{lstlisting}
-
-\subsubsection{Network Analysis}
-
-\begin{lstlisting}[language=python, caption=Network analysis example]
-from toolkit.plotkit import plot_weight_distributions
-
-# Plot weight distributions
-plot_weight_distributions(
-    model=policy_network,
-    title="Weight Distributions",
-    save_path="weights.png"
-)
-\end{lstlisting}
-
-\section{Parakit}
-
-The \texttt{parakit} subpackage provides parameter management and configuration tools.
-
-\subsection{Features}
-
-\begin{itemize}
-    \item \textbf{Parameter Configuration}: JSON and YAML configuration files
-    \item \textbf{Hyperparameter Management}: Grid search and random search utilities
-    \item \textbf{Experiment Tracking}: Parameter logging and experiment management
-    \item \textbf{Configuration Validation}: Parameter validation and type checking
-\end{itemize}
-
-\section{Usage Examples}
-
-\subsection{Basic Usage}
-
-\begin{lstlisting}[language=python, caption=Basic toolkit usage]
-import torch
-from toolkit.neural_toolkit import MLPPolicyNetwork, MLPValueNetwork
-from toolkit.plotkit import plot_training_curves
-
-# Create networks
-policy_network = MLPPolicyNetwork(
-    input_dim=10,
-    output_dim=4,
-    hidden_dims=[256, 256],
-    activation='relu'
+\begin{pycode}
+import argparse
+from toolkit.parakit import (
+    apply_parameters, get_parameters, load_parameters, save_parameters,
 )
 
-value_network = MLPValueNetwork(
-    input_dim=10,
-    hidden_dims=[256, 256],
-    activation='relu'
-)
+parser = argparse.ArgumentParser()
+parser.add_argument("--lr", type=float, default=3e-4, help="learning rate")
+parser.add_argument("--batch_size", type=int, default=64)
+parser.add_argument("--optimizer", choices=["adam", "sgd"], default="adam")
+parser.add_argument("--hidden", type=int, nargs="+", default=[256, 256])
+parser.add_argument("--layer_norm", action="store_true")
+parser.add_argument("--checkpoint", default=None)
 
-# Training loop
-rewards = []
-losses = []
+# Save the current defaults into a directory (timestamped file name).
+path = save_parameters(get_parameters(parser), "runs/params")
 
-for episode in range(1000):
-    # Training code here
-    episode_reward = train_episode(policy_network, value_network)
-    rewards.append(episode_reward)
-    
-    if episode % 100 == 0:
-        loss = compute_loss(policy_network, value_network)
-        losses.append(loss)
+# Later: load the newest file of the directory and install it as defaults.
+apply_parameters(parser, load_parameters("runs/params"))
 
-# Plot results
-plot_training_curves(
-    rewards=rewards,
-    losses=losses,
-    title="Training Progress",
-    save_path="training_results.png"
-)
-\end{lstlisting}
+# Values given as text are converted according to the parser.
+apply_parameters(parser, {"lr": "1e-3", "hidden": "64 64", "layer_norm": "yes"})
+args = parser.parse_args([])            # lr=0.001, hidden=[64, 64], layer_norm=True
+args = parser.parse_args(["--lr", "0.01"])  # command-line flags still win
+\end{pycode}
 
-\subsection{Advanced Usage}
+\subsection{Headless API}\label{sec:parakit-api}
 
-\begin{lstlisting}[language=python, caption=Advanced toolkit usage]
-import torch
-from toolkit.neural_toolkit import (
-    TransformerPolicyNetwork,
-    TransformerValueNetwork,
-    CNNEncoder,
-    MLPDecoder
-)
-from toolkit.plotkit import plot_network_analysis
+Table~\ref{tab:parakit-api} lists the functions; none of them needs Tk.
 
-# Create complex network architecture
-encoder = CNNEncoder(
-    input_channels=3,
-    hidden_dims=[32, 64, 128],
-    output_dim=256
-)
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Headless functions of \pkg{toolkit.parakit}.}
+  \label{tab:parakit-api}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{5.6cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Function & Description \\
+    \midrule
+    \code{get\_parameters(parser)} &
+      Dictionary \code{\{dest: default\}} of all tunable options (lists are
+      copied). \\
+    \code{save\_parameters(values, path\_or\_dir)} &
+      Write \code{values} as JSON and return the \code{Path} of the file.
+      A path with a suffix is used as the file name; a directory (existing, or
+      a path without suffix) receives a new timestamped file. Parent
+      directories are created and the write is atomic. \\
+    \code{load\_parameters(path)} &
+      Read a JSON object from a file, or from the newest
+      \code{parameters\_*.json} file of a directory. Raises
+      \code{FileNotFoundError} or \code{ValueError}. \\
+    \code{apply\_parameters(parser, values, strict=True, validation\_callbacks=None)} &
+      Convert and validate every value with \code{parse\_value}, then call
+      \code{parser.set\_defaults}. Returns the parser. \\
+    \code{parse\_value(action, text, validator=None)} &
+      Convert one value (text or an already typed JSON value) for an
+      \pkg{argparse} action; see Section~\ref{sec:parakit-parsing}. \\
+    \code{parse\_bool(value)} &
+      Convert \code{true/false}, \code{yes/no}, \code{on/off}, \code{1/0}
+      (any case) or a boolean to \code{bool}. \\
+    \code{format\_value(action, value)} &
+      Text that \code{parse\_value} converts back (lists as JSON, \code{None}
+      as \code{"None"}). \\
+    \code{describe\_type(action)} &
+      Short type description such as \code{"float"}, \code{"list[int]"} or
+      \code{"str or None"}. \\
+    \code{tunable\_actions(parser)} &
+      Dictionary \code{\{dest: action\}} of the options \pkg{parakit}
+      manages. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
 
-policy_network = TransformerPolicyNetwork(
-    input_dim=256,
-    output_dim=10,
-    d_model=256,
-    nhead=8,
-    num_layers=6
-)
+\paragraph{Tunable options.}
+\code{tunable\_actions} skips help, version and sub-parser actions and options
+whose destination or default is \code{argparse.SUPPRESS}. When several options
+share a destination, such as a \code{--flag}/\code{--no-flag} pair, the first
+one is used. Positional arguments are included and keyed by their name.
 
-value_network = TransformerValueNetwork(
-    input_dim=256,
-    d_model=256,
-    nhead=8,
-    num_layers=6
-)
+\paragraph{Errors.}
+\code{apply\_parameters} either applies all values or none. With
+\code{strict=True} (the default) a key that is not a parser destination raises
+a \code{ValueError} that lists the unknown keys and the valid names; with
+\code{strict=False} unknown keys are ignored. Otherwise every value is
+converted, and all conversion and validation failures are reported together
+in one \code{ValueError}, one line per parameter. The parser is left unchanged
+whenever an exception is raised.
 
-# Network analysis
-plot_network_analysis(
-    networks={
-        'encoder': encoder,
-        'policy': policy_network,
-        'value': value_network
-    },
-    title="Network Architecture Analysis",
-    save_path="network_analysis.png"
-)
-\end{lstlisting}
+\subsection{File format}\label{sec:parakit-format}
 
-\section{Configuration}
+A parameter file is a flat JSON object that maps each destination name
+(\code{action.dest}) to its value, written in UTF-8 with an indentation of four
+spaces:
 
-\subsection{Default Configuration}
-
-The toolkit uses sensible defaults for most parameters:
-
-\begin{lstlisting}[language=python, caption=Default configuration]
-DEFAULT_CONFIG = {
-    'device': 'cuda' if torch.cuda.is_available() else 'cpu',
-    'dtype': torch.float32,
-    'seed': 42,
-    'activation': 'relu',
-    'dropout': 0.1,
-    'layer_norm': False,
-    'hidden_dims': [256, 256],
-    'learning_rate': 0.001,
-    'batch_size': 32
+\begin{textcode}
+{
+    "lr": 0.001,
+    "batch_size": 64,
+    "optimizer": "adam",
+    "hidden": [
+        64,
+        64
+    ],
+    "layer_norm": true,
+    "checkpoint": null
 }
-\end{lstlisting}
+\end{textcode}
 
-\subsection{Custom Configuration}
+\begin{itemize}
+  \item \emph{File names.} Saving into a directory creates
+    \code{parameters\_YYYYmmdd\_HHMMSS.json}; if that name exists (two saves in
+    the same second), \code{\_1}, \code{\_2}, \ldots\ is appended. Loading from
+    a directory reads the file whose name sorts last, which is the most recent
+    one.
+  \item \emph{Values.} JSON numbers, strings, booleans, \code{null} and lists
+    are stored as such. NumPy arrays and scalars are converted with
+    \code{tolist()}, sets are stored as sorted lists and any other object as its
+    \code{str()}.
+  \item \emph{Loading.} Values read from a file pass through the same
+    conversion as text, so a file may contain \code{"64"} or \code{64} for an
+    integer option, and \code{"yes"} or \code{true} for a flag. A file may
+    contain a subset of the parameters; the other defaults are kept.
+  \item \emph{Atomic writes.} Files are written to a temporary file in the
+    target directory and renamed, so an interrupted save never leaves a
+    truncated file behind.
+\end{itemize}
 
-You can override default settings:
+\subsection{Parsing rules}\label{sec:parakit-parsing}
 
-\begin{lstlisting}[language=python, caption=Custom configuration]
-from toolkit import set_config
+\code{parse\_value(action, text)} derives the conversion from the parser's
+own declarations, so the same rules apply to values typed in the editor
+window, loaded from JSON or passed to \code{apply\_parameters}.
+Table~\ref{tab:parakit-rules} summarises them.
 
-# Set custom configuration
-set_config({
-    'device': 'cuda:0',
-    'dtype': torch.float16,
-    'activation': 'gelu',
-    'hidden_dims': [512, 512, 256],
-    'learning_rate': 0.0001
-})
-\end{lstlisting}
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Conversion rules of \code{parse\_value}.}
+  \label{tab:parakit-rules}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{4.4cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Declaration & Accepted input and result \\
+    \midrule
+    \code{type=callable} &
+      The callable is applied to text (surrounding blanks are removed for
+      \code{int} and \code{float}). Already typed values from JSON are checked:
+      an \code{int} option accepts \code{3} and \code{3.0} but not \code{3.5};
+      a \code{float} option accepts integers. \\
+    No \code{type} &
+      The type is inferred from the default (\code{bool}, \code{int},
+      \code{float}, otherwise \code{str}), or from the \code{choices} when all
+      have the same type. \\
+    Booleans: \code{store\_true}, \code{store\_false},
+      \code{BooleanOptionalAction}, \code{type=bool} or a boolean default &
+      \code{true/false}, \code{yes/no}, \code{on/off}, \code{1/0} in any case,
+      or a JSON boolean. The string \code{"False"} gives \code{False}. \\
+    Lists: \code{nargs="+"}, \code{"*"}, an integer, \code{append} and
+      \code{extend} actions &
+      A JSON list (\code{[1.0, 2.0]}), a Python literal list or tuple, or
+      tokens separated by commas (if the text contains a comma) or by
+      whitespace. Each element is converted; \code{"+"} requires at least one
+      element and an integer \code{nargs} exactly that many. \\
+    Default \code{None} or \code{nargs="?"} &
+      \code{None}, \code{null} (any case) and the empty string give
+      \code{None}. For other options \code{None} is rejected, except that a
+      string option accepts the text \code{"None"} literally. \\
+    \code{choices} &
+      Enforced on the converted value (on every element of a list). \\
+    \code{count} action & Converted as an integer. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
 
-\section{Best Practices}
+\paragraph{Declare types explicitly.}
+Type inference from the default is a convenience of \pkg{parakit}, not of
+\pkg{argparse}. An option declared as \code{add\_argument("--gamma",
+default=0.99)} is converted to \code{float} by \pkg{parakit}, but
+\code{parser.parse\_args(["--gamma", "0.9"])} returns the \emph{string}
+\code{"0.9"}. Give every option a \code{type=} so that both paths agree.
 
-\subsection{Network Design}
+\paragraph{Validation callbacks.}
+A validator receives the \emph{converted} value and signals the result in one
+of the following ways: return \code{True}/\code{False}; return a tuple
+\code{(is\_valid, message)} or the legacy form \code{(is\_valid,
+converted\_value, message)}; return \code{None} (valid); or raise
+\code{ValueError} or \code{TypeError}, whose text becomes the error message.
+Validators are not called when the converted value is \code{None}, and a value
+returned by a validator is ignored: the result always follows the parser
+declaration.
 
-\begin{enumerate}
-    \item Start with simple architectures and gradually increase complexity
-    \item Use appropriate activation functions for your task
-    \item Consider using layer normalization for training stability
-    \item Monitor gradient flow and weight distributions
-    \item Use appropriate learning rates and optimizers
-\end{enumerate}
+\begin{pycode}
+def positive_even(value):
+    return value > 0 and value % 2 == 0, "batch size must be a positive even number"
 
-\subsection{Training}
+validators = {"batch_size": positive_even,
+              "lr": lambda v: (0 < v <= 1, "lr must lie in (0, 1]")}
+apply_parameters(parser, {"batch_size": "128", "lr": 0.01},
+                 validation_callbacks=validators)
 
-\begin{enumerate}
-    \item Use appropriate batch sizes for your hardware
-    \item Monitor training progress with plots
-    \item Implement early stopping to prevent overfitting
-    \item Use learning rate scheduling for better convergence
-    \item Save model checkpoints regularly
-\end{enumerate}
+try:
+    apply_parameters(parser, {"batch_size": 7, "optimizer": "rmsprop"},
+                     validation_callbacks=validators)
+except ValueError as exc:
+    print(exc)
+# Invalid parameter values:
+# batch_size: batch size must be a positive even number
+# optimizer: 'rmsprop' is not a valid choice; value must be one of: 'adam', 'sgd'
+\end{pycode}
 
-\subsection{Visualization}
+\subsection{Recommended workflow in training scripts}\label{sec:parakit-workflow}
 
-\begin{enumerate}
-    \item Plot training curves to monitor progress
-    \item Analyze network weights and activations
-    \item Compare different architectures and hyperparameters
-    \item Use appropriate plot types for different metrics
-    \item Save plots with descriptive filenames
-\end{enumerate}
+The following pattern gives a script three configuration layers with a clear
+precedence: parser defaults, then an optional parameter file, then explicit
+command-line flags.
 
-\section{Integration with Environments}
+\begin{pycode}
+import argparse
+import sys
+from toolkit.parakit import apply_parameters, get_parameters, load_parameters, save_parameters
 
-The toolkit is designed to work seamlessly with the environment library:
+def build_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default=None, help="JSON file or directory")
+    parser.add_argument("--lr", type=float, default=3e-4)
+    parser.add_argument("--seed", type=int, default=0)
+    return parser
 
-\begin{lstlisting}[language=python, caption=Environment integration]
-import gym
-from toolkit.neural_toolkit import MLPPolicyNetwork
-from env_lib import pistonball_env
+def main(argv=None):
+    parser = build_parser()
+    pre, _ = parser.parse_known_args(argv)          # read --config first
+    if pre.config is not None:
+        apply_parameters(parser, load_parameters(pre.config), strict=False)
+    args = parser.parse_args(argv)                  # flags override the file
+    run_dir = f"runs/seed{args.seed}"
+    save_parameters(vars(args), f"{run_dir}/config.json")
+    return args
 
-# Create environment
-env = pistonball_env.PistonballEnv()
+main(["--lr", "0.001"])
+\end{pycode}
 
-# Create policy network
-policy_network = MLPPolicyNetwork(
-    input_dim=env.observation_space.shape[0],
-    output_dim=env.action_space.n,
-    hidden_dims=[256, 256]
-)
+\code{AJLATTConfig.add\_arguments(parser)} registers every AJLATT option on a
+parser (Chapter~\ref{chap:ajlatt}), so environment parameters can be managed
+in the same way.
 
-# Training loop
-for episode in range(1000):
-    obs = env.reset()
-    done = False
-    
-    while not done:
-        action = policy_network.select_action(obs)
-        obs, reward, done, info = env.step(action)
-\end{lstlisting} 
+\subsection{The ParameterTuner window}\label{sec:parakit-gui}
+
+\code{ParameterTuner} opens a Tk window with one input field per tunable
+option: a check box for booleans, a drop-down list for options with
+\code{choices}, and a text field otherwise. Each field shows the option's help
+text and its type as reported by \code{describe\_type}. Values are validated
+with \code{parse\_value} (and the optional validation callbacks), written to
+timestamped JSON files, and installed as the parser's defaults when the window
+closes.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Constructor arguments of \code{ParameterTuner}.}
+  \label{tab:parakit-tuner}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.8cm}>{\raggedright\arraybackslash}p{2.1cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Argument & Default & Meaning \\
+    \midrule
+    \code{parser} & required & The \code{argparse.ArgumentParser} to tune. \\
+    \code{save\_delay} & \code{30000} & Auto-save interval in milliseconds. \\
+    \code{save\_path} & \code{None} & Output directory for the JSON files; \code{None}
+      uses the current working directory. Created on the first save. \\
+    \code{auto\_save\_enabled} & \code{True} & Start with auto-save switched on. \\
+    \code{validation\_callbacks} & \code{None} & Per-destination validators
+      (Section~\ref{sec:parakit-parsing}); callbacks for unknown names are
+      ignored with a warning. \\
+    \code{inactivity\_timeout} & \code{10} & Seconds without keyboard or mouse
+      activity after which the values are saved and the window closes;
+      \code{None} disables the automatic close. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\paragraph{Window behaviour.}
+\begin{itemize}
+  \item \emph{Save Parameters} validates all fields and writes a new file.
+    Invalid values are listed in an error dialog and nothing is saved.
+  \item \emph{OK} saves and closes the window; if the values are invalid the
+    window stays open.
+  \item \emph{Auto-save} (check box) saves every \code{save\_delay}
+    milliseconds while enabled; problems are shown in the status line instead
+    of dialogs.
+  \item After \code{inactivity\_timeout} seconds without activity the window
+    saves (if the values are valid) and closes. The default of ten seconds
+    suits scripts that open the window at start-up and should continue
+    unattended; pass a larger value or \code{None} for interactive editing.
+  \item \emph{Browse} selects another output directory and \emph{Reset to
+    Default} returns to the initial one. Closing the window with the window
+    manager does not save.
+\end{itemize}
+
+\code{tune()} blocks until the window closes and returns the parser. The
+values of the last \emph{successful} save (manual, OK, auto-save or
+inactivity save) become the parser's defaults; if nothing was saved, the
+parser is unchanged. The path of the last file is available as
+\code{tuner.last\_saved\_path}. The class method
+\code{ParameterTuner.tune\_parameters(parser, ...)} creates a tuner, calls
+\code{tune()} and returns the parser; \code{ParameterAdjuster} is a
+backward-compatible alias of the class. The font of the window is the class
+attribute \code{font\_family} (default \code{"Times New Roman"}).
+
+% norun
+\begin{pycode}
+from toolkit.parakit import ParameterTuner
+
+tuner = ParameterTuner(parser, save_path="runs/params", inactivity_timeout=None,
+                       validation_callbacks=validators)
+parser = tuner.tune()                  # blocks until the window is closed
+args = parser.parse_args()
+print("saved to", tuner.last_saved_path)
+\end{pycode}
+
+\paragraph{Systems without Tk or without a display.}
+\code{tune()} raises \code{ImportError} with installation instructions when
+Tk is missing (the message is available as
+\code{toolkit.parakit.TK\_MISSING\_MESSAGE}) and \code{RuntimeError} when no
+display is available, for example on a cluster node or over SSH without X
+forwarding. Scripts that should run everywhere catch both exceptions and fall
+back to the headless API:
+
+% norun
+\begin{pycode}
+try:
+    ParameterTuner(parser, save_path="runs/params").tune()
+except (ImportError, RuntimeError) as exc:
+    print(f"Editor not available ({exc}); using the current defaults.")
+\end{pycode}
+
+The script \code{examples/parakit\_demo.py} demonstrates the complete
+workflow, including the window (\code{--gui}), loading a file or directory
+(\code{--load}) and command-line overrides (\code{--set KEY=VALUE}).
