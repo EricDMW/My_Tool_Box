@@ -21,12 +21,15 @@ deviation of the return. With the default parameter sharing, one actor and one
 critic serve all agents and a one-hot agent identifier is appended to their
 inputs; every forward pass covers all copies and agents at once.
 
-Standard simplifications, stated once: feed-forward instead of recurrent
-networks (all ``env_lib`` observations are Markovian enough for this), a
-state-independent Gaussian standard deviation for continuous actions (sampled
-unbounded, clipped by the environment adapter, the log-probability is that of
-the unclipped sample), and reward scaling instead of MAPPO's value
-normalisation (PopArt / ValueNorm); both keep value targets of order one.
+Standard simplifications, stated once: feed-forward networks instead of the
+recurrent ones MAPPO uses for partially observed tasks (the ``env_lib``
+observations carry the recent history that matters, such as previous actions
+and rates of change), a state-independent Gaussian standard deviation for
+continuous actions (sampled unbounded, clipped by the environment adapter, the
+log-probability is that of the unclipped sample), and reward scaling instead of
+MAPPO's value normalisation (PopArt / ValueNorm); both keep value targets of
+order one. The global state of MAPPO is the concatenation of the local
+observations (the paper's "CL" state), not an environment-specific state.
 
 References
 ----------
@@ -678,8 +681,25 @@ def _explained_variance(predictions: np.ndarray, targets: np.ndarray) -> float:
 #: num_envs=preset["num_envs"], env_kwargs=preset["env_kwargs"], **preset["config"])``
 #: reproduces a demonstration run.
 #:
-#: Each preset trains in about one to two minutes on one CPU core. Lessons
-#: from tuning, reflected in the settings:
+#: Mean team return of the deterministic policy after training with seed 0
+#: (``env_lib.evaluate`` on 16 copies, 64 episodes, seed 1), measured on one
+#: CPU core (``torch.set_num_threads(1)``); "baseline" is
+#: ``env_lib.baseline_policy``:
+#:
+#: ============  =====  ==========  =========  ========  =======  ========
+#: environment   algo   env steps   wall time  random    trained  baseline
+#: ============  =====  ==========  =========  ========  =======  ========
+#: PowerGrid-v0  IPPO   200,704     72 s       -589.9    -1.59    -0.668
+#: PowerGrid-v0  MAPPO  251,904     111 s      -589.9    -0.83    -0.668
+#: Platoon-v0    IPPO   450,560     90 s       -4086     -88.9    -49.5
+#: Platoon-v0    MAPPO  450,560     102 s      -4086     -68.6    -49.5
+#: Consensus-v0  IPPO   401,408     80 s       -17930    -1550    -1518
+#: Consensus-v0  MAPPO  401,408     93 s       -17930    -1586    -1518
+#: LineMsg-v0    IPPO   100,800     26 s       43.5      95.0     95.0
+#: LineMsg-v0    MAPPO  100,800     26 s       43.5      95.0     95.0
+#: ============  =====  ==========  =========  ========  =======  ========
+#:
+#: Lessons from tuning, reflected in the settings:
 #:
 #: * PowerGrid: a small initial exploration noise (``log_std_init=-1.5``) is
 #:   essential -- with more noise the mean policy learns to compensate its own
@@ -690,9 +710,13 @@ def _explained_variance(predictions: np.ndarray, targets: np.ndarray) -> float:
 #:   agent's own command, and the observations are used unnormalised: they
 #:   are already scaled to order one (Platoon) or in arena units (Consensus),
 #:   and running statistics dominated by the large errors of early training
-#:   hide the small errors that matter once the task is nearly solved.
-#: * LineMsg: MAPPO learns the relay from the team reward in a few ten
-#:   thousand steps.
+#:   hide the small errors that matter once the task is nearly solved. On
+#:   Platoon, MAPPO with the team reward and normalised observations stalls
+#:   at about -800 (the followers never learn the predecessor-acceleration
+#:   feed-forward that makes the platoon string stable, and every episode
+#:   ends in a collision).
+#: * LineMsg: MAPPO learns the relay from the team reward in about 30,000
+#:   steps, so the preset is shorter than the others.
 PRESETS: dict[str, dict[str, dict[str, Any]]] = {
     "ippo": {
         "PowerGrid-v0": {
