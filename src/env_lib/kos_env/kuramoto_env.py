@@ -25,11 +25,11 @@ import numpy as np
 from env_lib.errors import ResetNeededError
 from env_lib.kos_env._common import (
     KuramotoEnvBase,
-    combine_reward,
     order_parameter,
     phase_coherence,
     wrap_phases,
 )
+from env_lib.kos_env._kernels import KuramotoKernel
 
 __all__ = ["KuramotoOscillatorEnv"]
 
@@ -186,15 +186,13 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
         self.control_inputs: np.ndarray | None = None
         self._current_coupling: np.ndarray | None = None
         self._last_reward: float | None = None
+        # Batch-first array kernels, shared with KuramotoOscillatorVectorEnv (called with B = 1).
+        self._kernel = KuramotoKernel(self)
 
     # ------------------------------------------------------------------ model
     def _coupling_matrix_from_actions(self, actions: np.ndarray) -> np.ndarray:
         """Scatter per-edge coupling strengths into a symmetric ``(N, N)`` matrix."""
-        n = self.n_oscillators
-        matrix = np.zeros((n, n))
-        matrix[self._edge_rows, self._edge_cols] = actions
-        matrix[self._edge_cols, self._edge_rows] = actions
-        return matrix
+        return self._kernel.coupling_from_strengths(np.asarray(actions, dtype=np.float64)[None])[0]
 
     def _kuramoto_dynamics(
         self,
@@ -208,11 +206,12 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
         Uses ``sin(theta_j - theta_i) = sin(theta_j) cos(theta_i) - cos(theta_j) sin(theta_i)``,
         i.e. two matrix-vector products instead of ``N^2`` sine evaluations.
         """
-        sin, cos = np.sin(phases), np.cos(phases)
-        coupling = cos * (coupling_matrix @ sin) - sin * (coupling_matrix @ cos)
-        if self.normalize_coupling:
-            coupling *= self._coupling_factor
-        return natural_frequencies + control_inputs + coupling
+        return self._kernel.dynamics(
+            np.asarray(phases)[None],
+            np.asarray(natural_frequencies)[None],
+            coupling_matrix,
+            np.asarray(control_inputs)[None],
+        )[0]
 
     def _integrate_rk4(
         self,
@@ -222,13 +221,10 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
         control_inputs: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Classical fourth-order Runge-Kutta step. Returns ``(new_phases, k1)``."""
-        dt = self.dt
-        args = (natural_frequencies, coupling_matrix, control_inputs)
-        k1 = self._kuramoto_dynamics(phases, *args)
-        k2 = self._kuramoto_dynamics(phases + 0.5 * dt * k1, *args)
-        k3 = self._kuramoto_dynamics(phases + 0.5 * dt * k2, *args)
-        k4 = self._kuramoto_dynamics(phases + dt * k3, *args)
-        return phases + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4), k1
+        new_phases, k1 = self._kernel.integrate(
+            phases[None], natural_frequencies[None], coupling_matrix, control_inputs[None]
+        )
+        return new_phases[0], k1[0]
 
     def _compute_order_parameter(self, phases: np.ndarray) -> float:
         """Kuramoto order parameter ``r`` in ``[0, 1]``."""
@@ -258,7 +254,8 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
         options:
             Optional overrides of the sampled state: ``"phases"``,
             ``"natural_frequencies"`` (shape ``(N,)``) and, in dynamic mode,
-            ``"coupling_strengths"`` (shape ``(M,)``).
+            ``"coupling_strengths"`` (shape ``(M,)``). Unknown keys are ignored
+            with a ``UserWarning``.
 
         Returns
         -------
@@ -267,14 +264,11 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
         """
         super().reset(seed=seed)
         overrides = self._parse_reset_options(options)
-        n, rng = self.n_oscillators, self.np_random
-        freq_low, freq_high = self.natural_freq_range
-        phases = (rng.random(n) * 2 - 1) * np.pi
-        natural_frequencies = rng.random(n) * (freq_high - freq_low) + freq_low
-        coupling_strengths = None
-        if self.coupling_mode == "dynamic":
-            low, high = self.coupling_range
-            coupling_strengths = rng.random(self.n_couplings) * (high - low) + low
+        n = self.n_oscillators
+        phases, natural_frequencies, coupling_strengths = (
+            None if value is None else value[0]
+            for value in self._kernel.sample_state(self.np_random, 1)
+        )
 
         for key, value in overrides.items():
             if value.ndim != 1:
@@ -335,42 +329,33 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
             )
         if not np.all(np.isfinite(action)):
             raise ValueError("action contains non-finite values")
-        action = np.clip(action, self._action_low, self._action_high)
+        action = self._kernel.clip_actions(action)
         n = self.n_oscillators
+        kernel = self._kernel
         self.control_inputs = action[:n]
         if self.coupling_mode == "dynamic":
             self.coupling_strengths = action[n:]
-            coupling_matrix = self._coupling_matrix_from_actions(self.coupling_strengths)
+            coupling_matrix = kernel.coupling_from_strengths(self.coupling_strengths[None])
         else:
             coupling_matrix = self.coupling_matrix
 
-        if self.integration_method == "euler":
-            dphases_dt = self._kuramoto_dynamics(
-                self.phases, self.natural_frequencies, coupling_matrix, self.control_inputs
-            )
-            phases = self.phases + dphases_dt * self.dt
-        else:
-            phases, dphases_dt = self._integrate_rk4(
-                self.phases, self.natural_frequencies, coupling_matrix, self.control_inputs
-            )
-        if self.noise_std > 0:
-            phases = phases + self.np_random.normal(0.0, self.noise_std, n)
-        self.phases = wrap_phases(phases)
+        phases, dphases_dt = kernel.integrate(
+            self.phases[None],
+            self.natural_frequencies[None],
+            coupling_matrix,
+            self.control_inputs[None],
+        )
+        self.phases = kernel.add_noise(phases, self.np_random)[0]
+        dphases_dt = dphases_dt[0]
+        if coupling_matrix.ndim == 3:
+            coupling_matrix = coupling_matrix[0]
         self._current_coupling = coupling_matrix
         self._append_history(self.phases.copy())
         self.step_count += 1
 
-        r = self._compute_order_parameter(self.phases)
-        coherence = self._compute_phase_coherence(self.phases)
-        frequency_error = (
-            float(np.mean(np.abs(dphases_dt - self.target_frequency)))
-            if self.reward_type == "frequency_synchronization"
-            else 0.0
-        )
-        reward = float(combine_reward(self.reward_type, r, coherence, frequency_error))
-        terminated = bool(r > self.sync_threshold)
-        if terminated and self.reward_type != "frequency_synchronization":
-            reward += self.sync_bonus
+        rewards, r, coherence, terminated = kernel.rewards(self.phases[None], dphases_dt[None])
+        reward = float(rewards[0])
+        r, coherence, terminated = float(r[0]), float(coherence[0]), bool(terminated[0])
         truncated = bool(self.step_count >= self.max_steps)
         self._last_reward = reward
 
@@ -392,11 +377,10 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
 
     # ------------------------------------------------------------------ internals
     def _get_obs(self) -> np.ndarray:
-        parts = [self.phases, self.natural_frequencies]
-        if self.coupling_mode == "dynamic":
-            parts.append(self.coupling_strengths)
-        parts.append(self.control_inputs)
-        return np.concatenate(parts).astype(np.float32)
+        strengths = None if self.coupling_strengths is None else self.coupling_strengths[None]
+        return self._kernel.observe(
+            self.phases[None], self.natural_frequencies[None], strengths, self.control_inputs[None]
+        )[0]
 
     def _frame(self):
         from env_lib.kos_env.rendering import KuramotoFrame

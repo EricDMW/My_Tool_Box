@@ -24,6 +24,8 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
+from env_lib.consensus_env._core import ConsensusKernel
+from env_lib.consensus_env._core import batched_connected as _batched_connected
 from env_lib.errors import ResetNeededError
 from env_lib.utils.rendering import validate_render_mode
 
@@ -51,36 +53,12 @@ FORMATION_SHAPES: tuple[str, ...] = ("circle", "line", "grid", "wedge")
 WEDGE_HALF_ANGLE: float = math.radians(35.0)
 
 _ER_MAX_ATTEMPTS = 1000
-_INIT_BATCH = 256
-_INIT_MAX_BATCHES = 32
-_INIT_SPREAD = 0.8
 _PROXIMITY_DEFAULT_SLOTS = 6
 
 
 # ---------------------------------------------------------------------------
 # Graph and formation helpers
 # ---------------------------------------------------------------------------
-def _batched_connected(adjacency: np.ndarray) -> np.ndarray:
-    """Connectivity test for a batch of undirected graphs.
-
-    Parameters
-    ----------
-    adjacency:
-        Boolean array of shape ``(B, n, n)``.
-
-    Returns
-    -------
-    numpy.ndarray
-        Boolean array of shape ``(B,)``.
-    """
-    n = adjacency.shape[-1]
-    reach = (adjacency | np.eye(n, dtype=bool)).astype(np.float32)
-    # After k squarings, reach[i, j] > 0 iff j is reachable from i in <= 2**k hops.
-    for _ in range(max(1, math.ceil(math.log2(max(n - 1, 1))))):
-        reach = (np.matmul(reach, reach) > 0).astype(np.float32)
-    return reach[:, 0, :].all(axis=-1)
-
-
 def is_connected(adjacency: np.ndarray) -> bool:
     """Return ``True`` if the undirected graph with the given adjacency matrix is connected.
 
@@ -309,6 +287,149 @@ def _check_choice(name: str, value: Any, choices: tuple[str, ...]) -> str:
     return str(value)
 
 
+def _parse_config(
+    *,
+    n_agents: Any,
+    task: Any,
+    topology: Any,
+    dynamics: Any,
+    dt: Any,
+    max_steps: Any,
+    arena_size: Any,
+    max_control: Any,
+    control_cost: Any,
+    noise_std: Any,
+    tolerance: Any,
+    success_bonus: Any,
+    formation_shape: Any,
+    formation_radius: Any,
+    comm_radius: Any,
+    edge_probability: Any,
+    graph_seed: Any,
+    max_neighbors: Any,
+    damping: Any,
+) -> dict[str, Any]:
+    """Validate the constructor arguments shared by the single and vector environments.
+
+    Returns
+    -------
+    dict
+        Validated values (``max_neighbors`` stays ``None`` when not given) plus
+        the formation ``offsets`` of shape ``(n_agents, 2)``.
+    """
+    cfg: dict[str, Any] = {
+        "n_agents": _check_int("n_agents", n_agents, 2),
+        "task": _check_choice("task", task, TASKS),
+        "topology": _check_choice("topology", topology, TOPOLOGIES),
+        "dynamics": _check_choice("dynamics", dynamics, DYNAMICS),
+        "dt": _check_float("dt", dt, minimum=0.0, strict=True),
+        "max_steps": _check_int("max_steps", max_steps, 1),
+        "arena_size": _check_float("arena_size", arena_size, minimum=0.0, strict=True),
+        "max_control": _check_float("max_control", max_control, minimum=0.0, strict=True),
+        "control_cost": _check_float("control_cost", control_cost, minimum=0.0),
+        "noise_std": _check_float("noise_std", noise_std, minimum=0.0),
+        "tolerance": _check_float("tolerance", tolerance, minimum=0.0, strict=True),
+        "success_bonus": _check_float("success_bonus", success_bonus),
+        "formation_shape": _check_choice("formation_shape", formation_shape, FORMATION_SHAPES),
+        "formation_radius": _check_float(
+            "formation_radius", formation_radius, minimum=0.0, strict=True
+        ),
+        "comm_radius": _check_float("comm_radius", comm_radius, minimum=0.0, strict=True),
+        "edge_probability": _check_float(
+            "edge_probability", edge_probability, minimum=0.0, strict=True
+        ),
+    }
+    if cfg["edge_probability"] > 1.0:
+        raise ValueError(f"edge_probability must be in (0, 1], got {edge_probability}")
+    if graph_seed is not None:
+        graph_seed = _check_int("graph_seed", graph_seed, 0)
+    cfg["graph_seed"] = graph_seed
+    cfg["damping"] = _check_float("damping", damping, minimum=0.0)
+    if max_neighbors is not None:
+        max_neighbors = _check_int("max_neighbors", max_neighbors, 1)
+    cfg["max_neighbors"] = max_neighbors
+
+    n = cfg["n_agents"]
+    # Formation offsets d_i (zero for consensus).
+    if cfg["task"] == "formation":
+        offsets = make_formation(cfg["formation_shape"], n, cfg["formation_radius"])
+        span = offsets.max(axis=0) - offsets.min(axis=0)
+        if np.any(span > 2.0 * cfg["arena_size"]):
+            raise ValueError(
+                f"formation {cfg['formation_shape']!r} with formation_radius="
+                f"{cfg['formation_radius']} spans {span.max():.2f}, which does not fit in the "
+                f"arena of width {2.0 * cfg['arena_size']}; reduce formation_radius or "
+                "increase arena_size"
+            )
+    else:
+        offsets = np.zeros((n, 2), dtype=np.float64)
+    cfg["offsets"] = offsets
+    return cfg
+
+
+def _make_kernel(cfg: dict[str, Any], max_neighbors: int) -> ConsensusKernel:
+    """Array kernel for a validated configuration (see :func:`_parse_config`)."""
+    return ConsensusKernel(
+        n_agents=cfg["n_agents"],
+        dynamics=cfg["dynamics"],
+        dt=cfg["dt"],
+        arena_size=cfg["arena_size"],
+        max_control=cfg["max_control"],
+        control_cost=cfg["control_cost"],
+        damping=cfg["damping"],
+        noise_std=cfg["noise_std"],
+        offsets=cfg["offsets"],
+        formation=cfg["task"] == "formation",
+        max_neighbors=max_neighbors,
+        comm_radius=cfg["comm_radius"],
+    )
+
+
+#: Keys of ``reset(options=...)`` understood by the consensus environments.
+RESET_OPTION_KEYS: tuple[str, ...] = ("positions", "velocities")
+
+
+def _known_reset_options(owner: str, options: Any, stacklevel: int) -> dict[str, Any]:
+    """Known ``reset`` options; unknown keys are ignored with a ``UserWarning``.
+
+    Unknown keys are tolerated (not an error) because generic tooling, e.g.
+    PettingZoo's API test, passes arbitrary options. ``stacklevel`` is that
+    of the warning as seen from the caller of this helper.
+    """
+    options = dict(options or {})
+    unknown = sorted(set(options) - set(RESET_OPTION_KEYS))
+    if unknown:
+        warnings.warn(
+            f"{owner}.reset(): ignoring unknown reset option(s) {unknown}; supported: "
+            f"{list(RESET_OPTION_KEYS)}",
+            UserWarning,
+            stacklevel=stacklevel + 1,
+        )
+        for key in unknown:
+            del options[key]
+    return options
+
+
+def _check_state_option(name: str, value: Any, shape: tuple[int, ...]) -> np.ndarray:
+    """Validate a ``reset(options=...)`` state array (float64 copy)."""
+    array = np.array(value, dtype=np.float64)
+    if array.shape != shape:
+        raise ValueError(f"options[{name!r}] must have shape {shape}, got {array.shape}")
+    if not np.all(np.isfinite(array)):
+        raise ValueError(f"options[{name!r}] must be finite")
+    return array
+
+
+def _sequential_init_warning(cfg: dict[str, Any], stacklevel: int) -> None:
+    warnings.warn(
+        f"comm_radius={cfg['comm_radius']} is small for arena_size={cfg['arena_size']} and "
+        f"n_agents={cfg['n_agents']}: no connected uniform placement found, falling back to "
+        "sequential placement within communication range",
+        RuntimeWarning,
+        stacklevel=stacklevel,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Environment
 # ---------------------------------------------------------------------------
@@ -463,7 +584,7 @@ class ConsensusEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 20}
 
     #: Width of one neighbour slot in the observation.
-    SLOT_DIM: int = 5
+    SLOT_DIM: int = ConsensusKernel.SLOT_DIM
     #: Columns of one neighbour slot.
     neighbor_slot_layout: dict[str, slice] = {
         "rel_position": slice(0, 2),
@@ -497,49 +618,50 @@ class ConsensusEnv(gym.Env):
     ):
         super().__init__()
         validate_render_mode(render_mode, self.metadata["render_modes"])
-        self.n_agents = _check_int("n_agents", n_agents, 2)
-        self.task = _check_choice("task", task, TASKS)
-        self.topology = _check_choice("topology", topology, TOPOLOGIES)
-        self.dynamics = _check_choice("dynamics", dynamics, DYNAMICS)
-        self.dt = _check_float("dt", dt, minimum=0.0, strict=True)
-        self.max_steps = _check_int("max_steps", max_steps, 1)
-        self.arena_size = _check_float("arena_size", arena_size, minimum=0.0, strict=True)
-        self.max_control = _check_float("max_control", max_control, minimum=0.0, strict=True)
-        self.control_cost = _check_float("control_cost", control_cost, minimum=0.0)
-        self.noise_std = _check_float("noise_std", noise_std, minimum=0.0)
-        self.tolerance = _check_float("tolerance", tolerance, minimum=0.0, strict=True)
-        self.success_bonus = _check_float("success_bonus", success_bonus)
-        self.formation_shape = _check_choice("formation_shape", formation_shape, FORMATION_SHAPES)
-        self.formation_radius = _check_float(
-            "formation_radius", formation_radius, minimum=0.0, strict=True
+        cfg = _parse_config(
+            n_agents=n_agents,
+            task=task,
+            topology=topology,
+            dynamics=dynamics,
+            dt=dt,
+            max_steps=max_steps,
+            arena_size=arena_size,
+            max_control=max_control,
+            control_cost=control_cost,
+            noise_std=noise_std,
+            tolerance=tolerance,
+            success_bonus=success_bonus,
+            formation_shape=formation_shape,
+            formation_radius=formation_radius,
+            comm_radius=comm_radius,
+            edge_probability=edge_probability,
+            graph_seed=graph_seed,
+            max_neighbors=max_neighbors,
+            damping=damping,
         )
-        self.comm_radius = _check_float("comm_radius", comm_radius, minimum=0.0, strict=True)
-        self.edge_probability = _check_float(
-            "edge_probability", edge_probability, minimum=0.0, strict=True
-        )
-        if self.edge_probability > 1.0:
-            raise ValueError(f"edge_probability must be in (0, 1], got {edge_probability}")
-        if graph_seed is not None:
-            graph_seed = _check_int("graph_seed", graph_seed, 0)
-        self.graph_seed = graph_seed
-        self.damping = _check_float("damping", damping, minimum=0.0)
+        self._cfg = cfg
+        self.n_agents: int = cfg["n_agents"]
+        self.task: str = cfg["task"]
+        self.topology: str = cfg["topology"]
+        self.dynamics: str = cfg["dynamics"]
+        self.dt: float = cfg["dt"]
+        self.max_steps: int = cfg["max_steps"]
+        self.arena_size: float = cfg["arena_size"]
+        self.max_control: float = cfg["max_control"]
+        self.control_cost: float = cfg["control_cost"]
+        self.noise_std: float = cfg["noise_std"]
+        self.tolerance: float = cfg["tolerance"]
+        self.success_bonus: float = cfg["success_bonus"]
+        self.formation_shape: str = cfg["formation_shape"]
+        self.formation_radius: float = cfg["formation_radius"]
+        self.comm_radius: float = cfg["comm_radius"]
+        self.edge_probability: float = cfg["edge_probability"]
+        self.graph_seed: int | None = cfg["graph_seed"]
+        self.damping: float = cfg["damping"]
         self.render_mode = render_mode
 
         n = self.n_agents
-        # Formation offsets d_i (zero for consensus) and their pairwise differences d_j - d_i.
-        if self.task == "formation":
-            self._offsets = make_formation(self.formation_shape, n, self.formation_radius)
-            span = self._offsets.max(axis=0) - self._offsets.min(axis=0)
-            if np.any(span > 2.0 * self.arena_size):
-                raise ValueError(
-                    f"formation {self.formation_shape!r} with formation_radius="
-                    f"{self.formation_radius} spans {span.max():.2f}, which does not fit in the "
-                    f"arena of width {2.0 * self.arena_size}; reduce formation_radius or "
-                    "increase arena_size"
-                )
-        else:
-            self._offsets = np.zeros((n, 2), dtype=np.float64)
-        self._offset_delta = self._offsets[None, :, :] - self._offsets[:, None, :]
+        self._offsets: np.ndarray = cfg["offsets"]
 
         # Communication graph.
         self._dynamic_graph = self.topology == "proximity"
@@ -554,14 +676,13 @@ class ConsensusEnv(gym.Env):
             self._static_adjacency.setflags(write=False)
             self._static_lambda2 = algebraic_connectivity(self._static_adjacency)
             default_slots = int(self._static_adjacency.sum(axis=1).max())
-        if max_neighbors is None:
-            self.max_neighbors = default_slots
-        else:
-            self.max_neighbors = _check_int("max_neighbors", max_neighbors, 1)
-        self._visible_slots = min(self.max_neighbors, n)
-        self._rows = np.arange(n)[:, None]
+        self.max_neighbors: int = (
+            default_slots if cfg["max_neighbors"] is None else cfg["max_neighbors"]
+        )
+        # Batch-first array kernels, shared with ConsensusVectorEnv (called with B = 1).
+        self._kernel = _make_kernel(cfg, self.max_neighbors)
 
-        self.obs_dim = 6 + self.SLOT_DIM * self.max_neighbors
+        self.obs_dim = self._kernel.obs_dim
         self._layout: dict[str, slice] = {
             "position": slice(0, 2),
             "velocity": slice(2, 4),
@@ -585,7 +706,6 @@ class ConsensusEnv(gym.Env):
         self._error = math.inf
         self._step_count = 0
         self._success = False
-        self._noise_scale = self.noise_std * math.sqrt(self.dt)
 
         self._renderer = None
         self._warned_no_render_mode = False
@@ -665,26 +785,26 @@ class ConsensusEnv(gym.Env):
         options:
             Optional ``{"positions": array (n_agents, 2), "velocities": array
             (n_agents, 2)}`` to start from a given state (positions are clipped
-            to the arena, velocities default to zero).
+            to the arena, velocities default to zero). This is also how a copy
+            of :class:`~env_lib.consensus_env.vector.ConsensusVectorEnv` is
+            reproduced by a single environment. Unknown keys are ignored with
+            a ``UserWarning``.
 
         Returns
         -------
         observation, info
         """
         super().reset(seed=seed)
-        options = dict(options or {})
-        unknown = set(options) - {"positions", "velocities"}
-        if unknown:
-            raise ValueError(
-                f"Unknown reset options {sorted(unknown)}; use 'positions', 'velocities'"
-            )
+        options = _known_reset_options(type(self).__name__, options, stacklevel=2)
 
         n = self.n_agents
         if options.get("positions") is not None:
             positions = self._state_option("positions", options["positions"])
             positions = np.clip(positions, -self.arena_size, self.arena_size)
         else:
-            positions = self._sample_positions()
+            positions = self._kernel.sample_positions(
+                self.np_random, 1, self._dynamic_graph, self._on_sequential_init
+            )[0]
         if options.get("velocities") is not None:
             velocities = self._state_option("velocities", options["velocities"])
         else:
@@ -695,10 +815,10 @@ class ConsensusEnv(gym.Env):
         self._step_count = 0
         self._success = False
 
-        delta_x, sq_x, delta_y, sq_y = self._pairwise()
+        rel, sq_x, _ = self._kernel.pairwise(positions[None])
         self._update_graph(sq_x)
-        self._error = self._compute_error()
-        observation = self._observation(delta_y, sq_x)
+        self._error = float(self._kernel.task_error(positions[None])[0])
+        observation = self._observation(rel, sq_x)
         info = self._info(np.zeros(n, dtype=np.float64))
 
         if self._renderer is not None:
@@ -721,32 +841,20 @@ class ConsensusEnv(gym.Env):
         observation, reward, terminated, truncated, info
         """
         self._require_reset()
-        control = self._validate_action(action)
-
-        pos, vel = self._pos, self._vel
-        if self.dynamics == "single":
-            moved = pos + self.dt * control
-            if self._noise_scale > 0.0:
-                moved += self._noise_scale * self.np_random.standard_normal(pos.shape)
-            new_pos = np.clip(moved, -self.arena_size, self.arena_size)
-            new_vel = (new_pos - pos) / self.dt
-        else:
-            new_vel = vel + self.dt * (control - self.damping * vel)
-            if self._noise_scale > 0.0:
-                new_vel += self._noise_scale * self.np_random.standard_normal(vel.shape)
-            moved = pos + self.dt * new_vel
-            new_pos = np.clip(moved, -self.arena_size, self.arena_size)
-            new_vel[moved != new_pos] = 0.0
-        self._pos, self._vel = new_pos, new_vel
+        control = self._validate_action(action)[None]
+        kernel = self._kernel
+        noise = None
+        if kernel.noise_scale > 0.0:
+            noise = self.np_random.standard_normal(control.shape)
+        pos, vel = kernel.integrate(self._pos[None], self._vel[None], control, noise)
+        self._pos, self._vel = pos[0], vel[0]
         self._step_count += 1
 
-        delta_x, sq_x, delta_y, sq_y = self._pairwise()
+        rel, sq_x, sq_y = kernel.pairwise(pos)
         self._update_graph(sq_x)
+        agent_rewards = kernel.agent_rewards(self._adj_f[None], self._deg[None], sq_y, control)[0]
 
-        disagreement = (self._adj_f * sq_y).sum(axis=1) / np.maximum(self._deg, 1.0)
-        agent_rewards = -disagreement - self.control_cost * np.einsum("ij,ij->i", control, control)
-
-        self._error = self._compute_error()
+        self._error = float(kernel.task_error(pos)[0])
         solved = self._error < self.tolerance
         reward = float(agent_rewards.mean())
         if solved and not self._success:
@@ -755,7 +863,7 @@ class ConsensusEnv(gym.Env):
         terminated = bool(solved)
         truncated = bool(self._step_count >= self.max_steps)
 
-        observation = self._observation(delta_y, sq_x)
+        observation = self._observation(rel, sq_x)
         info = self._info(agent_rewards)
         if self.render_mode == "human":
             self.render()
@@ -781,21 +889,7 @@ class ConsensusEnv(gym.Env):
             return None
         self._require_reset()
         if self._renderer is None:
-            from env_lib.consensus_env.rendering import ConsensusRenderer
-
-            self._renderer = ConsensusRenderer(
-                self.render_mode,
-                n_agents=self.n_agents,
-                arena_size=self.arena_size,
-                task=self.task,
-                formation_shape=self.formation_shape,
-                topology=self.topology,
-                dynamics=self.dynamics,
-                max_steps=self.max_steps,
-                tolerance=self.tolerance,
-                comm_radius=self.comm_radius if self._dynamic_graph else None,
-                fps=self.metadata["render_fps"],
-            )
+            self._renderer = _make_renderer(self._cfg, self.render_mode, self.metadata)
         centroid = (self._pos - self._offsets).mean(axis=0)
         return self._renderer.render(
             positions=self._pos,
@@ -848,16 +942,8 @@ class ConsensusEnv(gym.Env):
             Action of shape ``(n_agents, 2)``, dtype ``float32``.
         """
         self._require_reset()
-        gain = _check_float("gain", gain, minimum=0.0, strict=True)
-        shifted = self._pos - self._offsets
-        feedback = self._deg[:, None] * shifted - self._adj_f @ shifted
-        control = -gain * feedback
-        if self.dynamics == "double":
-            if velocity_gain is None:
-                velocity_gain = max(0.0, math.sqrt(gain) - self.damping)
-            velocity_gain = _check_float("velocity_gain", velocity_gain, minimum=0.0)
-            control -= velocity_gain * self._vel
-        elif not self._warned_policy_gain:
+        gain, velocity_gain = _policy_gains(self._cfg, gain, velocity_gain)
+        if self.dynamics == "single" and not self._warned_policy_gain:
             # Gershgorin bound lambda_max(L) <= 2 * max degree.
             lambda_bound = 2.0 * float(self._deg.max())
             if gain * self.dt * lambda_bound >= 2.0:
@@ -871,7 +957,14 @@ class ConsensusEnv(gym.Env):
                         stacklevel=2,
                     )
                     self._warned_policy_gain = True
-        return np.clip(control, -self.max_control, self.max_control).astype(np.float32)
+        return self._kernel.feedback(
+            self._pos[None],
+            self._vel[None],
+            self._adj_f[None],
+            self._deg[None],
+            gain,
+            velocity_gain,
+        )[0]
 
     # ------------------------------------------------------------------
     # Internals
@@ -881,14 +974,7 @@ class ConsensusEnv(gym.Env):
             raise ResetNeededError("Call reset() before using the environment")
 
     def _state_option(self, name: str, value: Any) -> np.ndarray:
-        array = np.array(value, dtype=np.float64)
-        if array.shape != (self.n_agents, 2):
-            raise ValueError(
-                f"options[{name!r}] must have shape {(self.n_agents, 2)}, got {array.shape}"
-            )
-        if not np.all(np.isfinite(array)):
-            raise ValueError(f"options[{name!r}] must be finite")
-        return array
+        return _check_state_option(name, value, (self.n_agents, 2))
 
     def _validate_action(self, action: Any) -> np.ndarray:
         control = np.asarray(action, dtype=np.float64)
@@ -899,92 +985,28 @@ class ConsensusEnv(gym.Env):
             raise ValueError("action contains NaN or inf")
         return np.clip(control, -self.max_control, self.max_control)
 
-    def _sample_positions(self) -> np.ndarray:
-        n, limit = self.n_agents, _INIT_SPREAD * self.arena_size
-        rng = self.np_random
-        if not self._dynamic_graph:
-            return rng.uniform(-limit, limit, size=(n, 2))
-        # Uniform positions conditioned on a connected initial disk graph.
-        radius_sq = self.comm_radius * self.comm_radius
-        for _ in range(_INIT_MAX_BATCHES):
-            candidates = rng.uniform(-limit, limit, size=(_INIT_BATCH, n, 2))
-            delta = candidates[:, None, :, :] - candidates[:, :, None, :]
-            connected = _batched_connected(np.einsum("bijk,bijk->bij", delta, delta) <= radius_sq)
-            if connected.any():
-                return candidates[int(np.argmax(connected))]
+    def _on_sequential_init(self) -> None:
         if not self._warned_sequential_init:
-            warnings.warn(
-                f"comm_radius={self.comm_radius} is small for arena_size={self.arena_size} and "
-                f"n_agents={n}: no connected uniform placement found, falling back to sequential "
-                "placement within communication range",
-                RuntimeWarning,
-                stacklevel=3,
-            )
+            _sequential_init_warning(self._cfg, stacklevel=5)
             self._warned_sequential_init = True
-        return self._sequential_positions(limit)
-
-    def _sequential_positions(self, limit: float) -> np.ndarray:
-        rng, n = self.np_random, self.n_agents
-        positions = np.empty((n, 2), dtype=np.float64)
-        positions[0] = rng.uniform(-limit, limit, size=2)
-        for i in range(1, n):  # rare fallback at reset time only
-            parent = positions[rng.integers(i)]
-            radius = 0.95 * self.comm_radius * math.sqrt(rng.random())
-            angle = 2.0 * math.pi * rng.random()
-            step = radius * np.array([math.cos(angle), math.sin(angle)])
-            # Projection onto the box is non-expansive, so the parent stays in range.
-            positions[i] = np.clip(parent + step, -limit, limit)
-        return positions[rng.permutation(n)]
-
-    def _pairwise(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Pairwise differences ``[i, j] -> x_j - x_i`` and ``y_j - y_i`` with squared norms."""
-        delta_x = self._pos[None, :, :] - self._pos[:, None, :]
-        sq_x = np.einsum("ijk,ijk->ij", delta_x, delta_x)
-        if self.task == "consensus":
-            return delta_x, sq_x, delta_x, sq_x
-        delta_y = delta_x - self._offset_delta
-        sq_y = np.einsum("ijk,ijk->ij", delta_y, delta_y)
-        return delta_x, sq_x, delta_y, sq_y
 
     def _update_graph(self, sq_x: np.ndarray) -> None:
+        """Refresh the graph quantities from the squared distances ``(1, n, n)``."""
         if self._dynamic_graph:
-            adj = sq_x <= self.comm_radius * self.comm_radius
-            np.fill_diagonal(adj, False)
+            adj = self._kernel.proximity(sq_x)[0]
             if self._step_count > 0 and np.array_equal(adj, self._adj):
                 return  # unchanged graph: keep the Laplacian quantities
-            self._adj = adj
-            self._adj_f = adj.astype(np.float64)
-            self._deg = self._adj_f.sum(axis=1)
-            laplacian = np.diag(self._deg) - self._adj_f
-            self._lambda2 = float(max(np.linalg.eigvalsh(laplacian)[1], 0.0))
+            adj_f, deg, lambda2 = self._kernel.graph_quantities(adj[None])
+            self._adj, self._adj_f, self._deg = adj, adj_f[0], deg[0]
+            self._lambda2 = float(lambda2[0])
         elif self._step_count == 0:
             self._adj = self._static_adjacency
             self._adj_f = self._adj.astype(np.float64)
             self._deg = self._adj_f.sum(axis=1)
             self._lambda2 = self._static_lambda2
 
-    def _compute_error(self) -> float:
-        shifted = self._pos - self._offsets
-        centred = shifted - shifted.mean(axis=0)
-        return float(np.einsum("ij,ij->", centred, centred) / self.n_agents)
-
-    def _observation(self, delta_y: np.ndarray, sq_x: np.ndarray) -> np.ndarray:
-        n, slots = self.n_agents, self._visible_slots
-        obs = np.zeros((n, self.obs_dim), dtype=np.float32)
-        obs[:, 0:2] = self._pos
-        obs[:, 2:4] = self._vel
-        obs[:, 4:6] = self._offsets
-        # Neighbours first (sorted by distance), non-neighbours (inf) last.
-        keys = np.where(self._adj, sq_x, np.inf)
-        order = np.argsort(keys, axis=1, kind="stable")[:, :slots]
-        mask = self._adj[self._rows, order]
-        weight = mask[..., None]
-        block = np.zeros((n, self.max_neighbors, self.SLOT_DIM), dtype=np.float32)
-        block[:, :slots, 0:2] = np.where(weight, delta_y[self._rows, order], 0.0)
-        block[:, :slots, 2:4] = np.where(weight, self._vel[order] - self._vel[:, None, :], 0.0)
-        block[:, :slots, 4] = mask
-        obs[:, 6:] = block.reshape(n, -1)
-        return obs
+    def _observation(self, rel: tuple[np.ndarray, np.ndarray], sq_x: np.ndarray) -> np.ndarray:
+        return self._kernel.observe(self._pos[None], self._vel[None], self._adj[None], sq_x, rel)[0]
 
     def _info(self, agent_rewards: np.ndarray) -> dict[str, Any]:
         return {
@@ -995,3 +1017,32 @@ class ConsensusEnv(gym.Env):
             "success": bool(self._success),
             "step": self._step_count,
         }
+
+
+def _policy_gains(cfg: dict[str, Any], gain: Any, velocity_gain: Any) -> tuple[float, float | None]:
+    """Validate the gains of the Laplacian baseline (``velocity_gain`` defaulted)."""
+    gain = _check_float("gain", gain, minimum=0.0, strict=True)
+    if cfg["dynamics"] != "double":
+        return gain, None
+    if velocity_gain is None:
+        velocity_gain = max(0.0, math.sqrt(gain) - cfg["damping"])
+    return gain, _check_float("velocity_gain", velocity_gain, minimum=0.0)
+
+
+def _make_renderer(cfg: dict[str, Any], render_mode: str, metadata: dict[str, Any]):
+    """Create the dashboard renderer (imported lazily)."""
+    from env_lib.consensus_env.rendering import ConsensusRenderer
+
+    return ConsensusRenderer(
+        render_mode,
+        n_agents=cfg["n_agents"],
+        arena_size=cfg["arena_size"],
+        task=cfg["task"],
+        formation_shape=cfg["formation_shape"],
+        topology=cfg["topology"],
+        dynamics=cfg["dynamics"],
+        max_steps=cfg["max_steps"],
+        tolerance=cfg["tolerance"],
+        comm_radius=cfg["comm_radius"] if cfg["topology"] == "proximity" else None,
+        fps=metadata["render_fps"],
+    )

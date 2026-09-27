@@ -126,7 +126,9 @@ def bresenham_batch(sx, sy, ex, ey):
 
     This is an exact, vectorised re-implementation of the error-accumulation
     variant used by :func:`bresenham2D` (the major axis advances every step, the
-    minor axis whenever ``(floor(a/2) - k*b) mod a`` wraps around).
+    minor axis whenever ``(floor(a/2) - k*b) mod a`` wraps around, i.e. the
+    minor offset after ``k`` steps is ``-floor((floor(a/2) - k*b) / a)``).
+    Entries beyond a ray's length (``valid`` is ``False``) are unspecified.
 
     Parameters
     ----------
@@ -158,14 +160,12 @@ def bresenham_batch(sx, sy, ex, ey):
     k = np.arange(length)[None, :]
     valid = k <= major[:, None]
 
-    # Minor-axis increments: q_0 = 0, q_k = [e_k - e_{k-1} >= 0], e_k = (h - k*b) mod a.
-    safe_major = np.maximum(major, 1)[:, None]
+    # Minor-axis offsets. The error term e_k = (h - k*b) mod a (h = floor(a/2))
+    # wraps around exactly when floor((h - k*b) / a) decreases, so the number of
+    # minor steps after k major steps is -floor((h - k*b) / a) (0 when b = 0).
+    # This closed form equals the cumulative count of wrap-arounds.
     half = (major // 2)[:, None]
-    err = np.mod(half - k * minor[:, None], safe_major)
-    steps = np.zeros_like(err)
-    steps[:, 1:] = np.diff(err, axis=1) >= 0
-    steps[minor == 0] = 0
-    minor_offset = np.cumsum(steps, axis=1)
+    minor_offset = -((half - k * minor[:, None]) // np.maximum(major, 1)[:, None])
 
     sign_x = np.where(ex >= sx, 1, -1)[:, None]
     sign_y = np.where(ey >= sy, 1, -1)[:, None]
@@ -304,10 +304,11 @@ class GridMap:
         """Vectorised ``is_collision_ray_cell`` for arrays of cell indices."""
         nx, ny = self.mapdim
         inside = (xs >= 0) & (ys >= 0) & (xs < nx) & (ys < ny)
-        blocked = ~inside
-        if self.map is not None:
-            blocked[inside] = self._occupied[xs[inside], ys[inside]]
-        return blocked
+        if self.map is None:
+            return ~inside
+        # Clipping only changes cells outside the grid, which are blocked anyway.
+        flat = np.clip(xs, 0, nx - 1) * ny + np.clip(ys, 0, ny - 1)
+        return ~inside | self._occupied.reshape(-1).take(flat)
 
     def is_collision_ray_cell(self, cell) -> bool:
         """``True`` if ``cell`` is outside the grid or occupied."""
@@ -355,12 +356,31 @@ class GridMap:
 
         Rays that hit nothing get ``inf`` distance.
         """
-        odom = np.asarray(odom, dtype=float)
-        sx, sy = self.se2_to_cell(odom[:2])
+        dist, points = self._cast_batch(np.asarray(odom, dtype=float)[None], angles, r_max)
+        return dist[0], points[0]
+
+    def _cast_batch(self, odoms: np.ndarray, angles: np.ndarray, r_max: float):
+        """:meth:`_cast` for several poses ``(P, 3)`` at once (one Bresenham batch).
+
+        Every ray is traced exactly as by a single-pose call; batching only
+        removes the per-call overhead. Returns distances ``(P, R)`` and hit
+        points ``(P, R, 2)``.
+        """
+        odoms = np.asarray(odoms, dtype=float)
+        n_poses, n_rays = len(odoms), len(angles)
+        start = round_half_away((odoms[:, :2] - self.mapmin) / self.mapres - 0.5)
         body = r_max * np.array([np.cos(angles), np.sin(angles)])
-        end = coord_change2g(body, odom[-1]) + odom[:2, np.newaxis]
-        ex, ey = se2_to_cell_batch(end.T, self.mapmin, self.mapres)
-        xs, ys, valid = bresenham_batch(sx, sy, ex, ey)
+        cos, sin = np.cos(odoms[:, -1]), np.sin(odoms[:, -1])
+        rotation = np.empty((n_poses, 2, 2))
+        rotation[:, 0, 0] = cos
+        rotation[:, 0, 1] = -sin
+        rotation[:, 1, 0] = sin
+        rotation[:, 1, 1] = cos
+        end = (rotation @ body + odoms[:, :2, np.newaxis]).transpose(0, 2, 1).reshape(-1, 2)
+        ex, ey = se2_to_cell_batch(end, self.mapmin, self.mapres)
+        xs, ys, valid = bresenham_batch(
+            np.repeat(start[:, 0], n_rays), np.repeat(start[:, 1], n_rays), ex, ey
+        )
 
         if self.map is None:
             cx = (xs + 0.5) * self.mapres[0] + self.mapmin[0]
@@ -380,9 +400,34 @@ class GridMap:
         rows = np.arange(len(first))
         hit_cells = np.stack([xs[rows, first], ys[rows, first]], axis=1)
         points = (hit_cells + 0.5) * self.mapres + self.mapmin
-        dist = np.sqrt(np.sum(np.square(points - odom[:2]), axis=1))
+        origin = np.repeat(odoms[:, :2], n_rays, axis=0)
+        dist = np.sqrt(np.sum(np.square(points - origin), axis=1))
         dist[~has_hit] = np.inf
-        return dist, points
+        return dist.reshape(n_poses, n_rays), points.reshape(n_poses, n_rays, 2)
+
+    def closest_obstacles(
+        self,
+        odoms,
+        ang_res: float = 0.05,
+        fov: float = DEFAULT_FOV,
+        r_max: float = DEFAULT_SENSOR_RANGE,
+    ) -> list:
+        """:meth:`get_closest_obstacle` (``(range, bearing)`` or ``None``) for poses ``(P, 3)``.
+
+        The rays of all poses are cast in one batch; the results are identical
+        to calling :meth:`get_closest_obstacle` pose by pose.
+        """
+        odoms = np.asarray(odoms, dtype=float).reshape(-1, 3)
+        angles = np.arange(-0.5 * fov, 0.5 * fov, ang_res)
+        if angles.size == 0 or len(odoms) == 0:
+            return [None] * len(odoms)
+        dist, _ = self._cast_batch(odoms, angles, r_max)
+        best = dist.argmin(axis=1)
+        nearest = dist[np.arange(len(best)), best]
+        return [
+            (float(nearest[i]), float(angles[best[i]])) if nearest[i] < r_max else None
+            for i in range(len(best))
+        ]
 
     def get_closest_obstacle(
         self,

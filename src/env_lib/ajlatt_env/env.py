@@ -152,6 +152,10 @@ class AJLATTEnv(gym.Env):
         self._warned_extra_rows = False
         self._history: dict[str, list[np.ndarray]] = {}
         self._fov_rad = np.deg2rad(config.fov)
+        # Indices of the other robots, row i = [j for j != i] (observation layout order).
+        self._others = np.array(
+            [[j for j in range(self.nR) if j != i] for i in range(self.nR)], dtype=np.intp
+        ).reshape(self.nR, self.nR - 1)
 
     # ------------------------------------------------------------------
     # Gymnasium API
@@ -378,36 +382,45 @@ class AJLATTEnv(gym.Env):
 
     def _observation(self, com_obs: np.ndarray) -> np.ndarray:
         """Stack the per-robot observations (all quantities expressed in the robot frame)."""
-        obs = np.zeros((self.nR, self.obs_dim))
+        nR = self.nR
+        cfg = self.config
+        obs = np.zeros((nR, self.obs_dim))
         poses = np.array([est.state for est in self.robot_est])
         cov_traces = np.array([np.trace(est.cov) for est in self.robot_est])
-        cfg = self.config
+        targets = [self.target_est[i][0] for i in range(nR)]
+        theta = poses[:, 2]
+        cos, sin = np.cos(theta), np.sin(theta)
+        rot_t = np.empty((nR, 2, 2))  # C^T of every robot
+        rot_t[:, 0, 0] = cos
+        rot_t[:, 0, 1] = sin
+        rot_t[:, 1, 0] = -sin
+        rot_t[:, 1, 1] = cos
+        target_states = np.array([target.state for target in targets])
+        offset = (target_states[:, :2] - poses[:, :2])[:, :, np.newaxis]
+        obs[:, 0:2] = (rot_t @ offset)[:, :, 0]
+        obs[:, 2] = target_states[:, 2] - theta
+        obs[:, 3:5] = self.target_velocity
+        obs[:, 5] = [np.trace(target.cov) for target in targets]
+        if nR > 1:
+            others = self._others
+            block = obs[:, 6 : 6 + 4 * (nR - 1)].reshape(nR, nR - 1, 4)
+            block[:, :, 0:2] = (poses[others, :2] - poses[:, np.newaxis, :2]) @ rot_t.transpose(
+                0, 2, 1
+            )
+            block[:, :, 2] = poses[others, 2] - theta[:, np.newaxis]
+            block[:, :, 3] = cov_traces[others]
+
         lo = self.MAP.mapmin + cfg.obstacle_sensing_margin
         hi = self.MAP.mapmax - cfg.obstacle_sensing_margin
-        for i in range(self.nR):
-            theta = poses[i, 2]
-            c, s = np.cos(theta), np.sin(theta)
-            rot_t = np.array([[c, s], [-s, c]])  # C^T
-            target = self.target_est[i][0]
-            obs[i, 0:2] = rot_t @ (target.state[:2] - poses[i, :2])
-            obs[i, 2] = target.state[2] - theta
-            obs[i, 3:5] = self.target_velocity
-            obs[i, 5] = np.trace(target.cov)
-
-            others = [j for j in range(self.nR) if j != i]
-            if others:
-                block = obs[i, 6 : 6 + 4 * len(others)].reshape(len(others), 4)
-                block[:, 0:2] = (poses[others, :2] - poses[i, :2]) @ rot_t.T
-                block[:, 2] = poses[others, 2] - theta
-                block[:, 3] = cov_traces[others]
-
-            if lo[0] <= poses[i, 0] <= hi[0] and lo[1] <= poses[i, 1] <= hi[1]:
-                closest = self.MAP.get_closest_obstacle(
-                    poses[i], fov=self._fov_rad, r_max=cfg.sensor_r_max
-                )
-                obs[i, -6:-4] = (cfg.sensor_r_max, np.pi) if closest is None else closest
-            obs[i, -4:-1] = poses[i]
-            obs[i, -1] = cov_traces[i]
+        sensing = np.flatnonzero(np.all((lo <= poses[:, :2]) & (poses[:, :2] <= hi), axis=1))
+        if sensing.size:
+            closest = self.MAP.closest_obstacles(
+                poses[sensing], fov=self._fov_rad, r_max=cfg.sensor_r_max
+            )
+            for i, value in zip(sensing, closest):
+                obs[i, -6:-4] = (cfg.sensor_r_max, np.pi) if value is None else value
+        obs[:, -4:-1] = poses
+        obs[:, -1] = cov_traces
         return obs.astype(np.float32)
 
     def measurement_generation(self):
@@ -571,13 +584,18 @@ class AJLATTEnv(gym.Env):
         collided = np.zeros(nR, dtype=bool)
         poses = np.array([est.state for est in self.robot_est])
         lo, hi = self.MAP.mapmin + 0.1, self.MAP.mapmax - 0.1
+        outside = np.any(poses[:, :2] < lo, axis=1) | np.any(poses[:, :2] > hi, axis=1)
+        # One batched ray cast for all robots inside the map.
+        closest = iter(
+            self.MAP.closest_obstacles(poses[~outside], fov=2 * np.pi, r_max=cfg.sensor_r_max)
+        )
         for i in range(nR):
-            if np.any(poses[i, :2] < lo) or np.any(poses[i, :2] > hi):
+            if outside[i]:
                 reward[i] -= cfg.boundary_penalty
                 self._episode_collisions[i] += 1
                 continue
-            closest = self.MAP.get_closest_obstacle(poses[i], fov=2 * np.pi, r_max=cfg.sensor_r_max)
-            if closest is not None and closest[0] < cfg.obstacle_collision_distance:
+            nearest = next(closest)
+            if nearest is not None and nearest[0] < cfg.obstacle_collision_distance:
                 reward[i] -= cfg.obstacle_penalty
                 self._episode_collisions[i] += 1
                 collided[i] = True

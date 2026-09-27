@@ -372,15 +372,27 @@ class KuramotoEnvBase(gym.Env):
         self._warned_render_none = False
 
     # ------------------------------------------------------------------ helpers
-    def _parse_reset_options(self, options: dict[str, Any] | None) -> dict[str, np.ndarray]:
-        """Validate ``reset(options=...)`` overrides of the sampled initial state."""
+    def _parse_reset_options(
+        self, options: dict[str, Any] | None, stacklevel: int = 3
+    ) -> dict[str, np.ndarray]:
+        """Validate ``reset(options=...)`` overrides of the sampled initial state.
+
+        Unknown keys are ignored with a ``UserWarning`` (generic tooling such as
+        PettingZoo's API test passes arbitrary options); the values of known
+        keys are validated strictly. ``stacklevel`` locates the user's
+        ``reset`` call for the warning.
+        """
         if not options:
             return {}
-        unknown = set(options) - set(RESET_OPTION_KEYS)
+        unknown = sorted(set(options) - set(RESET_OPTION_KEYS))
         if unknown:
-            raise ValueError(
-                f"Unknown reset option(s) {sorted(unknown)}; supported: {list(RESET_OPTION_KEYS)}"
+            warnings.warn(
+                f"{type(self).__name__}.reset(): ignoring unknown reset option(s) {unknown}; "
+                f"supported: {list(RESET_OPTION_KEYS)}",
+                UserWarning,
+                stacklevel=stacklevel,
             )
+            options = {key: value for key, value in options.items() if key not in unknown}
         if "coupling_strengths" in options and self.coupling_mode != "dynamic":
             raise ValueError("reset option 'coupling_strengths' requires coupling_mode='dynamic'")
         parsed = {}

@@ -294,7 +294,8 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
         options:
             Optional overrides ``"phases"``, ``"natural_frequencies"`` and (dynamic
             mode) ``"coupling_strengths"``, each of shape ``(size,)`` (broadcast to
-            every system) or ``(n_agents, size)``.
+            every system) or ``(n_agents, size)``. Unknown keys are ignored with
+            a ``UserWarning``.
 
         Returns
         -------

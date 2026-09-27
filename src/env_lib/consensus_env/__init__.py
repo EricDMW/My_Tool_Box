@@ -8,6 +8,8 @@ Registered as ``Consensus-v0`` and ``Formation-v0``::
     obs, info = env.reset(seed=0)
     action = env.unwrapped.laplacian_policy()
 
+    envs = env_lib.make_vec("Formation-v0", num_envs=256)  # ConsensusVectorEnv
+
 The renderer (:mod:`env_lib.consensus_env.rendering`) is imported lazily on the
 first ``render()`` call.
 """
@@ -26,6 +28,7 @@ from env_lib.consensus_env.consensus_env import (
     make_topology,
     proximity_adjacency,
 )
+from env_lib.consensus_env.vector import ConsensusVectorEnv
 
 __all__ = [
     "DYNAMICS",
@@ -33,6 +36,7 @@ __all__ = [
     "TASKS",
     "TOPOLOGIES",
     "ConsensusEnv",
+    "ConsensusVectorEnv",
     "algebraic_connectivity",
     "is_connected",
     "make_formation",

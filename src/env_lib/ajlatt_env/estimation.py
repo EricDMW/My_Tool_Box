@@ -18,8 +18,15 @@ finite-difference gradients) for exact reproducibility of earlier results.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 from scipy.optimize import minimize
+
+try:  # gufuncs behind numpy.linalg.inv / solve (called without their Python wrappers)
+    from numpy.linalg import _umath_linalg
+except ImportError:  # pragma: no cover
+    _umath_linalg = None
 
 __all__ = [
     "Agent",
@@ -186,6 +193,36 @@ class _DegenerateCI(RuntimeError):
     pass
 
 
+#: Floating-point errors of LAPACK on singular matrices are reported through
+#: NaN results inside the Newton solver (as numpy.linalg does internally).
+_QUIET_FP = {"invalid": "ignore", "divide": "ignore", "over": "ignore", "under": "ignore"}
+
+
+def _raw_inv(matrix: np.ndarray) -> np.ndarray:
+    """``numpy.linalg.inv`` of a float64 matrix without the Python wrapper.
+
+    Calls the same LAPACK kernel (the gufunc behind ``numpy.linalg.inv``), so
+    results are bitwise identical; a singular matrix gives a NaN-filled result
+    instead of raising. Call inside ``np.errstate(**_QUIET_FP)``.
+    """
+    if _umath_linalg is not None:
+        return _umath_linalg.inv(matrix, signature="d->d")
+    try:  # pragma: no cover - NumPy without the private gufunc module
+        return np.linalg.inv(matrix)
+    except np.linalg.LinAlgError:  # pragma: no cover
+        return np.full(matrix.shape, np.nan)
+
+
+def _raw_solve(matrix: np.ndarray, rhs: np.ndarray) -> np.ndarray:
+    """``numpy.linalg.solve`` for a 1-D right-hand side, see :func:`_raw_inv`."""
+    if _umath_linalg is not None:
+        return _umath_linalg.solve1(matrix, rhs, signature="dd->d")
+    try:  # pragma: no cover
+        return np.linalg.solve(matrix, rhs)
+    except np.linalg.LinAlgError:  # pragma: no cover
+        return np.full(rhs.shape, np.nan)
+
+
 def _combine(S: np.ndarray, c: np.ndarray) -> np.ndarray:
     """``sum_i c_i S_i`` for ``S`` of shape ``(n, d, d)``."""
     n, d, _ = S.shape
@@ -193,48 +230,78 @@ def _combine(S: np.ndarray, c: np.ndarray) -> np.ndarray:
 
 
 def _objective(S: np.ndarray, c: np.ndarray):
-    fused = _combine(S, c)
-    try:
-        inverse = np.linalg.inv(fused)
-    except np.linalg.LinAlgError:
-        return np.inf, None
-    value = np.trace(inverse)
-    if not np.isfinite(value) or value <= 0:
-        return np.inf, None
+    n, d, _ = S.shape
+    with np.errstate(**_QUIET_FP):
+        return _flat_objective(S.reshape(n, d * d), c, d)
+
+
+def _flat_objective(flat: np.ndarray, c: np.ndarray, d: int):
+    """``(trace(P), P)`` with ``P = inv(sum_i c_i S_i)``, or ``(inf, None)``.
+
+    ``flat`` is ``S.reshape(n, d * d)``. A singular combination gives a NaN
+    trace and is rejected, like the ``LinAlgError`` of ``numpy.linalg.inv``.
+    """
+    inverse = _raw_inv((c @ flat).reshape(d, d))
+    value = inverse.trace()
+    if not 0.0 < value < math.inf:
+        return math.inf, None
     return value, inverse
 
 
 def _weights_newton(S: np.ndarray, max_iter: int = 100) -> np.ndarray:
-    """Active-set projected Newton method on the probability simplex."""
-    n = S.shape[0]
+    """Active-set projected Newton method on the probability simplex.
+
+    The implementation avoids per-call overhead (direct LAPACK gufunc calls,
+    one floating-point error context per solve) but performs exactly the
+    same floating-point operations as the straightforward NumPy version, so
+    its iterates are bitwise identical to it. This matters: nearly identical
+    sources (common when neighbouring robots share estimates) make the KKT
+    system ill-conditioned, and any rounding change would alter the weights.
+    """
+    n, d, _ = S.shape
+    with np.errstate(**_QUIET_FP):
+        return _newton_loop(S, S.reshape(n, d * d), n, d, max_iter)
+
+
+def _newton_loop(S: np.ndarray, flat: np.ndarray, n: int, d: int, max_iter: int) -> np.ndarray:
+    inv = _raw_inv
+    diagonal = list(range(0, d * d, d + 1))
     c = np.full(n, 1.0 / n)
-    f, p = _objective(S, c)
+    f, p = _flat_objective(flat, c, d)
     if p is None:
         raise _DegenerateCI
+    f = float(f)
     free = np.ones(n, dtype=bool)
+    all_free = True
+    # KKT matrix and right-hand side of the all-free case, reused across iterations.
+    kkt_full = np.ones((n + 1, n + 1))
+    kkt_full[n, n] = 0.0
+    rhs_full = np.zeros(n + 1)
 
     for _ in range(max_iter):
         b = S @ p  # S_i P, shape (n, d, d)
         a = p @ b  # P S_i P
-        grad = -np.einsum("nii->n", a)
+        trace_a = np.einsum("nii->n", a)
+        grad = -trace_a
         hess = 2.0 * a.reshape(n, -1) @ b.transpose(0, 2, 1).reshape(n, -1).T
 
-        if free.all():
-            idx, sub_hess, sub_grad = None, hess, grad
+        if all_free:
+            idx, m = None, n
+            kkt, rhs = kkt_full, rhs_full
+            kkt[:n, :n] = hess
+            rhs[:n] = trace_a  # -grad
         else:
             idx = np.flatnonzero(free)
-            sub_hess, sub_grad = hess[idx][:, idx], grad[idx]
-        m = sub_grad.size
-        kkt = np.empty((m + 1, m + 1))
-        kkt[:m, :m] = sub_hess
-        kkt[:m, m] = kkt[m, :m] = 1.0
-        kkt[m, m] = 0.0
-        rhs = np.append(-sub_grad, 0.0)
-        try:
-            solution = np.linalg.solve(kkt, rhs)
-            if not np.all(np.isfinite(solution)):
-                raise np.linalg.LinAlgError
-        except np.linalg.LinAlgError:
+            m = idx.size
+            kkt = np.empty((m + 1, m + 1))
+            kkt[:m, :m] = hess[idx][:, idx]
+            kkt[:m, m] = kkt[m, :m] = 1.0
+            kkt[m, m] = 0.0
+            rhs = np.empty(m + 1)
+            rhs[:m] = -grad[idx]
+            rhs[m] = 0.0
+        solution = _raw_solve(kkt, rhs)
+        if not np.isfinite(solution).all():  # singular or ill-conditioned KKT system
             solution = np.linalg.lstsq(kkt, rhs, rcond=None)[0]
         if idx is None:
             step = solution[:m].copy()
@@ -245,17 +312,21 @@ def _weights_newton(S: np.ndarray, max_iter: int = 100) -> np.ndarray:
         decrement = -float(grad @ step)  # Newton decrement (>= 0 for convex f)
 
         accepted = False
-        if decrement > 1e-14 * f and np.max(np.abs(step)) > 1e-13:
+        if decrement > 1e-14 * f and np.abs(step).max() > 1e-13:
             decreasing = step < 0
             alpha_max = 1.0
             if decreasing.any():
-                alpha_max = min(1.0, float(np.min(c[decreasing] / -step[decreasing])))
+                alpha_max = min(1.0, float((c[decreasing] / -step[decreasing]).min()))
             alpha = alpha_max
             while alpha > 1e-12:
                 trial = np.maximum(c + alpha * step, 0.0)
                 trial /= trial.sum()
-                f_trial, p_trial = _objective(S, trial)
-                if p_trial is not None and f_trial <= f - 1e-4 * alpha * decrement:
+                # Objective trace(inv(sum_i trial_i S_i)), see _flat_objective.
+                p_trial = inv((trial @ flat).reshape(d, d))
+                f_trial = 0.0
+                for k in diagonal:  # same summation order as ndarray.trace
+                    f_trial += p_trial.item(k)
+                if 0.0 < f_trial < math.inf and f_trial <= f - 1e-4 * alpha * decrement:
                     accepted = True
                     break
                 alpha *= 0.5
@@ -265,23 +336,26 @@ def _weights_newton(S: np.ndarray, max_iter: int = 100) -> np.ndarray:
                     free &= ~blocked
                     trial[blocked] = 0.0
                     trial /= trial.sum()
-                    f_blocked, p_blocked = _objective(S, trial)
+                    f_blocked, p_blocked = _flat_objective(flat, trial, d)
                     if p_blocked is not None:
-                        f_trial, p_trial = f_blocked, p_blocked
+                        f_trial, p_trial = float(f_blocked), p_blocked
                     else:
                         free |= blocked
+                    all_free = bool(free.all())
                 c, f, p = trial, f_trial, p_trial
                 continue
 
         # No further progress on the current free set: check the KKT
         # multipliers of the variables fixed at zero and release the most
         # violated one.
-        multipliers = grad + nu
-        fixed = np.flatnonzero(~free)
-        tolerance = 1e-9 * max(1.0, float(np.max(np.abs(grad))))
-        if fixed.size and multipliers[fixed].min() < -tolerance:
-            free[fixed[np.argmin(multipliers[fixed])]] = True
-            continue
+        if not all_free:
+            multipliers = grad + nu
+            fixed = np.flatnonzero(~free)
+            tolerance = 1e-9 * max(1.0, float(np.abs(grad).max()))
+            if multipliers[fixed].min() < -tolerance:
+                free[fixed[np.argmin(multipliers[fixed])]] = True
+                all_free = bool(free.all())
+                continue
         break
     return c
 
@@ -333,8 +407,12 @@ def ci_weights(S: np.ndarray, solver: str = "newton") -> np.ndarray:
     # Dimensions that carry no information in any source (e.g. the heading of a
     # target observed only through range and bearing) are dropped; the
     # pseudo-inverse objective ignores them as well.
-    support = np.flatnonzero(np.any(np.diagonal(S, axis1=1, axis2=2) != 0, axis=0))
-    reduced = S[:, support][:, :, support]
+    informative = (np.diagonal(S, axis1=1, axis2=2) != 0).any(axis=0)
+    if informative.all():
+        reduced = np.ascontiguousarray(S)
+    else:
+        support = np.flatnonzero(informative)
+        reduced = S[:, support][:, :, support]
     try:
         return _weights_newton(reduced)
     except _DegenerateCI:

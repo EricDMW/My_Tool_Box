@@ -477,8 +477,19 @@ def test_action_and_reset_validation():
     env.step(np.zeros(16))  # flat actions are accepted
     with pytest.raises(ValueError):
         env.reset(options={"positions": np.zeros((3, 2))})
-    with pytest.raises(ValueError):
-        env.reset(options={"speed": 1})
+
+
+def test_unknown_reset_options_warn_and_are_ignored():
+    env = ConsensusEnv(n_agents=3)
+    start = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    with pytest.warns(UserWarning, match="ignoring unknown reset option") as record:
+        obs, _ = env.reset(seed=0, options={"speed": 1, "positions": start})
+    assert record[0].filename == __file__  # the warning points at the caller
+    np.testing.assert_array_equal(env.positions, start)  # known keys still apply
+    with pytest.warns(UserWarning, match="ignoring unknown reset option"):
+        env.reset(seed=0, options={"options": 1})  # as passed by PettingZoo's API test
+    with pytest.raises(ValueError), pytest.warns(UserWarning):  # known keys stay strict
+        env.reset(options={"speed": 1, "positions": np.zeros((2, 2))})
 
 
 def test_make_formation():
