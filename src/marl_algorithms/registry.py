@@ -50,7 +50,7 @@ _REGISTRY: dict[str, AlgorithmInfo] = {
             "on-policy",
             _BOTH,
             "independent PPO: every agent learns from its own observation and reward",
-            "de Witt et al., 2020, Is independent learning all you need in the StarCraft challenge?",
+            "de Witt et al., 2020, Is independent learning all you need in the StarCraft multi-agent challenge?",
         ),
         AlgorithmInfo(
             "mappo",
@@ -90,7 +90,8 @@ _REGISTRY: dict[str, AlgorithmInfo] = {
             "value-based",
             ("discrete",),
             "value decomposition networks: team value as the sum of agent utilities",
-            "Sunehag et al., 2018, Value-decomposition networks for cooperative multi-agent learning",
+            "Sunehag et al., 2018, Value-decomposition networks for cooperative multi-agent learning "
+            "based on team reward",
         ),
         AlgorithmInfo(
             "qmix",
@@ -98,7 +99,8 @@ _REGISTRY: dict[str, AlgorithmInfo] = {
             "value-based",
             ("discrete",),
             "QMIX: monotonic, state-conditioned mixing of agent utilities",
-            "Rashid et al., 2018, QMIX: monotonic value function factorisation for deep MARL",
+            "Rashid et al., 2018, QMIX: monotonic value function factorisation for deep multi-agent "
+            "reinforcement learning",
         ),
     )
 }
