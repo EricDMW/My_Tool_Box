@@ -269,37 +269,17 @@ def test_parallel_adapter_subclasses_pettingzoo_when_available():
         ("WirelessComm-v1", {"max_iter": 20}),
         ("AJLATT-v0", {"max_episode_steps": 12}),
         ("Pistonball-v0", {"n_pistons": 5, "max_cycles": 15}),
+        ("Consensus-v0", {"max_steps": 20}),
+        ("KuramotoOscillator-Constant-v0", {"max_steps": 20}),
+        ("PowerGrid-v0", {"max_steps": 20}),
+        ("Platoon-v0", {"max_steps": 20}),
     ],
 )
+# parallel_api_test resets with a dummy option; environments that validate
+# their options warn about it and ignore it.
+@pytest.mark.filterwarnings("ignore:.*reset option:UserWarning")
 def test_pettingzoo_parallel_api_test(env_id, kwargs):
     parallel_test = pytest.importorskip("pettingzoo.test")
     if env_id == "Pistonball-v0":
         pytest.importorskip("pymunk")
     parallel_test.parallel_api_test(to_parallel(env_id, **kwargs), num_cycles=100)
-
-
-class _DropResetOptions(gym.Wrapper):
-    """Ignore reset options (parallel_api_test passes a dummy ``{"options": 1}``)."""
-
-    def reset(self, *, seed=None, options=None):
-        return self.env.reset(seed=seed)
-
-
-@pytest.mark.parametrize(
-    ("env_id", "kwargs"),
-    [
-        ("Consensus-v0", {"max_steps": 20}),
-        ("KuramotoOscillator-Constant-v0", {"max_steps": 20}),
-        ("PowerGrid-v0", {}),
-        ("Platoon-v0", {}),
-    ],
-)
-def test_pettingzoo_parallel_api_test_strict_option_envs(env_id, kwargs):
-    # These environments reject unknown reset options, including the dummy one
-    # of parallel_api_test; everything else of the API is checked here.
-    parallel_test = pytest.importorskip("pettingzoo.test")
-    try:
-        env = env_lib.make(env_id, **kwargs)
-    except ImportError:
-        pytest.skip(f"{env_id} is not available")
-    parallel_test.parallel_api_test(ParallelEnvAdapter(_DropResetOptions(env)), num_cycles=30)
