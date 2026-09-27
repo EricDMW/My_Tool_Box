@@ -234,9 +234,10 @@ because they synchronise in 21 steps instead of 10, and less in
 \begin{pycode}
 import env_lib
 
-env = env_lib.make("KuramotoOscillator-v0", reward_mode="penalty")
-env = env_lib.make("KuramotoOscillator-v0", reward_mode="terminal")   # final reward only
-env = env_lib.make("KuramotoOscillator-v0", terminate_on_sync=False,  # hold synchronisation
+env_id = "KuramotoOscillator-v0"
+env = env_lib.make(env_id, reward_mode="penalty")
+env = env_lib.make(env_id, reward_mode="terminal")        # final reward only
+env = env_lib.make(env_id, terminate_on_sync=False,       # hold synchronisation
                    sync_bonus=0.0, control_cost=0.1)
 \end{pycode}
 

@@ -239,7 +239,7 @@ table.
     \code{terminate\_on\_collision} (\code{True}) & An obstacle collision ends
       the robot's episode (\code{terminated[i]}); with \code{False} the
       collision is only penalised and the episode continues. \\
-    \code{collision\_termination\_penalty} (0) & Subtracted from $r_i$ on the
+    \code{collision\_}\allowbreak\code{termination\_penalty} (0) & Subtracted from $r_i$ on the
       step a collision ends robot $i$'s episode. \\
     \code{team\_reward\_weight} $w$ (0) & $r_i \leftarrow (1-w)\, r_i + w\,
       \frac{1}{n_R}\sum_j r_j$: 0 keeps individual rewards, 1 gives every robot
@@ -262,7 +262,8 @@ $-34{,}273$, controller $-7{,}415$), or a
 \begin{pycode}
 import env_lib
 
-env = env_lib.make("AJLATT-v0", terminate_on_collision=False)   # penalised, not stopped
+# collisions penalised, the episode continues
+env = env_lib.make("AJLATT-v0", terminate_on_collision=False)
 env = env_lib.make("AJLATT-v0", reward_mode="bounded", team_reward_weight=0.5)
 \end{pycode}
 
@@ -367,7 +368,7 @@ fields are listed in Table~\ref{tab:ajlatt-params}.
   \code{terminate\_on\_collision} & \code{True} & End a robot's episode (\code{terminated}) at an obstacle collision; \code{False} only penalises it. \\
   \code{reward\_mode} & \code{"cost"} & \code{"cost"} or \code{"bounded"} (Table~\ref{tab:ajlatt-reward-settings}). \\
   \code{cost\_scale} & \code{20.0} & Scale $\sigma$ of the \code{"bounded"} reward. \\
-  \code{collision\_termination\_penalty} & \code{0.0} & Extra penalty when a collision ends a robot's episode. \\
+  \code{collision\_}\allowbreak\code{termination\_}\allowbreak\code{penalty} & \code{0.0} & Extra penalty when a collision ends a robot's episode. \\
   \code{team\_reward\_weight} & \code{0.0} & Weight $w \in [0, 1]$ of the team mean in each robot's reward. \\
   \code{obstacle\_sensing\_margin} & \code{1.0} & Robots closer than this to the map border report a zero obstacle reading (original behaviour). \\
   \multicolumn{3}{@{}l}{\textit{Miscellaneous}} \\
