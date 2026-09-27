@@ -12,7 +12,7 @@ The tables live in one module per algorithm family, together with the notes
 from tuning them: :mod:`~marl_algorithms.presets.ppo` (IPPO, MAPPO),
 :mod:`~marl_algorithms.presets.ddpg` (MADDPG, MATD3) and
 :mod:`~marl_algorithms.presets.q_learning` (IQL, VDN, QMIX). Every preset
-trains in one to two minutes on one CPU core.
+trains in under two minutes on one CPU core.
 """
 
 from __future__ import annotations

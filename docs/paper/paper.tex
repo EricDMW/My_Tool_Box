@@ -25,7 +25,7 @@
 % ---------------------------------------------------------------------------
 % Numbers (from the repository's benchmarks and test suite)
 % ---------------------------------------------------------------------------
-\newcommand{\NumTests}{1{,}369}
+\newcommand{\NumTests}{1{,}419}
 \newcommand{\NumIds}{18}
 \newcommand{\NumFamilies}{eight}
 \newcommand{\repo}{\ificmlshowauthors\url{https://github.com/EricDMW/My_Tool_Box}\else(repository link removed for anonymous review)\fi}
@@ -467,7 +467,10 @@ pay a positive reward per step and end on synchronisation, so the controller,
 which synchronises in half the steps, collects less; their task metric is the
 time to synchronise. The default AJLATT episode ends at the first collision,
 which rewards random robots for colliding early, so the table uses the variant
-without collision termination.
+without collision termination. A learner can exploit both designs by ending
+episodes early; \code{env-lib describe} flags them, and for training we
+recommend a larger synchronisation bonus or the frequency-tracking reward,
+and AJLATT with \code{terminate\_on\_collision=False}.
 
 \begin{table}[t]
   \caption{Mean return of uniformly random actions and the classical
@@ -544,11 +547,11 @@ the concatenated observations as the global state.
 \end{table}
 
 Seventeen tuned presets pair the methods with the environments whose action
-type they support; each trains in one to two minutes on one CPU core.
+type they support; each trains in under two minutes on one CPU core.
 \Cref{tab:marl} lists representative results and \cref{fig:curves} learning
-curves (all 17 in \cref{app:presets}). Every learned policy closes at least
-90\,\% of the gap between random actions and the classical controller, and at
-least 98\,\% outside WirelessComm. All methods match the optimal relay on
+curves (all 17 in \cref{app:presets}). Every learned policy but one closes at
+least 98\,\% of the gap between random actions and the classical controller;
+the exception, QMIX on WirelessComm, closes 90\,\%. All methods match the optimal relay on
 LineMsg, and VDN comes within 0.5\,\% of the collision-free schedule on
 WirelessComm; on the continuous tasks the classical controllers remain
 ahead, which makes these environments a demanding test for new methods.
@@ -595,7 +598,7 @@ cannot give different policies different episodes. All arguments are checked
 before any training starts. The report prints as a table, exports to CSV and
 Markdown, and keeps the trained baselines for reuse.
 
-\begin{lstlisting}[caption={Comparing a proposed method with the baselines.},label={lst:compare},captionpos=b]
+\begin{lstlisting}[caption={Comparing a proposed method with the baselines.},label={lst:compare},captionpos=b,float=tb]
 from marl_algorithms import compare
 
 def my_method(obs):  # (num_envs, n_agents, obs_dim)
@@ -631,7 +634,7 @@ actions $-629.3$. The same comparison runs from the shell as
 % ===========================================================================
 
 The distribution installs with \code{pip} from the repository, supports
-Python 3.9 or newer and needs only NumPy, SciPy, matplotlib, Gymnasium and
+Python 3.9 to 3.13 and needs only NumPy, SciPy, matplotlib, Gymnasium and
 PyYAML; PyTorch, pymunk/pygame
 and video export are optional extras loaded on first use. {\NumTests} tests
 cover the Gymnasium contract of every environment, the equivalence of single

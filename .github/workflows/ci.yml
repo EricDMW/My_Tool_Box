@@ -74,4 +74,4 @@ jobs:
           marl-train list
           python examples/algorithms/marl_training_demo.py --quick --plot ''
           python examples/algorithms/baseline_comparison.py --quick --seeds 0 --episodes 16 --plot ''
-          marl-train compare LineMsg-v0 --algos iql vdn --steps 1000 --num-envs 8 --episodes 8
+          marl-train compare LineMsg-v0 --algos iql vdn --steps 3000 --num-envs 8 --episodes 8
