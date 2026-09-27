@@ -263,7 +263,9 @@ class _ValueBase(OffPolicyAlgorithm):
         net = self.target_q_net if target else self.q_net
         return net(self.agent_inputs(obs))
 
-    def mix(self, agent_q: torch.Tensor, obs: torch.Tensor, *, target: bool = False) -> torch.Tensor:
+    def mix(
+        self, agent_q: torch.Tensor, obs: torch.Tensor, *, target: bool = False
+    ) -> torch.Tensor:
         """Team value ``(*batch,)`` from chosen utilities ``(*batch, n)``.
 
         Without a mixer (IQL) the utilities are returned unchanged. The global
@@ -481,11 +483,54 @@ class QMIX(_ValueBase):
 # ----------------------------------------------------------------------
 # Presets
 # ----------------------------------------------------------------------
-#: Tuned demonstration settings ``{algorithm: {env_id: preset}}``; a preset has
-#: the keys ``"total_steps"``, ``"num_envs"``, ``"config"`` (configuration
-#: overrides) and ``"env_kwargs"``. See :mod:`marl_algorithms.presets`.
+_LINEMSG: dict[str, Any] = {
+    "num_envs": 16,
+    "total_steps": 25_000,
+    "config": {"batch_size": 128, "lr": 1e-3, "epsilon_decay_steps": 12_500},
+    "env_kwargs": {},
+}
+
+#: Tuned demonstration settings ``PRESETS[algorithm][env_id]`` for ``algorithm``
+#: in ``"iql"``, ``"vdn"``, ``"qmix"``. A preset is a dictionary with the keys
+#: ``"total_steps"`` (environment steps summed over copies), ``"num_envs"``
+#: (batched copies), ``"config"`` (:class:`QLearningConfig` overrides) and
+#: ``"env_kwargs"`` (environment arguments); see :mod:`marl_algorithms.presets`.
+#: Every preset trains in at most about two minutes on one CPU core.
+#:
+#: IQL has no WirelessComm preset: with its per-agent rewards a collision costs
+#: the transmitting agent nothing, so independent learners converge to
+#: transmitting all the time and collide (no better than random actions), while
+#: VDN and QMIX, trained on the team reward, learn a collision-free schedule.
 PRESETS: dict[str, dict[str, dict[str, Any]]] = {
-    "iql": {},
-    "vdn": {},
-    "qmix": {},
+    "iql": {
+        "LineMsg-v0": copy.deepcopy(_LINEMSG),
+    },
+    "vdn": {
+        "LineMsg-v0": copy.deepcopy(_LINEMSG),
+        "WirelessComm-v1": {
+            "num_envs": 16,
+            "total_steps": 120_000,
+            "config": {
+                "batch_size": 128,
+                "lr": 1e-3,
+                "gamma": 0.8,
+                "epsilon_decay_steps": 30_000,
+            },
+            "env_kwargs": {},
+        },
+    },
+    "qmix": {
+        "LineMsg-v0": copy.deepcopy(_LINEMSG),
+        "WirelessComm-v1": {
+            "num_envs": 16,
+            "total_steps": 120_000,
+            "config": {
+                "batch_size": 128,
+                "lr": 1e-3,
+                "gamma": 0.8,
+                "epsilon_decay_steps": 50_000,
+            },
+            "env_kwargs": {},
+        },
+    },
 }
