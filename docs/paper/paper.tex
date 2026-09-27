@@ -64,9 +64,10 @@
 \begin{abstract}
 Cooperative multi-agent reinforcement learning is increasingly proposed for
 networked physical systems such as power grids, vehicle platoons and robot
-teams, yet most benchmarks are games or particle worlds whose actions,
-rewards and scales have no physical meaning, and none of them tells the user
-how far a learned policy is from the controller an engineer would deploy. We
+teams, yet many widely used benchmarks are games or particle worlds whose
+actions, rewards and scales have no physical meaning, and they rarely tell
+the user how far a learned policy is from the controller an engineer would
+deploy. We
 present \texttt{env\_lib}, a library of {\NumIds} Gymnasium environments in
 {\NumFamilies} families of networked multi-agent control problems with
 continuous states and actions in physical units: power-grid frequency control,
@@ -76,8 +77,8 @@ cooperative rigid-body physics, and two discrete networking tasks. All
 environments share one interface with joint per-agent spaces, per-agent
 rewards and an explicit interaction graph. The continuous environments are
 written batch-first, so a vector environment advances all its copies with
-array operations: 2 to 3~million agent-steps per second on one CPU core, 33 to
-43 times the throughput of Gymnasium's synchronous vector environment. Every
+array operations: 2.1 to 3.2~million agent-steps per second on one CPU core,
+33 to 43 times the throughput of Gymnasium's synchronous vector environment. Every
 environment ships a decentralised classical controller as a reference, and a
 companion package provides seven multi-agent reinforcement learning baselines
 (IPPO, MAPPO, MADDPG, MATD3, IQL, VDN, QMIX) with tuned settings and a
@@ -107,9 +108,9 @@ environments of \citet{lowe2017maddpg}, the StarCraft challenges
 \citep{terry2021pettingzoo} have game scores as rewards, discrete or
 normalised actions and no notion of a physical operating point. Domain
 simulators for power systems \citep{marot2020l2rpn,wang2021mapdn} or traffic
-\citep{wu2022flow} are faithful but heavy, each with its own interface. None
-of these provides the reference an engineer would compare against: a
-classical controller for the same task.
+\citep{wu2022flow} are faithful but heavy, each with its own interface. They
+rarely ship the reference an engineer would compare against: a classical
+controller for the same task, runnable through the same interface.
 
 \texttt{env\_lib} fills this gap with a compact, dependency-light library of
 networked control environments. Its contributions are:
