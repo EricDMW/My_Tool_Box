@@ -1488,7 +1488,6 @@ class PowerGridVectorEnv(BatchedVectorEnv):
         self._core = _GridBatch(config, self.num_envs, _default_network(config))
         self._renderer = None
         self._layout_cache: tuple[_Network, np.ndarray] | None = None
-        self._last_active = np.ones(self.num_envs, dtype=bool)
 
     # ------------------------------------------------------------------
     # Read-only views (batched over copies)
@@ -1562,7 +1561,6 @@ class PowerGridVectorEnv(BatchedVectorEnv):
     def _step_envs(
         self, actions: np.ndarray, active: np.ndarray
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
-        self._last_active = active
         control = self._core.clip_action(actions)
         self._core.step(control, self.np_random)
         infos = self._core.infos()
@@ -1580,24 +1578,13 @@ class PowerGridVectorEnv(BatchedVectorEnv):
     def step(self, actions: Any):
         """Advance every copy by ``dt``; see :meth:`BatchedVectorEnv.step`.
 
-        The info of a copy that was reset within this call (``"next_step"``:
-        the copies that ended on the previous call; ``"same_step"``: the copies
-        that end now, whose final info is in ``infos["final_info"]``) describes
-        its new episode, as in :class:`gymnasium.vector.SyncVectorEnv`.
+        Copies reset automatically within this call report the info of their
+        new episode, as in :class:`gymnasium.vector.SyncVectorEnv`.
         """
-        observations, rewards, terminated, truncated, infos = super().step(actions)
-        if self.autoreset_mode == "next_step":
-            restarted = ~self._last_active
-        elif self.autoreset_mode == "same_step":
-            restarted = terminated | truncated
-        else:
-            restarted = None
-        if restarted is not None and restarted.any():
-            for key, value in self._core.infos().items():
-                infos[key][restarted] = value[restarted]
+        result = super().step(actions)
         if self.render_mode == "human":
             self.render()
-        return observations, rewards, terminated, truncated, infos
+        return result
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         """Reset all copies (or those in ``options["reset_mask"]``).

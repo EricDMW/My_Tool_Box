@@ -89,6 +89,9 @@ def test_same_step_autoreset():
     assert obs[:, 0].tolist() == [0.0, 1.0]
     assert info["_final_obs"].tolist() == [True, False]
     assert info["final_obs"][0].tolist() == [2.0]
+    # The main info rows of the reset copy describe its new episode.
+    assert info["_count"].tolist() == [False, True]
+    assert info["resets"][0] == 2 and info["_resets"].tolist() == [True, False]
     assert info["final_info"]["count"][0] == 2.0
     assert info["final_info"]["_count"].tolist() == [True, False]
 

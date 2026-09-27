@@ -235,6 +235,7 @@ class BatchedVectorEnv(VectorEnv):
                     final_info[key] = value.copy() if isinstance(value, np.ndarray) else value
                     final_info[f"_{key}"] = infos[f"_{key}"] & done
                 self._reset_envs(done, None)
+                infos = self._merge_reset_infos(infos, done)
                 infos["final_obs"], infos["_final_obs"] = final, done.copy()
                 infos["final_info"], infos["_final_info"] = final_info, done.copy()
             observations = self._observe()
@@ -272,9 +273,10 @@ class BatchedVectorEnv(VectorEnv):
     def _merge_reset_infos(self, infos: dict[str, Any], resetting: np.ndarray) -> dict[str, Any]:
         """Replace the info rows of copies reset in this step by their reset info.
 
-        As in :class:`gymnasium.vector.SyncVectorEnv`, a copy that is reset by
-        the next-step autoreset reports the info of its reset, not that of the
-        discarded step.
+        As in :class:`gymnasium.vector.SyncVectorEnv`, a copy that is reset
+        automatically reports the info of its reset: under ``"next_step"`` the
+        discarded step's info is dropped, under ``"same_step"`` the last step's
+        info moves to ``infos["final_info"]``.
         """
         infos = self._with_masks(infos)
         fresh = self._with_masks(self._reset_infos(resetting))
