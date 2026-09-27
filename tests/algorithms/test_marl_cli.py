@@ -102,9 +102,27 @@ def test_run_and_evaluate_commands(tmp_path, capsys):
     assert "mappo" in capsys.readouterr().out
 
 
-def test_bad_key_value_pair_exits():
-    with pytest.raises(SystemExit):
-        main(["run", "vdn", "LineMsg-v0", "--set", "lr"])
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["run", "vdn", "LineMsg-v0", "--set", "lr"], "expected KEY=VALUE"),
+        (["run", "maddpg", "LineMsg-v0"], "does not support the discrete"),
+        (["run", "iql", "LineMsg-v0", "--set", "gamma=2"], "gamma must be in [0, 1]"),
+        (["run", "iql", "LineMsg-v0", "--env-kwarg", "bogus=1"], "invalid environment arguments"),
+        (["evaluate", "x.pt", "LineMsg-v0", "--env-kwarg", "bogus=1"], "invalid environment"),
+    ],
+)
+def test_invalid_values_give_a_clean_error_before_training(argv, message, capsys):
+    assert main(argv) == 2
+    captured = capsys.readouterr()
+    assert captured.out == "" and message in captured.err
+
+
+@pytest.mark.parametrize("option", ["--steps", "--num-envs", "--reports"])
+def test_non_positive_counts_are_usage_errors(option):
+    with pytest.raises(SystemExit) as info:
+        main(["run", "iql", "LineMsg-v0", option, "0"])
+    assert info.value.code == 2
 
 
 @pytest.mark.parametrize(

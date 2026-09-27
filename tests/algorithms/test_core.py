@@ -356,6 +356,15 @@ def test_learn_is_cumulative_and_summary_reports_steps(name):
     envs.close()
 
 
+def test_summary_counts_the_steps_taken_before_any_episode_or_update():
+    envs = make_vector_env("PowerGrid-v0", 4)
+    algo = get_algorithm("maddpg")(envs, seed=0, hidden_sizes=(8,), warmup_steps=10_000)
+    log = algo.learn(envs, 400, seed=0)
+    assert not log.episodes and not log.updates
+    assert log.env_steps == algo.env_steps == 400 and "400 env steps" in log.summary()
+    envs.close()
+
+
 def test_off_policy_callback_sees_the_episodes_of_its_step():
     envs = make_vector_env("LineMsg-v0", 4, max_iter=10)
     algo = get_algorithm("iql")(envs, seed=0, hidden_sizes=(8,), **_SMALL["vdn"])

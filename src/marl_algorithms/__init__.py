@@ -73,6 +73,7 @@ _LAZY: dict[str, str] = {
     "train_preset": "marl_algorithms.presets",
     # Baselines
     "Comparison": "marl_algorithms.baselines",
+    "ComparisonRow": "marl_algorithms.baselines",
     "compare": "marl_algorithms.baselines",
     "per_copy": "marl_algorithms.baselines",
     # Algorithms

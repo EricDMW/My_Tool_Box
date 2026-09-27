@@ -845,7 +845,8 @@ may be repeated.
 
 Chapter~\ref{chap:marl}. The package requires PyTorch. The top-level package
 exports lazily the training entry points, the registry, the preset functions,
-the core classes \code{Algorithm}, \code{OnPolicyAlgorithm},
+the baselines (\code{compare}, \code{Comparison}, \code{ComparisonRow},
+\code{per\_copy}), the core classes \code{Algorithm}, \code{OnPolicyAlgorithm},
 \code{OffPolicyAlgorithm}, \code{TrainingLog}, \code{MultiAgentSpec},
 \code{VectorRunner}, \code{Transition} and \code{make\_vector\_env}, the seven
 algorithm classes and the three configuration classes; the preset tables,
@@ -902,8 +903,8 @@ Section~\ref{sec:marl-baselines}.
 \begin{pycode}
 compare(env_id, algorithms=None, *, seeds=(0,), policies=None, n_episodes=64,
         eval_seed=1, total_steps=None, num_envs=None, env_kwargs=None,
-        include_random=True, include_baseline=True, device='cpu',
-        verbose=False, **config) -> Comparison
+        include_random=True, include_baseline=True, keep_replay=False,
+        device='cpu', verbose=False, **config) -> Comparison
 per_copy(policy) -> policy          # single-environment policy -> batched
 
 Comparison(env_id, env_kwargs, n_episodes, eval_seed, rows, algorithms, logs)
@@ -915,6 +916,7 @@ report.algorithms[(name, seed)] -> Algorithm; report.logs[(name, seed)]
 
 ComparisonRow(name, kind, returns, seeds=(), env_steps=(), train_seconds=())
 row.mean, row.std                   # over seeds; std is NaN for one value
+# records(): std_return is None for rows with one value
 \end{pycode}
 
 \code{algorithms=None} selects every algorithm with a preset for the
@@ -922,12 +924,19 @@ environment and an empty sequence none; \code{policies} maps names to batched
 policies or trained algorithms. Rows are in the order references
 (\code{"random"}, \code{"baseline"}), algorithms, policies, with
 \code{kind} \code{"reference"}, \code{"algorithm"} or \code{"policy"}.
-\code{compare} raises \code{KeyError} for an unknown algorithm and
-\code{ValueError} for an algorithm without a preset when \code{total\_steps}
-is not given, a preset whose environment arguments differ from
-\code{env\_kwargs}, a policy name that repeats another row's name, empty
-\code{seeds} or \code{n\_episodes < 1}. The classical controller row is
-omitted for environments without one.
+Evaluation uses only the first episode of every copy after a seeded reset,
+in chunks of at most 64 episodes (reset with \code{eval\_seed},
+\code{eval\_seed + 64}, \ldots), so every row meets the same episodes.
+\code{compare} checks all arguments before it trains anything: it raises
+\code{KeyError} for an unknown algorithm and \code{ValueError} for an
+algorithm listed twice, one that does not support the environment's actions,
+one without a preset when \code{total\_steps} is not given, a configuration
+override that an algorithm rejects, invalid environment arguments or ones that
+differ from a preset's, a policy name that repeats another row's name, empty or
+repeated \code{seeds}, \code{eval\_seed=None}, or a non-positive
+\code{n\_episodes}, \code{total\_steps} or \code{num\_envs}. The classical
+controller row is omitted for environments without one; the replay buffers of
+trained off-policy algorithms are released unless \code{keep\_replay=True}.
 
 \subsection{Agent spec and experience collection}
 
@@ -1063,6 +1072,7 @@ OffPolicyAlgorithm(Algorithm)    # config_class OffPolicyConfig; algo.replay
 TrainingLog(algorithm, env_id=None)
 log.episodes              # list of (env_steps, team_return, length)
 log.updates               # list of (env_steps, statistics)
+log.env_steps             # steps taken when training last returned
 log.wall_time, log.algorithm, log.env_id
 log.episode_steps, log.episode_returns                 # properties, arrays
 log.mean_return(last=100) -> float
@@ -1070,6 +1080,7 @@ log.curve(points=50) -> tuple[np.ndarray, np.ndarray]  # (steps, mean returns)
 log.summary() -> str
 log.to_csv(path) -> Path
 log.record_episodes(env_steps, episodes); log.record_update(env_steps, stats)
+log.record_steps(env_steps)      # called by learn() when it returns
 \end{pycode}
 
 The constructor raises \code{TypeError} for an unsupported action kind, a
@@ -1162,13 +1173,15 @@ without a preset), \code{-{}-seed 0}, \code{-{}-eval-episodes 64},
 algorithm with a preset, \code{-{}-seeds 0}, the presets' budgets,
 \code{-{}-episodes 64}, \code{-{}-eval-seed 1} and \code{-{}-threads 1};
 \code{evaluate} uses \code{-{}-episodes 64} and \code{-{}-seed 1}.
-\code{KEY=VALUE} values are parsed as Python literals (plain text otherwise); a
-malformed pair ends the command with the message \code{expected KEY=VALUE} and
-exit status 1. Command-line usage errors, and an unknown environment,
-algorithm, configuration field or checkpoint, an algorithm that does not
-support the environment's actions (\code{compare}) or one without a preset
-and without \code{-{}-steps} (\code{compare}), end the command before any
-training with a message on standard error and exit status 2.
+\code{KEY=VALUE} values are parsed as Python literals (plain text otherwise).
+Command-line usage errors (including a malformed \code{KEY=VALUE} pair and a
+non-positive count), and an unknown environment, algorithm, configuration
+field or checkpoint, invalid environment arguments or configuration values,
+an algorithm that does not support the environment's actions, or (for
+\code{compare}) one without a preset and without \code{-{}-steps}, end the
+command before any training with a message on standard error and exit status
+2. Without PyTorch, every sub-command reports that PyTorch is not installed
+and exits with status 1.
 
 \section{\texorpdfstring{\pkg{toolkit.plotkit}}{toolkit.plotkit}}\label{sec:api-plotkit}
 

@@ -24,17 +24,77 @@ from typing import Any
 __all__ = ["main"]
 
 
+class _UsageError(Exception):
+    """A command-line mistake, reported as ``marl-train: error: ...`` with exit status 2."""
+
+
 def _parse_pairs(pairs: list[str] | None) -> dict[str, Any]:
     values: dict[str, Any] = {}
     for pair in pairs or []:
         if "=" not in pair:
-            raise SystemExit(f"expected KEY=VALUE, got {pair!r}")
+            raise _UsageError(f"expected KEY=VALUE, got {pair!r}")
         key, raw = pair.split("=", 1)
         try:
             values[key.strip()] = ast.literal_eval(raw)
         except (ValueError, SyntaxError):
             values[key.strip()] = raw
     return values
+
+
+def _positive_int(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, got {text}")
+    return value
+
+
+def _non_negative_int(text: str) -> int:
+    value = int(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must be a non-negative integer, got {text}")
+    return value
+
+
+def _action_kind(env_id: str, env_kwargs: dict[str, Any]) -> str:
+    """Action kind of ``env_id`` built with ``env_kwargs``; checks the id and the arguments."""
+    import env_lib
+    from marl_algorithms.core.runner import make_vector_env
+    from marl_algorithms.core.spec import MultiAgentSpec
+
+    if env_id not in env_lib.list_envs():
+        raise _UsageError(f"unknown environment {env_id!r}; see `env-lib list`")
+    try:
+        envs = make_vector_env(env_id, 1, **env_kwargs)
+    except (TypeError, ValueError) as exc:
+        raise _UsageError(f"invalid environment arguments for {env_id}: {exc}") from exc
+    try:
+        return MultiAgentSpec.from_env(envs).action_kind
+    finally:
+        envs.close()
+
+
+def _algorithm_class(name: str) -> Any:
+    from marl_algorithms.registry import get_algorithm, list_algorithms
+
+    try:
+        return get_algorithm(name)
+    except KeyError:
+        known = ", ".join(info.name for info in list_algorithms())
+        raise _UsageError(f"unknown algorithm {name!r}; choose from {known}") from None
+
+
+def _check_config(algo_class: Any, config: dict[str, Any]) -> None:
+    config_class = algo_class.config_class
+    unknown = sorted(set(config) - set(config_class.field_names()))
+    if unknown:
+        raise _UsageError(
+            f"unknown {config_class.__name__} field(s) {', '.join(unknown)}; "
+            f"valid fields: {', '.join(config_class.field_names())}"
+        )
+    try:
+        config_class(**config)
+    except (TypeError, ValueError) as exc:
+        raise _UsageError(f"invalid {config_class.__name__} value: {exc}") from exc
 
 
 def _cmd_list(_: argparse.Namespace) -> int:
@@ -95,27 +155,20 @@ def _error(message: str) -> int:
 def _cmd_run(args: argparse.Namespace) -> int:
     import torch
 
-    import env_lib
     from marl_algorithms.presets import get_preset
-    from marl_algorithms.registry import get_algorithm, list_algorithms, train
+    from marl_algorithms.registry import train
 
-    try:
-        algo_class = get_algorithm(args.algorithm)
-    except KeyError:
-        names = ", ".join(info.name for info in list_algorithms())
-        return _error(f"unknown algorithm {args.algorithm!r}; choose from {names}")
-    if args.env_id not in env_lib.list_envs():
-        return _error(f"unknown environment {args.env_id!r}; see `env-lib list`")
+    algo_class = _algorithm_class(args.algorithm)
     preset = None if args.no_preset else get_preset(args.algorithm, args.env_id)
     preset = preset or {}
     env_kwargs = {**preset.get("env_kwargs", {}), **_parse_pairs(args.env_kwarg)}
     config = {**preset.get("config", {}), **_parse_pairs(args.set)}
-    unknown = sorted(set(config) - set(algo_class.config_class.field_names()))
-    if unknown:
-        return _error(
-            f"unknown {algo_class.config_class.__name__} field(s) {', '.join(unknown)}; "
-            f"valid fields: {', '.join(algo_class.config_class.field_names())}"
+    action_kind = _action_kind(args.env_id, env_kwargs)
+    if action_kind not in algo_class.action_kinds:
+        raise _UsageError(
+            f"{args.algorithm} does not support the {action_kind} actions of {args.env_id}"
         )
+    _check_config(algo_class, config)
     if args.threads:
         torch.set_num_threads(args.threads)
     total_steps = args.steps or int(preset.get("total_steps", 100_000))
@@ -160,52 +213,18 @@ def _cmd_run(args: argparse.Namespace) -> int:
 def _cmd_compare(args: argparse.Namespace) -> int:
     import torch
 
-    import env_lib
     from marl_algorithms.baselines import compare
-    from marl_algorithms.core.runner import make_vector_env
-    from marl_algorithms.core.spec import MultiAgentSpec
-    from marl_algorithms.presets import get_preset, list_presets
-    from marl_algorithms.registry import get_algorithm, list_algorithms
 
-    if args.env_id not in env_lib.list_envs():
-        return _error(f"unknown environment {args.env_id!r}; see `env-lib list`")
     env_kwargs = _parse_pairs(args.env_kwarg)
     config = _parse_pairs(args.set)
-    if args.algos is None:
-        names = [name for name, env_id in list_presets() if env_id == args.env_id]
-    else:
-        names = [name.lower() for name in args.algos]
-    probe = make_vector_env(args.env_id, 1, **env_kwargs)
-    action_kind = MultiAgentSpec.from_env(probe).action_kind
-    probe.close()
-    for name in names:
-        try:
-            algo_class = get_algorithm(name)
-        except KeyError:
-            known = ", ".join(info.name for info in list_algorithms())
-            return _error(f"unknown algorithm {name!r}; choose from {known}")
-        if action_kind not in algo_class.action_kinds:
-            return _error(f"{name} does not support the {action_kind} actions of {args.env_id}")
-        if args.steps is None and get_preset(name, args.env_id) is None:
-            return _error(f"{name} has no preset for {args.env_id}; pass --steps")
-        unknown = sorted(set(config) - set(algo_class.config_class.field_names()))
-        if unknown:
-            return _error(
-                f"unknown {algo_class.config_class.__name__} field(s) {', '.join(unknown)}"
-            )
+    _action_kind(args.env_id, env_kwargs)  # the id and the arguments
     if args.threads:
         torch.set_num_threads(args.threads)
-    seeds = args.seeds
-    print(
-        f"Comparing {', '.join(names) or 'no algorithms'} on {args.env_id} "
-        f"({len(seeds)} seed{'s' if len(seeds) != 1 else ''}), with random actions and "
-        "the classical controller"
-    )
-    try:
+    try:  # compare() checks everything else before training
         report = compare(
             args.env_id,
-            names,
-            seeds=seeds,
+            args.algos,
+            seeds=args.seeds,
             n_episodes=args.episodes,
             eval_seed=args.eval_seed,
             total_steps=args.steps,
@@ -215,7 +234,7 @@ def _cmd_compare(args: argparse.Namespace) -> int:
             **config,
         )
     except (KeyError, ValueError) as exc:
-        return _error(str(exc.args[0]) if exc.args else str(exc))
+        raise _UsageError(str(exc.args[0]) if exc.args else str(exc)) from exc
     print()
     print(report.to_markdown() if args.markdown else report)
     if args.csv:
@@ -227,15 +246,14 @@ def _cmd_compare(args: argparse.Namespace) -> int:
 
 
 def _cmd_evaluate(args: argparse.Namespace) -> int:
-    import env_lib
     from marl_algorithms.core.base import Algorithm
 
-    if args.env_id not in env_lib.list_envs():
-        return _error(f"unknown environment {args.env_id!r}; see `env-lib list`")
+    env_kwargs = _parse_pairs(args.env_kwarg)
+    _action_kind(args.env_id, env_kwargs)
     if not os.path.isfile(args.checkpoint):
-        return _error(f"no checkpoint at {args.checkpoint!r}")
+        raise _UsageError(f"no checkpoint at {args.checkpoint!r}")
     algo = Algorithm.load(args.checkpoint)
-    _evaluation_table(algo, args.env_id, _parse_pairs(args.env_kwarg), args.episodes, args.seed)
+    _evaluation_table(algo, args.env_id, env_kwargs, args.episodes, args.seed)
     return 0
 
 
@@ -252,17 +270,27 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="train an algorithm, then evaluate it")
     run.add_argument("algorithm", help="ippo, mappo, maddpg, matd3, iql, vdn or qmix")
     run.add_argument("env_id", help="env_lib environment id")
-    run.add_argument("--steps", type=int, default=None, help="environment steps (default: preset)")
-    run.add_argument("--num-envs", type=int, default=None, help="batched copies (default: preset)")
+    run.add_argument(
+        "--steps", type=_positive_int, default=None, help="environment steps (default: preset)"
+    )
+    run.add_argument(
+        "--num-envs", type=_positive_int, default=None, help="batched copies (default: preset)"
+    )
     run.add_argument("--seed", type=int, default=0)
     run.add_argument("--no-preset", action="store_true", help="ignore the tuned preset")
     run.add_argument("--set", nargs="+", metavar="KEY=VALUE", help="configuration overrides")
     run.add_argument("--env-kwarg", nargs="+", metavar="KEY=VALUE", help="environment arguments")
-    run.add_argument("--eval-episodes", type=int, default=64, help="evaluation episodes (0 skips)")
-    run.add_argument("--reports", type=int, default=10, help="progress lines during training")
+    run.add_argument(
+        "--eval-episodes", type=_non_negative_int, default=64, help="evaluation episodes (0 skips)"
+    )
+    run.add_argument(
+        "--reports", type=_positive_int, default=10, help="progress lines during training"
+    )
     run.add_argument("--save", metavar="PATH", help="save the trained algorithm")
     run.add_argument("--csv", metavar="PATH", help="save the training episodes as CSV")
-    run.add_argument("--threads", type=int, default=1, help="PyTorch threads (0 keeps the default)")
+    run.add_argument(
+        "--threads", type=_non_negative_int, default=1, help="PyTorch threads (0 keeps the default)"
+    )
     run.set_defaults(func=_cmd_run)
 
     compare = sub.add_parser(
@@ -275,9 +303,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--algos", nargs="+", metavar="ALGO", help="algorithms (default: all with a preset)"
     )
     compare.add_argument("--seeds", nargs="+", type=int, default=[0], help="training seeds [0]")
-    compare.add_argument("--steps", type=int, default=None, help="environment steps per run")
-    compare.add_argument("--num-envs", type=int, default=None, help="batched copies per run")
-    compare.add_argument("--episodes", type=int, default=64, help="evaluation episodes [64]")
+    compare.add_argument(
+        "--steps", type=_positive_int, default=None, help="environment steps per run"
+    )
+    compare.add_argument(
+        "--num-envs", type=_positive_int, default=None, help="batched copies per run"
+    )
+    compare.add_argument(
+        "--episodes", type=_positive_int, default=64, help="evaluation episodes [64]"
+    )
     compare.add_argument("--eval-seed", type=int, default=1, help="evaluation seed [1]")
     compare.add_argument("--set", nargs="+", metavar="KEY=VALUE", help="configuration overrides")
     compare.add_argument(
@@ -286,13 +320,13 @@ def build_parser() -> argparse.ArgumentParser:
     compare.add_argument("--markdown", action="store_true", help="print a Markdown table")
     compare.add_argument("--csv", metavar="PATH", help="save the report as CSV")
     compare.add_argument("--save-dir", metavar="DIR", help="save every trained algorithm")
-    compare.add_argument("--threads", type=int, default=1, help="PyTorch threads [1]")
+    compare.add_argument("--threads", type=_non_negative_int, default=1, help="PyTorch threads [1]")
     compare.set_defaults(func=_cmd_compare)
 
     evaluate = sub.add_parser("evaluate", help="evaluate a saved algorithm")
     evaluate.add_argument("checkpoint")
     evaluate.add_argument("env_id")
-    evaluate.add_argument("--episodes", type=int, default=64)
+    evaluate.add_argument("--episodes", type=_positive_int, default=64)
     evaluate.add_argument("--seed", type=int, default=1)
     evaluate.add_argument("--env-kwarg", nargs="+", metavar="KEY=VALUE")
     evaluate.set_defaults(func=_cmd_evaluate)
@@ -304,6 +338,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return int(args.func(args) or 0)
+    except _UsageError as exc:
+        return _error(str(exc))
     except BrokenPipeError:  # output piped into a command that exited (e.g. `| head`)
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         return 0

@@ -51,8 +51,9 @@ building blocks and reproducible experiment parameters.
   (`marl-train run mappo PowerGrid-v0`); tuned presets learn in one to two
   minutes on one CPU core and are evaluated against the classical controller.
   `marl_algorithms.compare` turns them into ready-made baselines for your own
-  method: one call trains them over several seeds and evaluates them with the
-  classical controller, random actions and your policy on the same episodes.
+  method: one call trains them, over as many seeds as you ask for, and
+  evaluates them with the classical controller, random actions and your policy
+  on the same episodes.
 - **Reproducible.** Randomness comes only from seeded generators, rendering
   works headless in dark and light themes, and episodes export to GIF, MP4 or
   `.npz` trajectories.
@@ -117,14 +118,15 @@ print(log.summary())
 print(algo.evaluate(env_lib.make_vec("PowerGrid-v0", 64), n_episodes=64, seed=1))
 ```
 
-Compare your own method with all of them, as baselines, on the same episodes
-([details](#using-the-algorithms-as-baselines)):
+Compare your own method with them as baselines (every algorithm with a preset
+for the environment), the classical controller and random actions, on the same
+episodes ([details](#using-the-algorithms-as-baselines)):
 
 ```python
 from marl_algorithms import compare
 
 report = compare("PowerGrid-v0", seeds=(0, 1, 2), policies={"mine": my_policy})
-print(report)                              # random, controller, IPPO, MAPPO, MADDPG, MATD3, mine
+print(report)        # rows: random, baseline (classical), ippo, mappo, maddpg, matd3, mine
 ```
 
 Or stay in the shell:
@@ -233,10 +235,13 @@ time is CPU seconds of training; reproduce with `benchmarks/benchmark_marl.py`):
 | QMIX | `LineMsg-v0` | 25,008 | 16 | 43.2 | 95.0 | 95.0 |
 | QMIX | `WirelessComm-v1` | 100,000 | 101 | 139.2 | 319.1 | 339.6 |
 
-The learned policies are far better than random everywhere. Several match the
-classical controller (MAPPO on PowerGrid and all methods on LineMsg, and IPPO
-and MAPPO on Consensus and VDN on WirelessComm come within about 5 per cent);
-the rest stay within a small factor. The team-reward methods also show why
+The learned policies close at least 90 per cent of the gap between random
+actions and the classical controller on every environment, and at least 98 per
+cent outside WirelessComm. All methods match the controller on LineMsg; VDN on
+WirelessComm and IPPO and MAPPO on Consensus come within about 5 per cent of
+it, MAPPO on PowerGrid within 13 per cent, and the others stay further behind:
+a well-designed classical controller is a strong baseline on these physical
+systems. The team-reward methods also show why
 credit assignment matters: on WirelessComm, independent Q-learning (IQL, not
 listed) stays near random because a collision costs the sending agent nothing,
 while VDN reaches the collision-free schedule.
@@ -247,11 +252,14 @@ while VDN reaches the collision-free schedule.
 
 ### Using the algorithms as baselines
 
-Every environment comes with three kinds of reference for a new method:
-random actions, its classical controller (`env_lib.baseline_policy`) and the
-seven learning algorithms with tuned presets. `marl_algorithms.compare` trains
-the learning baselines over several seeds and evaluates everything, your
-method included, on the same seeded episodes:
+A new method on these environments can be measured against three kinds of
+reference: random actions, the environment's classical controller
+(`env_lib.baseline_policy`) and the learning algorithms, which have tuned
+presets for PowerGrid, Platoon, Consensus, LineMsg and WirelessComm-v1 (on
+other environments they train with their defaults and a budget you choose).
+`marl_algorithms.compare` trains the learning baselines over one or several
+seeds and evaluates everything, your method included, on the same seeded
+episodes:
 
 ```python
 from marl_algorithms import compare
@@ -268,7 +276,7 @@ mappo = report.algorithms[("mappo", 0)]   # the trained baselines, ready to save
 ```
 
 ```
-PowerGrid-v0: mean team return over 64 evaluation episodes (seed 1); higher is better
+PowerGrid-v0: mean return over 64 evaluation episodes (seed 1); higher is better
 
 method     kind       mean return    std  seeds  env steps  train [s]
 ---------  ---------  -----------  -----  -----  ---------  ---------

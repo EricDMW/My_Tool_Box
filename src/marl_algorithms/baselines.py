@@ -34,6 +34,7 @@ import numpy as np
 
 from marl_algorithms.core.base import Algorithm, TrainingLog
 from marl_algorithms.core.runner import make_vector_env
+from marl_algorithms.core.spec import MultiAgentSpec
 from marl_algorithms.presets import get_preset, list_presets, train_preset
 from marl_algorithms.registry import get_algorithm, train
 
@@ -104,7 +105,7 @@ class Comparison:
     env_id: str
     env_kwargs: dict[str, Any]
     n_episodes: int
-    eval_seed: int | None
+    eval_seed: int
     rows: list[ComparisonRow] = field(default_factory=list)
     algorithms: dict[tuple[str, int], Algorithm] = field(default_factory=dict)
     logs: dict[tuple[str, int], TrainingLog] = field(default_factory=dict)
@@ -120,14 +121,17 @@ class Comparison:
         return sorted((r for r in self.rows if r.kind in kinds), key=lambda r: -r.mean)
 
     def records(self) -> list[dict[str, Any]]:
-        """One flat dictionary per row (for pandas, JSON or logging)."""
+        """One flat dictionary per row (for pandas, JSON or logging).
+
+        ``std_return`` is ``None`` for rows with a single value.
+        """
         return [
             {
                 "env_id": self.env_id,
                 "name": row.name,
                 "kind": row.kind,
                 "mean_return": row.mean,
-                "std_return": row.std,
+                "std_return": None if math.isnan(row.std) else row.std,
                 "n_seeds": len(row.seeds),
                 "returns": list(row.returns),
                 "seeds": list(row.seeds),
@@ -169,7 +173,7 @@ class Comparison:
         rows = [header, *self._cells()]
         widths = [max(len(row[i]) for row in rows) for i in range(len(header))]
         title = (
-            f"{self.env_id}: mean team return over {self.n_episodes} evaluation episodes "
+            f"{self.env_id}: mean return over {self.n_episodes} evaluation episodes "
             f"(seed {self.eval_seed}); higher is better"
         )
         out = [title, ""]
@@ -199,17 +203,21 @@ def compare(
     seeds: Sequence[int] = (0,),
     policies: Mapping[str, Policy | Algorithm] | None = None,
     n_episodes: int = 64,
-    eval_seed: int | None = 1,
+    eval_seed: int = 1,
     total_steps: int | None = None,
     num_envs: int | None = None,
     env_kwargs: Mapping[str, Any] | None = None,
     include_random: bool = True,
     include_baseline: bool = True,
+    keep_replay: bool = False,
     device: str = "cpu",
     verbose: bool = False,
     **config: Any,
 ) -> Comparison:
     """Train baseline algorithms on ``env_id`` and compare them with your policies.
+
+    Every argument is checked before anything is trained, so a mistake costs
+    seconds, not a training run.
 
     Parameters
     ----------
@@ -221,27 +229,36 @@ def compare(
         empty sequence trains none, to compare only your policies with the
         references.
     seeds:
-        Training seeds; every algorithm is trained once per seed and the
-        report gives the mean and standard deviation over seeds.
+        Training seeds (distinct); every algorithm is trained once per seed
+        and the report gives the mean and standard deviation over seeds.
     policies:
         Your methods, by name: callables mapping the batched observations of
         a vector environment, ``(num_envs, n_agents, obs_dim)``, to batched
         actions (wrap a single-environment policy with :func:`per_copy`), or
         trained :class:`~marl_algorithms.core.base.Algorithm` instances.
     n_episodes, eval_seed:
-        Evaluation episodes, shared by every method: a vector environment of
-        ``min(n_episodes, 64)`` copies reset with ``eval_seed``.
+        Evaluation episodes, identical for every method: a vector environment
+        of ``min(n_episodes, 64)`` copies, reset with ``eval_seed`` (then
+        ``eval_seed + 64``, ``eval_seed + 128``, ... for more than 64
+        episodes), where every copy contributes the first episode after the
+        reset only.
     total_steps, num_envs:
         Training budget and batched copies for every algorithm, replacing the
         presets' values. Algorithms without a preset for ``env_id`` train
         with their default configuration and need ``total_steps``.
     env_kwargs:
-        Environment arguments for training and evaluation (merged into the
-        presets' arguments). The presets' hyperparameters are kept, so they
-        may need more steps on a larger variant.
+        Environment arguments for training and evaluation. They are passed to
+        every algorithm on top of its preset's arguments (none of the current
+        presets has any), and must repeat any a preset sets. The presets'
+        hyperparameters are kept, so they may need more steps on a larger
+        variant.
     include_random, include_baseline:
         Add rows for uniformly random actions and for the classical
         controller (skipped for environments without one).
+    keep_replay:
+        Keep the replay buffers of the trained off-policy algorithms in
+        :attr:`Comparison.algorithms` (released by default: they can take
+        hundreds of megabytes per run).
     device:
         Torch device for training.
     verbose:
@@ -259,66 +276,86 @@ def compare(
     KeyError
         For an unknown algorithm.
     ValueError
-        For an algorithm without a preset when ``total_steps`` is not given, a
-        preset whose environment arguments differ from ``env_kwargs``, a
-        policy name that repeats another row's name, empty ``seeds`` or an
-        invalid ``n_episodes``.
+        For an invalid argument, before any training: an algorithm listed
+        twice, one that does not support the environment's actions, one
+        without a preset when ``total_steps`` is not given, a configuration
+        override it does not accept, invalid environment arguments or ones
+        that differ from a preset's, a policy name that repeats another row's
+        name, empty or repeated ``seeds``, or a non-positive ``n_episodes``,
+        ``total_steps`` or ``num_envs``.
     """
     from env_lib.baselines import baseline_policy
-    from env_lib.utils.evaluation import evaluate
 
-    if isinstance(n_episodes, bool) or int(n_episodes) != n_episodes or n_episodes < 1:
-        raise ValueError(f"n_episodes must be a positive integer, got {n_episodes!r}")
+    n_episodes = _positive("n_episodes", n_episodes)
+    if total_steps is not None:
+        total_steps = _positive("total_steps", total_steps)
+    if num_envs is not None:
+        num_envs = _positive("num_envs", num_envs)
+    if eval_seed is None or isinstance(eval_seed, bool) or int(eval_seed) != eval_seed:
+        raise ValueError(
+            f"eval_seed must be an integer (every method is evaluated on the episodes of "
+            f"this seed), got {eval_seed!r}"
+        )
+    eval_seed = int(eval_seed)
     seeds = tuple(int(seed) for seed in seeds)
-    if not seeds:
-        raise ValueError("seeds must not be empty")
+    if not seeds or len(set(seeds)) != len(seeds):
+        raise ValueError(f"seeds must be distinct and not empty, got {seeds}")
     if algorithms is None:
         names = [name for name, preset_env in list_presets() if preset_env == env_id]
     else:
         names = [str(name).lower() for name in algorithms]
+    if len(set(names)) != len(names):
+        raise ValueError(f"algorithms must be distinct, got {names}")
     env_kwargs = dict(env_kwargs or {})
-    for name in names:
-        get_algorithm(name)  # KeyError for unknown names
-        preset = get_preset(name, env_id)
-        if preset is None and total_steps is None:
-            raise ValueError(
-                f"{name} has no preset for {env_id}; pass total_steps to train it with its "
-                "default configuration"
-            )
-        if preset is not None and {**preset.get("env_kwargs", {}), **env_kwargs} != env_kwargs:
-            raise ValueError(
-                f"the {name} preset uses the environment arguments {preset['env_kwargs']}; "
-                "pass them in env_kwargs so that every method sees the same environment"
-            )
     policies = dict(policies or {})
-    taken = {"random", "baseline", *names}
+    taken = set(names)
+    taken.update(["random"] if include_random else [])
+    taken.update(["baseline"] if include_baseline else [])
     for label in policies:
         if label in taken:
             raise ValueError(f"policy name {label!r} repeats the name of another row")
-    report = Comparison(env_id, env_kwargs, int(n_episodes), eval_seed)
-    envs = make_vector_env(env_id, min(int(n_episodes), 64), **env_kwargs)
+
     try:
+        envs = make_vector_env(env_id, min(n_episodes, 64), **env_kwargs)
+    except TypeError as exc:
+        raise ValueError(f"invalid environment arguments for {env_id}: {exc}") from exc
+    try:
+        action_kind = MultiAgentSpec.from_env(envs).action_kind
+        for name in names:
+            _check_algorithm(name, env_id, action_kind, total_steps, env_kwargs, config)
+        if verbose:
+            references = ["random actions"] * include_random
+            references += ["the classical controller"] * include_baseline
+            if policies:
+                references.append(f"{len(policies)} polic{'y' if len(policies) == 1 else 'ies'}")
+            print(
+                f"Comparing {', '.join(names) or 'no algorithms'} on {env_id} "
+                f"({len(seeds)} seed{'s' if len(seeds) != 1 else ''})"
+                + (f", with {_join(references)}" if references else ""),
+                flush=True,
+            )
+
+        report = Comparison(env_id, env_kwargs, n_episodes, eval_seed)
         if include_random:
-            result = evaluate(envs, None, n_episodes=n_episodes, seed=eval_seed)
-            report.rows.append(ComparisonRow("random", "reference", (result.mean_return,)))
+            mean = _mean_return(envs, None, n_episodes, eval_seed)
+            report.rows.append(ComparisonRow("random", "reference", (mean,)))
         if include_baseline:
             try:
                 controller = baseline_policy(envs)
             except (TypeError, NotImplementedError):
                 controller = None
             if controller is not None:
-                result = evaluate(envs, controller, n_episodes=n_episodes, seed=eval_seed)
-                report.rows.append(ComparisonRow("baseline", "reference", (result.mean_return,)))
+                mean = _mean_return(envs, controller, n_episodes, eval_seed)
+                report.rows.append(ComparisonRow("baseline", "reference", (mean,)))
 
         # Your policies are evaluated before the (long) training runs, so that
         # an error in one of them shows at once; their rows come last.
         policy_rows = []
         for label, policy in policies.items():
             if isinstance(policy, Algorithm):
-                result = policy.evaluate(envs, int(n_episodes), seed=eval_seed)
-            else:
-                result = evaluate(envs, policy, n_episodes=n_episodes, seed=eval_seed)
-            policy_rows.append(ComparisonRow(str(label), "policy", (result.mean_return,)))
+                policy = policy.policy(deterministic=True)
+            mean = _mean_return(envs, policy, n_episodes, eval_seed)
+            policy_rows.append(ComparisonRow(str(label), "policy", (mean,)))
 
         for name in names:
             returns, steps, seconds = [], [], []
@@ -328,14 +365,16 @@ def compare(
                     name, env_id, seed, total_steps, num_envs, env_kwargs, device, config
                 )
                 seconds.append(time.perf_counter() - start)
-                result = algo.evaluate(envs, int(n_episodes), seed=eval_seed)
-                returns.append(result.mean_return)
+                if not keep_replay and hasattr(algo, "replay"):
+                    del algo.replay  # a later learn() call creates a new buffer
+                mean = _mean_return(envs, algo.policy(deterministic=True), n_episodes, eval_seed)
+                returns.append(mean)
                 steps.append(int(algo.env_steps))
                 report.algorithms[(name, seed)] = algo
                 report.logs[(name, seed)] = log
                 if verbose:
                     print(
-                        f"  {name:8s} seed {seed}: return {_fmt(result.mean_return):>10s} "
+                        f"  {name:8s} seed {seed}: return {_fmt(mean):>10s} "
                         f"after {algo.env_steps:,} env steps in {seconds[-1]:.1f} s",
                         flush=True,
                     )
@@ -399,9 +438,79 @@ def _train(
     )
 
 
+def _check_algorithm(
+    name: str,
+    env_id: str,
+    action_kind: str,
+    total_steps: int | None,
+    env_kwargs: dict[str, Any],
+    config: dict[str, Any],
+) -> None:
+    """Raise ``KeyError``/``ValueError`` for an algorithm that cannot train on ``env_id``."""
+    algo_class = get_algorithm(name)  # KeyError for unknown names
+    if action_kind not in algo_class.action_kinds:
+        raise ValueError(f"{name} does not support the {action_kind} actions of {env_id}")
+    preset = get_preset(name, env_id)
+    if preset is None and total_steps is None:
+        raise ValueError(
+            f"{name} has no preset for {env_id}; pass total_steps to train it with its "
+            "default configuration"
+        )
+    preset_env_kwargs = preset.get("env_kwargs", {}) if preset is not None else {}
+    if {**preset_env_kwargs, **env_kwargs} != env_kwargs:
+        raise ValueError(
+            f"the {name} preset uses the environment arguments {preset_env_kwargs}; "
+            "pass them in env_kwargs so that every method sees the same environment"
+        )
+    preset_config = preset.get("config", {}) if preset is not None else {}
+    try:
+        algo_class.config_class(**{**preset_config, **config})
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid configuration for {name}: {exc}") from exc
+
+
+def _mean_return(envs: Any, policy: Policy | None, n_episodes: int, eval_seed: int) -> float:
+    """Mean return over ``n_episodes`` first episodes of seeded copies.
+
+    The episodes are run in chunks of at most ``envs.num_envs``: chunk ``k``
+    resets the copies with ``eval_seed + k * num_envs`` and counts only the
+    first episode of each copy. Every policy therefore meets exactly the same
+    initial conditions and random disturbances, which automatic resets after
+    episodes of policy-dependent length would not guarantee.
+    """
+    from env_lib.utils.evaluation import evaluate
+
+    width = int(envs.num_envs)
+    total, done, chunk_index = 0.0, 0, 0
+    while done < n_episodes:
+        chunk = min(width, n_episodes - done)
+        seed = eval_seed + chunk_index * width
+        result = evaluate(envs, policy, n_episodes=chunk, seed=seed)
+        total += float(np.sum(result.returns))
+        done += chunk
+        chunk_index += 1
+    return total / n_episodes
+
+
+def _join(items: list[str]) -> str:
+    """``"a"``, ``"a and b"``, ``"a, b and c"``."""
+    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
+
+
+def _positive(name: str, value: Any) -> int:
+    if isinstance(value, bool) or int(value) != value or value < 1:
+        raise ValueError(f"{name} must be a positive integer, got {value!r}")
+    return int(value)
+
+
 def _fmt(value: float) -> str:
-    if abs(value) >= 1000:
+    """Compact number format; the thresholds apply to the rounded value."""
+    if math.isnan(value):
+        return "nan"
+    if abs(round(value)) >= 1000:
         return f"{value:,.0f}"
-    if abs(value) >= 10:
+    if abs(round(value, 1)) >= 10:
         return f"{value:.1f}"
-    return f"{value:.3g}" if abs(value) < 1 else f"{value:.2f}"
+    if abs(round(value, 2)) >= 1:
+        return f"{value:.2f}"
+    return f"{value:.3g}"

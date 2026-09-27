@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 
 import numpy as np
 import pytest
@@ -117,6 +118,12 @@ def test_compare_skips_the_controller_where_there_is_none(monkeypatch):
         ({"algorithms": [], "n_episodes": 0}, ValueError),
         ({"algorithms": ["iql"], "policies": {"iql": always_relay}}, ValueError),
         ({"algorithms": [], "policies": {"random": always_relay}}, ValueError),
+        ({"algorithms": ["iql", "IQL"], "total_steps": 100}, ValueError),
+        ({"algorithms": ["iql"], "seeds": (0, 0), "total_steps": 100}, ValueError),
+        ({"algorithms": [], "eval_seed": None}, ValueError),
+        ({"algorithms": ["iql"], "total_steps": 0}, ValueError),
+        ({"algorithms": ["iql"], "num_envs": 0, "total_steps": 100}, ValueError),
+        ({"algorithms": [], "env_kwargs": {"bogus": 1}}, ValueError),
     ],
 )
 def test_compare_rejects_invalid_arguments(kwargs, error):
@@ -213,3 +220,70 @@ def test_compare_command_errors(argv, message, capsys):
     assert main(argv) == 2
     captured = capsys.readouterr()
     assert captured.err.startswith("marl-train: error:") and message in captured.err
+
+
+@pytest.mark.parametrize(
+    ("env_id", "algorithms", "config", "message"),
+    [
+        ("LineMsg-v0", ["iql", "maddpg"], {}, "does not support the discrete"),
+        (
+            "PowerGrid-v0",
+            ["ippo", "maddpg"],
+            {"ent_coef": 0.01},
+            "invalid configuration for maddpg",
+        ),
+        ("LineMsg-v0", ["iql"], {"gamma": 2.0}, "gamma must be in [0, 1]"),
+    ],
+)
+def test_compare_checks_every_algorithm_before_training(
+    env_id, algorithms, config, message, monkeypatch
+):
+    import marl_algorithms.baselines as baselines
+
+    def no_training(*args, **kwargs):
+        raise AssertionError("trained before checking the arguments")
+
+    monkeypatch.setattr(baselines, "_train", no_training)
+    with pytest.raises(ValueError, match=re.escape(message)):
+        compare(env_id, algorithms, total_steps=100, n_episodes=2, **config)
+
+
+def test_policies_see_the_same_episodes_beyond_one_batch():
+    # 70 episodes run as 64 + 6 seeded first episodes: two copies of the same
+    # stochastic-free policy must score exactly the same.
+    report = compare(
+        "LineMsg-v0", [], policies={"a": always_relay, "b": always_relay}, n_episodes=70
+    )
+    assert report["a"].mean == report["b"].mean == report["baseline"].mean
+    small = compare("LineMsg-v0", [], n_episodes=4)
+    envs = make_vector_env("LineMsg-v0", 4)
+    expected = env_lib.evaluate(envs, None, n_episodes=4, seed=1).mean_return
+    envs.close()
+    assert small["random"].mean == pytest.approx(expected)
+
+
+def test_replay_buffers_are_released_unless_kept():
+    kwargs = {"algorithms": ["iql"], **QUICK}
+    assert not hasattr(compare("LineMsg-v0", **kwargs).algorithms[("iql", 0)], "replay")
+    kept = compare("LineMsg-v0", keep_replay=True, **kwargs).algorithms[("iql", 0)]
+    assert len(kept.replay) > 0
+
+
+def test_records_and_formatting_details():
+    from marl_algorithms.baselines import _fmt
+
+    report = compare("LineMsg-v0", [], n_episodes=2, include_random=False)
+    assert report.records()[0]["std_return"] is None
+    assert _fmt(999.96) == "1,000" and _fmt(9.996) == "10.0" and _fmt(0.99951) == "1.00"
+    assert _fmt(-629.34) == "-629.3" and _fmt(-0.7858) == "-0.786" and _fmt(-2.37) == "-2.37"
+    # "random" is free for your policy when random actions are not included
+    named = compare(
+        "LineMsg-v0", [], n_episodes=2, include_random=False, policies={"random": always_relay}
+    )
+    assert [row.name for row in named.rows] == ["baseline", "random"]
+
+
+def test_comparison_row_is_exported():
+    import marl_algorithms
+
+    assert marl_algorithms.ComparisonRow is ComparisonRow

@@ -112,7 +112,6 @@ def main() -> None:
     torch.set_num_threads(args.threads)
 
     budget = {"total_steps": 4_096, "num_envs": 16} if args.quick else {}
-    print(f"Training {', '.join(args.algos)} with seeds {args.seeds} on PowerGrid-v0 ...")
     report = compare(
         "PowerGrid-v0",
         args.algos,

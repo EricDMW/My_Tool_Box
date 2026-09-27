@@ -47,6 +47,11 @@ class TrainingLog:
         ``(env_steps, team_return, length)`` of every finished training episode.
     updates:
         ``(env_steps, statistics)`` after every update.
+    env_steps:
+        Environment steps taken when training last returned (the algorithm's
+        counter, summed over copies).
+    wall_time:
+        Seconds from the creation of the log to its last record.
     """
 
     def __init__(self, algorithm: str, env_id: str | None = None) -> None:
@@ -54,8 +59,14 @@ class TrainingLog:
         self.env_id = env_id
         self.episodes: list[tuple[int, float, int]] = []
         self.updates: list[tuple[int, dict[str, float]]] = []
+        self.env_steps = 0
         self._start = time.perf_counter()
         self.wall_time = 0.0
+
+    def record_steps(self, env_steps: int) -> None:
+        """Record the environment steps taken so far (called when training returns)."""
+        self.env_steps = int(env_steps)
+        self.wall_time = time.perf_counter() - self._start
 
     def record_episodes(self, env_steps: int, episodes: list[tuple[float, int]]) -> None:
         """Add finished episodes."""
@@ -98,6 +109,7 @@ class TrainingLog:
     def summary(self) -> str:
         """One-line summary."""
         steps = max(
+            self.env_steps,
             self.episodes[-1][0] if self.episodes else 0,
             self.updates[-1][0] if self.updates else 0,
         )
@@ -446,6 +458,7 @@ class OnPolicyAlgorithm(Algorithm):
             log.record_update(self.env_steps, stats)
             if callback is not None and callback(self, log) is False:
                 break
+        log.record_steps(self.env_steps)
         return log
 
 
@@ -510,6 +523,7 @@ class OffPolicyAlgorithm(Algorithm):
                 log.record_update(self.env_steps, stats)
                 if callback is not None and callback(self, log) is False:
                     break
+        log.record_steps(self.env_steps)
         return log
 
 

@@ -217,10 +217,13 @@ print(algo.config.lr, algo.config.batch_size, algo.env_steps)
 % norun
 \begin{pycode}
 train_preset(algorithm, env_id, *, seed=0, total_steps=None, num_envs=None,
-             device="cpu", callback=None, **config) -> (Algorithm, TrainingLog)
+             env_kwargs=None, device="cpu", callback=None,
+             **config) -> (Algorithm, TrainingLog)
 \end{pycode}
 calls \code{train} with the preset's values; \code{total\_steps},
-\code{num\_envs} and configuration overrides replace them. It raises \code{KeyError} when the pair has no preset.
+\code{num\_envs} and configuration overrides replace them, and
+\code{env\_kwargs} are merged into the preset's environment arguments. It
+raises \code{KeyError} when the pair has no preset.
 \code{get\_preset} returns a copy of the preset (or \code{None}), so it can be
 modified freely.
 
@@ -348,6 +351,7 @@ override the preset's configuration and environment arguments.
       save the report as CSV \\
     \quad \code{-{}-save-dir DIR} & save every trained algorithm as
       \code{DIR/NAME\_seedS.pt} \\
+    \quad \code{-{}-threads N} & PyTorch threads [1] \\
     \code{evaluate CHECKPOINT ENV\_ID} & evaluate a saved algorithm against
       random actions and the baseline \\
     \quad \code{-{}-episodes N}, \code{-{}-seed S} & evaluation episodes [64]
@@ -391,9 +395,9 @@ Evaluation on LineMsg-v0, 64 episodes (seed 1):
 \end{textcode}
 
 The progress lines report the mean return of the last 20 exploratory training
-episodes; the summary line is \code{TrainingLog.summary()}, whose step count
-and time refer to the last record of the log (an update or a finished
-episode). The evaluation columns
+episodes; the summary line is \code{TrainingLog.summary()}, with the
+environment steps taken and the time from the start of training to its last
+record. The evaluation columns
 are the mean team return of the deterministic policy, the half-width of its
 95\,\% confidence interval and the mean episode length
 (Table~\ref{tab:workflow-result}).
@@ -434,7 +438,7 @@ that also reacts to the neighbours' mean frequency deviation, and the full
 presets (about six minutes on one core):
 
 \begin{textcode}
-PowerGrid-v0: mean team return over 64 evaluation episodes (seed 1); higher is better
+PowerGrid-v0: mean return over 64 evaluation episodes (seed 1); higher is better
 
 method     kind       mean return    std  seeds  env steps  train [s]
 ---------  ---------  -----------  -----  -----  ---------  ---------
@@ -460,9 +464,13 @@ Figure~\ref{fig:marl-baselines} draws the same numbers. The rows are the
 references first, then the algorithms with the mean and the
 standard deviation over the training seeds, the environment steps and the
 wall-clock training time of one run, then your policies. \code{compare} works
-in four steps:
+in five steps:
 
 \begin{enumerate}
+  \item it checks every argument: the algorithm names, their support for the
+    environment's actions, the configuration overrides (applied to each
+    algorithm's preset), the environment arguments, the seeds and the budget,
+    so that a mistake shows in seconds instead of after a training run;
   \item it creates the evaluation environment,
     \code{make\_vector\_env(env\_id, min(n\_episodes, 64), **env\_kwargs)};
   \item it evaluates random actions, the classical controller (when the
@@ -473,22 +481,27 @@ in four steps:
     configuration and \code{total\_steps}, and evaluates the deterministic
     policy;
   \item it returns a \code{Comparison}, which also keeps every trained
-    algorithm and training log.
+    algorithm and training log (the replay buffers of off-policy algorithms
+    are released unless \code{keep\_replay=True}).
 \end{enumerate}
 
-Every evaluation resets the same environment copies with the same seed, so all
-rows see identical initial conditions and disturbances. With the default
-training seed 0 and evaluation seed 1 the numbers reproduce the published
-results of Table~\ref{tab:marl-results-table}.
+Every evaluation resets the copies with the same seed and counts only the
+first episode of every copy, so all rows meet identical initial conditions and
+disturbances. More than 64 episodes run in chunks of 64, reset with
+\code{eval\_seed}, \code{eval\_seed + 64}, and so on; automatic resets after
+episodes of policy-dependent length could otherwise give different policies
+different episodes. With the default training seed 0 and evaluation seed 1
+the numbers reproduce the published results of
+Table~\ref{tab:marl-results-table}.
 
 \subsection{From the command line}
 
 \begin{shellcode}
-marl-train compare PowerGrid-v0                       # every preset algorithm, seed 0
+marl-train compare PowerGrid-v0                   # every preset algorithm, seed 0
 marl-train compare PowerGrid-v0 --algos mappo ippo --seeds 0 1 2 --csv runs/pg.csv
-marl-train compare LineMsg-v0 --markdown              # a table for a README or a paper
-marl-train compare Consensus-v0 --save-dir runs/baselines  # keep the trained baselines
-marl-train compare Formation-v0 --algos mappo --steps 200000   # no preset: set a budget
+marl-train compare LineMsg-v0 --markdown          # a table for a paper
+marl-train compare Consensus-v0 --save-dir runs/baselines   # keep the models
+marl-train compare Formation-v0 --algos mappo --steps 200000  # no preset
 \end{shellcode}
 
 \code{marl-train compare} checks the environment, the algorithm names, their
