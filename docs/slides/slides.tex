@@ -309,9 +309,9 @@ print(env_lib.evaluate(envs, policy, n_episodes=1024))
     \footnotesize\textbf{Existing learners}\\[2pt]
 \begin{pycode}
 from env_lib.wrappers import (
-    FlattenJointSpaces, to_parallel)
-flat = FlattenJointSpaces(env) # SB3
-par = to_parallel(env)  # PettingZoo
+  FlattenJointSpaces, to_parallel)
+sb3_env = FlattenJointSpaces(env)
+pettingzoo_env = to_parallel(env)
 \end{pycode}
     \vspace{6pt}
     \textbf{Shell}\\[2pt]
