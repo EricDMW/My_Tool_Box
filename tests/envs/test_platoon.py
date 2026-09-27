@@ -225,7 +225,9 @@ def test_initial_state_is_perturbed_equilibrium():
     assert 16.0 <= info["leader_speed"] <= 25.0
     env = PlatoonEnv()
     _, info = env.reset(seed=0)
-    assert 0.0 < np.abs(info["spacing_errors"]).max() < 0.5 + env.headway * 0.2
+    # Perturbations are truncated at three standard deviations.
+    bound = 3.0 * (env.config.init_spacing_noise + env.headway * env.config.init_speed_noise)
+    assert 0.0 < np.abs(info["spacing_errors"]).max() <= bound + 1e-12
 
 
 @pytest.mark.parametrize("topology", TOPOLOGIES)

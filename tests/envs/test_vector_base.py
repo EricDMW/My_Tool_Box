@@ -11,6 +11,7 @@ from env_lib.utils.vector import BatchedVectorEnv
 
 
 class CounterVectorEnv(BatchedVectorEnv):
+    # Reset info reports how often each copy was reset.
     """Each copy counts up by its action and terminates at ``limit``."""
 
     def __init__(self, num_envs, limit=3, **kwargs):
@@ -42,6 +43,9 @@ class CounterVectorEnv(BatchedVectorEnv):
     def _observe(self):
         return self.count[:, None].astype(np.float32)
 
+    def _reset_infos(self, mask):
+        return {"resets": self.resets.copy()}
+
 
 def test_spaces_and_reset():
     env = CounterVectorEnv(4)
@@ -49,7 +53,7 @@ def test_spaces_and_reset():
     assert env.action_space.shape == (4, 1)
     obs, info = env.reset(seed=0, options={"start": 1.0})
     assert obs.shape == (4, 1) and np.all(obs == 1.0)
-    assert info == {}
+    assert info["resets"].tolist() == [1, 1, 1, 1] and info["_resets"].all()
 
 
 def test_step_before_reset_raises():
@@ -71,6 +75,10 @@ def test_next_step_autoreset():
     assert rew.tolist() == [0.0, 2.0]
     assert term.tolist() == [False, True]
     assert env.resets.tolist() == [2, 1]
+    # Like SyncVectorEnv: the reset copy reports its reset info, not the step info.
+    assert info["_count"].tolist() == [False, True]
+    assert info["_resets"].tolist() == [True, False]
+    assert info["resets"][0] == 2
 
 
 def test_same_step_autoreset():

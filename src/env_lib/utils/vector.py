@@ -216,6 +216,7 @@ class BatchedVectorEnv(VectorEnv):
                 terminated[resetting] = False
                 truncated[resetting] = False
                 done[resetting] = False
+                infos = self._merge_reset_infos(infos, resetting)
             self._pending_reset = done
             observations = self._observe()
         elif self.autoreset_mode == "same_step":
@@ -267,6 +268,40 @@ class BatchedVectorEnv(VectorEnv):
         if np.issubdtype(array.dtype, np.floating) and not np.all(np.isfinite(array)):
             raise ValueError("actions contain NaN or infinite values")
         return array
+
+    def _merge_reset_infos(self, infos: dict[str, Any], resetting: np.ndarray) -> dict[str, Any]:
+        """Replace the info rows of copies reset in this step by their reset info.
+
+        As in :class:`gymnasium.vector.SyncVectorEnv`, a copy that is reset by
+        the next-step autoreset reports the info of its reset, not that of the
+        discarded step.
+        """
+        infos = self._with_masks(infos)
+        fresh = self._with_masks(self._reset_infos(resetting))
+        merged: dict[str, Any] = {}
+        for key in set(infos) | set(fresh):
+            if key.startswith("_"):
+                continue
+            step_mask = infos.get(f"_{key}", np.zeros(self.num_envs, dtype=bool)) & ~resetting
+            reset_mask = fresh.get(f"_{key}", np.zeros(self.num_envs, dtype=bool)) & resetting
+            if key in infos and key in fresh:
+                value = infos[key]
+                replacement = fresh[key]
+                if (
+                    isinstance(value, np.ndarray)
+                    and isinstance(replacement, np.ndarray)
+                    and value.shape[1:] == replacement.shape[1:]
+                ):
+                    value = value.copy()
+                    value[reset_mask] = replacement[reset_mask]
+                    merged[key], merged[f"_{key}"] = value, step_mask | reset_mask
+                else:
+                    merged[key], merged[f"_{key}"] = value, step_mask
+            elif key in infos:
+                merged[key], merged[f"_{key}"] = infos[key], step_mask
+            else:
+                merged[key], merged[f"_{key}"] = fresh[key], reset_mask
+        return merged
 
     def _with_masks(self, infos: dict[str, Any]) -> dict[str, Any]:
         """Add the ``"_key"`` masks Gymnasium expects for every info key."""

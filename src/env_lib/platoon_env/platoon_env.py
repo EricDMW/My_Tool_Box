@@ -43,6 +43,7 @@ __all__ = [
     "OBSERVATION_FEATURES",
     "SCENARIOS",
     "TOPOLOGIES",
+    "PlatoonConfig",
     "PlatoonEnv",
     "PlatoonVectorEnv",
     "cacc_policy",
@@ -1490,25 +1491,6 @@ class PlatoonVectorEnv(_PlatoonSpecMixin, BatchedVectorEnv):
         self._last_step0 = 0
 
     # ------------------------------------------------------------------
-    def step(
-        self, actions: Any
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
-        """Advance every copy by one step (see :meth:`BatchedVectorEnv.step`).
-
-        With ``autoreset_mode="next_step"``, the info rows of the copies that
-        are reset in this call describe their new initial state (zero rewards),
-        as with :class:`gymnasium.vector.SyncVectorEnv`.
-        """
-        resetting = None
-        if self.autoreset_mode == "next_step" and not self._needs_reset:
-            resetting = self._pending_reset.copy()
-        observations, rewards, terminated, truncated, infos = super().step(actions)
-        if resetting is not None and resetting.any():
-            fresh = self._core.infos(np.zeros((self.num_envs, self._cfg.n_followers)))
-            for key, value in fresh.items():
-                infos[key][resetting] = value[resetting]
-        return observations, rewards, terminated, truncated, infos
-
     def _reset_envs(self, mask: np.ndarray, options: dict[str, Any] | None) -> None:
         options = _known_options(options, stacklevel=4)  # warn at the caller of reset()
         self._core.reset(mask, self.np_random, options)
