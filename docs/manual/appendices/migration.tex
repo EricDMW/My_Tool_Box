@@ -41,6 +41,20 @@ are new:
   notes that call them by path need the new folder.
 \end{itemize}
 
+Version 1.2.1 is a maintenance release. It requires Gymnasium 1.1 or newer
+(Gymnasium 1.0 lacks the same-step autoreset mode that the training loops
+use) and \pkg{imageio-ffmpeg} 0.5.1 or newer for video export. The names that
+need an optional extra (\code{KuramotoOscillatorEnvTorch},
+\code{PistonballEnv}, the module \pkg{env\_lib.pistonball\_env} and
+\pkg{toolkit.neural\_toolkit}) are still attributes of their packages but no
+longer part of \code{\_\_all\_\_}, so \code{from env\_lib import *} works on a
+base installation; import them by name. \code{train}, \code{train\_preset}
+and \code{compare} take \code{threads=1} and restore the previous PyTorch
+thread count when they return, where version 1.2 left the setting to the
+caller. Environments can be pickled and deep-copied after rendering, and
+several errors that were raised late or without a useful message are now
+reported early (Chapter~\ref{chap:troubleshooting}).
+
 \section{From 1.0 to 1.1}\label{sec:migration-11}
 
 Version 1.1 adds the environments \envid{PowerGrid-v0} and \envid{Platoon-v0},

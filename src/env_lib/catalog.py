@@ -513,6 +513,26 @@ def _wrap(label: str, text: str, width: int = 88) -> list[str]:
     return wrapped or [label]
 
 
+def _caution(spec: EnvSpec) -> str | None:
+    """Reward-design pitfall of a configuration that learning code should know about."""
+    if spec.family == "kuramoto":
+        if spec.kwargs.get("reward_type", "order_parameter") == "frequency_synchronization":
+            return None
+        return (
+            "the reward (order parameter r in [0, 1]) is paid every step and the episode "
+            "ends once r > sync_threshold (with sync_bonus), so staying just below the "
+            "threshold can earn more than synchronising; to train, raise sync_bonus or use "
+            "reward_type='frequency_synchronization', and report info['order_parameter']"
+        )
+    if spec.family == "ajlatt":
+        return (
+            "rewards are negative and a collision ends the episode "
+            "(terminate_on_collision=True), so colliding early can earn more than tracking; "
+            "to train, pass terminate_on_collision=False (collisions are still penalised)"
+        )
+    return None
+
+
 def describe(env_id: str) -> str:
     """Readable multi-line description of a registered environment.
 
@@ -586,6 +606,9 @@ def describe(env_id: str) -> str:
     lines += _wrap("vector", vector)
     baseline = list_baselines().get(spec.family)
     lines += _wrap("baseline", f"{baseline} (env_lib.baseline_policy)" if baseline else "none")
+    caution = _caution(spec)
+    if caution:
+        lines += _wrap("caution", caution)
     if spec.requires:
         modules = _EXTRA_MODULES.get(spec.requires, (spec.requires,))
         status = "installed" if all(_module_exists(m) for m in modules) else "not installed"

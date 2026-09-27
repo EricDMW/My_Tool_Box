@@ -732,3 +732,30 @@ def test_gui_requires_display(fake_tk):
     fake_tk.Tk.side_effect = fake_tk.TclError("no display name and no $DISPLAY")
     with pytest.raises(RuntimeError, match="graphical display"):
         ParameterTuner(make_parser()).tune()
+
+
+def test_yaml_parameter_files_round_trip(tmp_path):
+    pytest.importorskip("yaml")
+    values = {"lr": 3e-4, "layers": [64, 64], "name": "run é", "flag": True}
+    for suffix in (".yaml", ".yml"):
+        path = save_parameters(values, tmp_path / f"params{suffix}")
+        text = path.read_text(encoding="utf-8")
+        assert text.startswith("lr: 0.0003") and "{" not in text
+        assert load_parameters(path) == values
+    (tmp_path / "list.yaml").write_text("- 1\n- 2\n")
+    with pytest.raises(ValueError, match="YAML mapping"):
+        load_parameters(tmp_path / "list.yaml")
+    (tmp_path / "bad.yaml").write_text("a: [1, 2\n")
+    with pytest.raises(ValueError, match="not valid YAML"):
+        load_parameters(tmp_path / "bad.yaml")
+
+
+def test_parameter_functions_reject_wrong_types(tmp_path):
+    with pytest.raises(TypeError, match="vars\\(args\\)"):
+        save_parameters(argparse.Namespace(lr=1.0), tmp_path)
+    parser = make_parser()
+    dest = next(iter(tunable_actions(parser)))
+    default = parser.get_default(dest)
+    apply_parameters(parser, [(dest, default)])  # key-value pairs are accepted
+    with pytest.raises(TypeError, match="mapping"):
+        apply_parameters(parser, 5)

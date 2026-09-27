@@ -3,8 +3,8 @@
 **Networked multi-agent control environments, classical MARL algorithms and research utilities for Python.**
 
 [![CI](https://github.com/EricDMW/My_Tool_Box/actions/workflows/ci.yml/badge.svg)](https://github.com/EricDMW/My_Tool_Box/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-2563EB)
-![Gymnasium](https://img.shields.io/badge/gymnasium-%E2%89%A5%201.0-059669)
+![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-2563EB)
+![Gymnasium](https://img.shields.io/badge/gymnasium-%E2%89%A5%201.1-059669)
 ![License](https://img.shields.io/badge/license-MIT-6B7280)
 
 My Tool Box simulates systems in which many agents act on continuous physical
@@ -19,13 +19,13 @@ package covers the rest of a study: publication-quality plots, neural-network
 building blocks and reproducible experiment parameters.
 
 <p align="center">
-  <img src="docs/images/hero.gif" width="820" alt="Platoon-v0 under cooperative adaptive cruise control">
+  <img src="https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/images/hero.gif" width="820" alt="Platoon-v0 under cooperative adaptive cruise control">
 </p>
 
-**Paper:** [`docs/paper/my_tool_box_paper.pdf`](docs/paper/my_tool_box_paper.pdf)
-&nbsp;&middot;&nbsp; **Introduction slides:** [`docs/slides/my_tool_box_slides.pdf`](docs/slides/my_tool_box_slides.pdf)
-&nbsp;&middot;&nbsp; **Handbook:** [`docs/manual/main.pdf`](docs/manual/main.pdf)
-&nbsp;&middot;&nbsp; **Changes:** [`CHANGELOG.md`](CHANGELOG.md)
+**Paper:** [`docs/paper/my_tool_box_paper.pdf`](https://github.com/EricDMW/My_Tool_Box/blob/main/docs/paper/my_tool_box_paper.pdf)
+&nbsp;&middot;&nbsp; **Introduction slides:** [`docs/slides/my_tool_box_slides.pdf`](https://github.com/EricDMW/My_Tool_Box/blob/main/docs/slides/my_tool_box_slides.pdf)
+&nbsp;&middot;&nbsp; **Handbook:** [`docs/manual/main.pdf`](https://github.com/EricDMW/My_Tool_Box/blob/main/docs/manual/main.pdf)
+&nbsp;&middot;&nbsp; **Changes:** [`CHANGELOG.md`](https://github.com/EricDMW/My_Tool_Box/blob/main/CHANGELOG.md)
 
 ## Highlights
 
@@ -64,7 +64,7 @@ building blocks and reproducible experiment parameters.
 
 ## Installation
 
-Python 3.9 or newer. From a clone of the repository:
+Python 3.9 to 3.13. From a clone of the repository:
 
 ```bash
 git clone https://github.com/EricDMW/My_Tool_Box.git
@@ -72,7 +72,8 @@ cd My_Tool_Box
 pip install -e ".[all]"
 ```
 
-The core install needs only NumPy, SciPy, matplotlib, Gymnasium and PyYAML.
+The core install needs only NumPy, SciPy, matplotlib (with Pillow), Gymnasium 1.1 or
+newer and PyYAML.
 Heavier dependencies are extras:
 
 | Extra | Adds | Needed for |
@@ -126,6 +127,8 @@ episodes ([details](#using-the-algorithms-as-baselines)):
 ```python
 from marl_algorithms import compare
 
+# my_policy: your method, mapping a batch of observations
+# (num_envs, n_agents, obs_dim) to actions (see below for a full example)
 report = compare("PowerGrid-v0", seeds=(0, 1, 2), policies={"mine": my_policy})
 print(report)        # rows: random, baseline (classical), ippo, mappo, maddpg, matd3, mine
 ```
@@ -168,11 +171,11 @@ per agent as `(n_agents, obs_dim)`; the table lists the default configuration.
 
 | Power grid (`PowerGrid-v0`) | Vehicle platoon (`Platoon-v0`) |
 |---|---|
-| ![PowerGrid](docs/manual/figures/power_grid.png) | ![Platoon](docs/manual/figures/platoon.png) |
+| ![PowerGrid](https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/manual/figures/power_grid.png) | ![Platoon](https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/manual/figures/platoon.png) |
 | **Formation control (`Formation-v0`)** | **Multi-robot target tracking (`AJLATT-v0`)** |
-| ![Formation](docs/manual/figures/formation.png) | ![AJLATT](docs/manual/figures/ajlatt.png) |
+| ![Formation](https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/manual/figures/formation.png) | ![AJLATT](https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/manual/figures/ajlatt.png) |
 | **Kuramoto synchronisation** | **Wireless access grid** |
-| ![Kuramoto](docs/manual/figures/kuramoto.png) | ![WirelessComm](docs/manual/figures/wireless.png) |
+| ![Kuramoto](https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/manual/figures/kuramoto.png) | ![WirelessComm](https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/manual/figures/wireless.png) |
 
 Every environment ships a decentralised baseline, returned by
 `env_lib.baseline_policy(env)`:
@@ -249,7 +252,7 @@ listed) stays near random because a collision costs the sending agent nothing,
 while VDN reaches the collision-free schedule.
 
 <p align="center">
-  <img src="docs/images/marl_training.png" width="900" alt="Learning curves of MAPPO, MADDPG, QMIX and VDN">
+  <img src="https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/images/marl_training.png" width="900" alt="Learning curves of MAPPO, MADDPG, QMIX and VDN">
 </p>
 
 ### Using the algorithms as baselines
@@ -291,11 +294,11 @@ my method  policy          -0.675      -      -          -          -
 
 `std` is the standard deviation over the training seeds. Here "my method" is a
 distributed droop controller that also reacts to the neighbours' mean
-frequency deviation ([`examples/algorithms/baseline_comparison.py`](examples/algorithms/baseline_comparison.py),
+frequency deviation ([`examples/algorithms/baseline_comparison.py`](https://github.com/EricDMW/My_Tool_Box/blob/main/examples/algorithms/baseline_comparison.py),
 about six minutes on one core):
 
 <p align="center">
-  <img src="docs/images/baseline_comparison.png" width="560" alt="Mean return of the proposed controller, MAPPO, IPPO and the classical controller on PowerGrid-v0">
+  <img src="https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/images/baseline_comparison.png" width="560" alt="Mean return of the proposed controller, MAPPO, IPPO and the classical controller on PowerGrid-v0">
 </p>
 
 The same from the shell, where `--csv`, `--markdown` and `--save-dir` export
@@ -319,13 +322,23 @@ A few rules of thumb:
   modified algorithm of this package is passed as the trained object.
 - With training seed 0 and the default evaluation seed 1, the numbers match
   the results table above.
+- `train`, `train_preset` and `compare` use one PyTorch thread (`threads=1`),
+  several times faster for these small networks, and restore the previous
+  setting afterwards; wrap your own `algo.learn(...)` calls in
+  `with marl_algorithms.torch_threads(1):`.
+- On the Kuramoto ids (except `FreqSync`) and AJLATT a learner can raise its
+  return by ending episodes early: the Kuramoto reward is paid every step
+  until synchronisation ends the episode, and AJLATT's negative rewards stop
+  at the first collision. `env-lib describe` shows a caution; train with a
+  larger `sync_bonus` or `reward_type="frequency_synchronization"`, and with
+  `terminate_on_collision=False` for AJLATT.
 
 The handbook section "Using the algorithms as baselines" has more recipes.
 
 ## Design
 
 <p align="center">
-  <img src="docs/images/design.png" width="820" alt="Architecture: access layer, Gymnasium contract, environments, shared services">
+  <img src="https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/images/design.png" width="820" alt="Architecture: access layer, Gymnasium contract, environments, shared services">
 </p>
 
 1. **One contract.** Every environment follows the Gymnasium API with joint
@@ -420,7 +433,7 @@ python benchmarks/benchmark_marl.py                # train and evaluate every MA
 
 Tests run headless (`tests/conftest.py` selects matplotlib's Agg backend and
 SDL's dummy video driver). Continuous integration runs lint, tests and example
-smoke tests on Python 3.9 to 3.12.
+smoke tests on Python 3.9 to 3.13, and builds and installs the wheel.
 
 ## License
 

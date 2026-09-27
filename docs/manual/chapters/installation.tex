@@ -14,7 +14,7 @@ My Tool Box is a standard Python project described by a single
 
 \begin{itemize}
   \item Python 3.9 or newer. The package is tested with CPython 3.9 to 3.13;
-    continuous integration runs the test suite on 3.9, 3.10, 3.11 and 3.12.
+    continuous integration runs the test suite on each of these versions.
   \item Any operating system supported by the dependencies (Linux, macOS and
     Windows). Development and continuous integration use Linux.
   \item The core dependencies below, installed automatically by \code{pip}.
@@ -32,8 +32,10 @@ My Tool Box is a standard Python project described by a single
     \pkg{numpy}      & 1.23 & all numerical code \\
     \pkg{scipy}      & 1.9  & AJLATT estimation, plotkit smoothing \\
     \pkg{matplotlib} & 3.6  & environment renderers, plotkit \\
-    \pkg{gymnasium}  & 1.0  & environment API, registration, vector environments \\
-    \pkg{pyyaml}     & 6.0  & AJLATT map files and map specifications \\
+    \pkg{pillow}     & 9.0  & GIF export \\
+    \pkg{cycler}     & 0.11 & plotkit styles \\
+    \pkg{gymnasium}  & 1.1  & environment API, registration, vector environments \\
+    \pkg{pyyaml}     & 6.0  & AJLATT map files, map specifications, parakit YAML files \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -89,7 +91,7 @@ quotes prevent shells such as \code{zsh} from interpreting the brackets.
     \code{torch} & \pkg{torch} $\geq$ 2.0 &
       \pkg{marl\_algorithms} and \code{marl-train},
       \code{KuramotoOscillatorEnvTorch}, \pkg{toolkit.neural\_toolkit} \\
-    \code{video} & \pkg{imageio} $\geq$ 2.20, \pkg{imageio-ffmpeg} $\geq$ 0.4 &
+    \code{video} & \pkg{imageio} $\geq$ 2.20, \pkg{imageio-ffmpeg} $\geq$ 0.5.1 &
       MP4, WebM, AVI, MOV and MKV export in \code{save\_animation} and
       \code{record\_episode} (GIF export needs no extra) \\
     \code{all} & the three extras above & every feature of the package \\
@@ -266,7 +268,7 @@ To upgrade a clone, pull the latest sources and reinstall:
 \code{pip install -e ".[all,dev]"} for an editable installation).
 Reinstalling also runs again the step that generates the console scripts, so
 an editable installation made with version 1.0 gains the \code{env-lib}
-command only after this step. Version 1.1 requires Gymnasium 1.0 or newer;
+command only after this step. Version 1.2.1 requires Gymnasium 1.1 or newer;
 \code{pip} upgrades an older Gymnasium automatically, which may affect other
 projects in the same environment (Section~\ref{sec:migration-11}).
 \code{pip uninstall my-tool-box} removes the package. Users of versions before

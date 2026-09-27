@@ -863,7 +863,7 @@ Sections~\ref{sec:marl-quickstart} and~\ref{sec:marl-results}.
 % norun
 \begin{pycode}
 train(algorithm, env_id, total_steps, *, num_envs=16, seed=0,
-      env_kwargs=None, device='cpu', callback=None,
+      env_kwargs=None, device='cpu', callback=None, threads=1,
       **config) -> tuple[Algorithm, TrainingLog]
 make_algorithm(name, env_or_spec, **kwargs) -> Algorithm
 get_algorithm(name) -> type[Algorithm]      # case-insensitive
@@ -876,14 +876,18 @@ marl_algorithms.__version__                 # "1.2.1"
 get_preset(algorithm, env_id) -> dict | None     # a copy
 list_presets() -> list[tuple[str, str]]          # (algorithm, env_id) pairs
 train_preset(algorithm, env_id, *, seed=0, total_steps=None, num_envs=None,
-             env_kwargs=None, device='cpu', callback=None,
+             env_kwargs=None, device='cpu', callback=None, threads=1,
              **config) -> tuple[Algorithm, TrainingLog]
 PRESETS                   # {algorithm: {env_id: preset}}, all families
 \end{pycode}
 
 \code{train} creates the copies with \code{make\_vector\_env}, builds the
 algorithm with \code{make\_algorithm} and trains it with \code{learn}, passing
-the seed to both; it closes the copies and sets \code{log.env\_id}.
+the seed to both; it closes the copies, sets \code{log.env\_id} and records
+the environment id and keyword arguments in \code{algo.metadata}. It trains
+with \code{threads} PyTorch threads (\code{None} keeps the current setting)
+and restores the previous setting afterwards, as \code{torch\_threads} does;
+an unknown algorithm is reported before any environment is created.
 \code{make\_algorithm} passes its keyword arguments (\code{config},
 \code{device}, \code{seed} and configuration overrides) to the class. \code{get\_algorithm},
 \code{get\_preset} and \code{train\_preset} raise \code{KeyError} for an unknown
@@ -904,7 +908,7 @@ Section~\ref{sec:marl-baselines}.
 compare(env_id, algorithms=None, *, seeds=(0,), policies=None, n_episodes=64,
         eval_seed=1, total_steps=None, num_envs=None, env_kwargs=None,
         include_random=True, include_baseline=True, keep_replay=False,
-        device='cpu', verbose=False, **config) -> Comparison
+        device='cpu', threads=1, verbose=False, **config) -> Comparison
 per_copy(policy) -> policy          # single-environment policy -> batched
 
 Comparison(env_id, env_kwargs, n_episodes, eval_seed, rows, algorithms, logs)
@@ -1054,6 +1058,9 @@ algo.state_dict() -> dict[str, Any]
 algo.load_state_dict(state)
 algo.save(path) -> Path
 Algorithm.load(path, device='cpu') -> Algorithm        # class method
+algo.check_env(env)       # ValueError if the spaces do not match algo.spec
+algo.metadata             # dict saved with the checkpoint (env_id, env_kwargs)
+torch_threads(threads)    # context manager; None leaves the setting unchanged
 algo.spec, algo.config, algo.device, algo.seed, algo.np_rng, algo.torch_rng
 algo.env_steps, algo.num_updates
 # helpers for subclasses
@@ -1088,7 +1095,17 @@ configuration of the wrong class or unknown override fields.
 \code{callback(algorithm, log)} is called after every update (on-policy) or
 every round of gradient steps (off-policy) and stops training by returning
 \code{False}. \code{Algorithm.load} selects the class through the registry
-unless it is called on the class that saved the file.
+unless it is called on the class that saved the file; it raises
+\code{FileNotFoundError} for a missing file and \code{ValueError} for a file
+that is not a checkpoint of this package. \code{evaluate} calls
+\code{check\_env}, which raises \code{ValueError} when the environment's
+number of agents, observation size or action space differs from the one the
+algorithm was built for (and warns when only the bounds of a continuous
+action space differ). \code{learn} requires a positive integer
+\code{total\_steps}; an off-policy \code{learn} whose budget ends before
+\code{warmup\_steps} warns that no gradient step will be taken. A
+\code{device} of \code{"cuda"} or \code{"mps"} that is not available raises
+\code{ValueError} in the constructor.
 
 \subsection{Algorithms and their configurations}
 

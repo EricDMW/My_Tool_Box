@@ -546,14 +546,18 @@ ruff format --check src tests examples benchmarks # verify formatting only
 \subsection{Continuous integration}
 
 The workflow \code{.github/workflows/ci.yml} runs on pushes to the
-\code{main} and \code{development} branches and on pull requests. It has two
+\code{main} and \code{development} branches and on pull requests. It has three
 jobs:
 
 \begin{description}[leftmargin=0.6cm,style=nextline]
   \item[\code{lint}] On Python 3.11: \code{ruff check} and
     \code{ruff format -{}-check} on \code{src}, \code{tests}, \code{examples} and
     \code{benchmarks}.
-  \item[\code{test}] On Python 3.9, 3.10, 3.11 and 3.12 with
+  \item[\code{package}] On Python 3.12: builds the source distribution and
+    the wheel, checks them with \code{twine check -{}-strict}, installs the
+    wheel into a fresh virtual environment and runs the quick start and
+    \code{env-lib list} there.
+  \item[\code{test}] On Python 3.9, 3.10, 3.11, 3.12 and 3.13 with
     \code{MPLBACKEND=Agg} and \code{SDL\_VIDEODRIVER=dummy}: installs the CPU
     build of PyTorch and the package with the \code{pistonball}, \code{video}
     and \code{dev} extras, runs \code{pytest -q}, and smoke-tests the examples

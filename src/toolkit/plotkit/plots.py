@@ -1288,9 +1288,7 @@ def plot_heatmap(
     if values.ndim == 1:
         values = values[np.newaxis, :]
     if values.ndim != 2 or values.size == 0:
-        raise ValueError(
-            f"plot_heatmap: data must be a non-empty 2-D array, got shape {values.shape}"
-        )
+        raise ValueError(f"data must be a non-empty 2-D (or 1-D) array, got shape {values.shape}")
     n_rows, n_cols = values.shape
     hidden = ~np.isfinite(values)
     if mask is not None:

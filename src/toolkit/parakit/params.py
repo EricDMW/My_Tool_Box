@@ -467,8 +467,11 @@ def _create_temp_file(target: Path) -> tuple[int, str]:
     raise FileExistsError(f"could not create a temporary file next to {target}")
 
 
+_YAML_SUFFIXES = frozenset({".yaml", ".yml"})
+
+
 def save_parameters(values: Mapping[str, Any], path_or_dir: PathLike) -> Path:
-    """Write ``values`` as JSON and return the file path.
+    """Write ``values`` as JSON (or YAML) and return the file path.
 
     Parameters
     ----------
@@ -476,9 +479,11 @@ def save_parameters(values: Mapping[str, Any], path_or_dir: PathLike) -> Path:
         Parameter values (JSON-serialisable; other objects are stored via ``str``).
     path_or_dir : str or path-like
         A file path (any path with a suffix, e.g. ``run.json``) or a directory
-        (an existing directory or a path without suffix). For a directory a new
-        file ``parameters_YYYYmmdd_HHMMSS.json`` is created (``_1``, ``_2``, ...
-        is appended if that name exists). Missing directories are created.
+        (an existing directory or a path without suffix). A ``.yaml`` or
+        ``.yml`` file is written as YAML, any other file as JSON. For a
+        directory a new file ``parameters_YYYYmmdd_HHMMSS.json`` is created
+        (``_1``, ``_2``, ... is appended if that name exists). Missing
+        directories are created.
 
     Returns
     -------
@@ -486,6 +491,11 @@ def save_parameters(values: Mapping[str, Any], path_or_dir: PathLike) -> Path:
         The written file. The write is atomic (temporary file + rename); the file
         gets the default permissions of new files (``0o666`` minus the umask).
     """
+    if not isinstance(values, Mapping):
+        raise TypeError(
+            f"save_parameters() expects a mapping of parameter names to values, "
+            f"got {type(values).__name__}; use vars(args) for an argparse.Namespace"
+        )
     target = Path(path_or_dir).expanduser()
     if target.is_dir() or not target.suffix:
         target.mkdir(parents=True, exist_ok=True)
@@ -493,6 +503,12 @@ def save_parameters(values: Mapping[str, Any], path_or_dir: PathLike) -> Path:
     else:
         target.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(dict(values), indent=4, ensure_ascii=False, default=_json_default)
+    if target.suffix.lower() in _YAML_SUFFIXES:
+        import yaml
+
+        payload = yaml.safe_dump(
+            json.loads(payload), sort_keys=False, allow_unicode=True, default_flow_style=False
+        ).rstrip()
     fd, tmp_name = _create_temp_file(target)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -514,12 +530,13 @@ def _file_rank(path: Path) -> tuple[bool, str, int, str]:
 
 
 def load_parameters(path: PathLike) -> dict[str, Any]:
-    """Read a JSON parameter file written by :func:`save_parameters`.
+    """Read a parameter file written by :func:`save_parameters`.
 
     Parameters
     ----------
     path : str or path-like
-        A JSON file, or a directory, in which case the newest
+        A JSON file, a YAML file (``.yaml`` or ``.yml``), or a directory, in
+        which case the newest
         ``parameters_*.json`` file is read: files are ranked by the timestamp and
         counter in their name (``parameters_YYYYmmdd_HHMMSS_N.json``, so ``_10``
         is newer than ``_9``); other ``parameters_*.json`` names rank below them.
@@ -529,7 +546,7 @@ def load_parameters(path: PathLike) -> dict[str, Any]:
     FileNotFoundError
         If the file, or any parameter file in the directory, does not exist.
     ValueError
-        If the file does not contain a JSON object.
+        If the file does not contain a JSON (or YAML) mapping.
     """
     source = Path(path).expanduser()
     if source.is_dir():
@@ -538,12 +555,22 @@ def load_parameters(path: PathLike) -> dict[str, Any]:
             raise FileNotFoundError(f"no {PARAMETER_FILE_PREFIX}_*.json files in {source}")
         source = candidates[-1]
     with open(source, encoding="utf-8") as handle:
-        try:
-            data = json.load(handle)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"{source} is not valid JSON: {exc}") from None
+        if source.suffix.lower() in _YAML_SUFFIXES:
+            import yaml
+
+            try:
+                data = yaml.safe_load(handle)
+            except yaml.YAMLError as exc:
+                raise ValueError(f"{source} is not valid YAML: {exc}") from None
+            kind = "YAML mapping"
+        else:
+            try:
+                data = json.load(handle)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{source} is not valid JSON: {exc}") from None
+            kind = "JSON object"
     if not isinstance(data, dict):
-        raise ValueError(f"{source} must contain a JSON object, got {type(data).__name__}")
+        raise ValueError(f"{source} must contain a {kind}, got {type(data).__name__}")
     return data
 
 
@@ -583,6 +610,14 @@ def apply_parameters(
         converted); otherwise listing every invalid value. The parser is left
         unchanged in either case.
     """
+    if not isinstance(values, Mapping):
+        try:
+            values = dict(values)
+        except (TypeError, ValueError):
+            raise TypeError(
+                "apply_parameters() expects a mapping (or key-value pairs) of parameter "
+                f"values, got {type(values).__name__}"
+            ) from None
     actions = tunable_actions(parser)
     callbacks = dict(validation_callbacks or {})
     unknown = [key for key in values if key not in actions]
