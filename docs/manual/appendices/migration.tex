@@ -59,7 +59,8 @@ import packages; optional features are selected with extras
 (Chapter~\ref{chap:install}):
 
 \begin{shellcode}
-pip uninstall -y env_lib toolkit ttenv kos_env linemsg_env pistonball_env wireless_comm_env
+pip uninstall -y env_lib toolkit
+pip uninstall -y ttenv kos_env linemsg_env pistonball_env wireless_comm_env
 pip install -e ".[all]"            # or ".[all,dev]" for development
 \end{shellcode}
 
@@ -164,7 +165,7 @@ outcomes (idle, success, collision, lost) in \code{info["outcomes"]}.
 \paragraph{Discrete actions.}
 The discrete action space is \code{MultiDiscrete([3] * n\_pistons)}: one
 value per piston, 0 moves the piston down, 1 keeps it still and 2 moves it up.
-Version 0.x declared the same array format as
+Earlier versions declared the same array format as
 \code{Box(0, 2, (n\_pistons,), int32)}, and some earlier documentation used a
 single base-3 integer in \code{Discrete(3**n\_pistons)}. Code that sends
 arrays keeps working; code that encodes a single integer must decode it:
@@ -196,7 +197,8 @@ AJLATT was rewritten as a Gymnasium environment configured by a dataclass.
 The old factory called \code{argparse.parse\_args()} internally, which failed
 in any script with its own command-line arguments.
 
-\paragraph{Creating the environment.}
+\paragraph{Creating the environment.} The legacy factory still works; the
+class and the configuration dataclass are the preferred interface:
 
 \begin{pycode}
 import env_lib
@@ -244,7 +246,7 @@ obs, info = team_env.reset(seed=0)
 obs, team_reward, done, truncated, info = team_env.step(actions)   # float, bool
 \end{pycode}
 
-\paragraph{Behaviour changes.}
+\paragraph{Behaviour changes.} The following changes affect results:
 \begin{itemize}
   \item The target-velocity entries of the observation contain the commanded
     target velocity instead of the configured constant.
@@ -330,7 +332,7 @@ other defects changed the computed functions (Section~\ref{sec:neural-changes}).
 The layer structure of every network changed, so checkpoints written before
 1.0 cannot be loaded; retrain and save new checkpoints.
 
-\paragraph{API differences.}
+\paragraph{API differences.} Besides the fixes, the following details changed:
 \begin{itemize}
   \item Unknown activation names raise \code{ValueError} instead of silently
     falling back to a default, and the \code{device} argument is honoured
@@ -343,8 +345,9 @@ The layer structure of every network changed, so checkpoints written before
     entries need \code{weights\_only=False} (only for trusted files).
     \code{save\_checkpoint} accepts \code{optimizer=None} and extra keyword
     entries, and returns the path.
-  \item \code{NetworkUtils.create\_positional\_encoding} returns the frozen
-    table as an \code{nn.Parameter} of shape \code{(1, max\_len, d\_model)};
+  \item The method \code{create\_positional\_encoding} of \code{NetworkUtils}
+    returns the frozen table as an \code{nn.Parameter} of shape
+    \code{(1, max\_len, d\_model)};
     use \code{PositionalEncoding} for a module that adds it to its input.
   \item The tabular tools draw random numbers from a per-table generator
     (\code{rng} argument) instead of the global NumPy state.
@@ -364,11 +367,14 @@ equivalents.
     \toprule
     Documented before 1.0 & Use \\
     \midrule
-    \code{NetworkUtils.count\_trainable\_parameters} & \code{NetworkUtils.count\_parameters} (counts trainable parameters) \\
-    \code{NetworkUtils.init\_weights} & \code{NetworkUtils.initialize\_weights} \\
-    \code{NetworkUtils.clip\_gradients} & \code{NetworkUtils.clip\_grad\_norm} \\
-    \code{NetworkUtils.get\_device}, \code{to\_device} & plain PyTorch: \code{torch.device(...)}, \code{module.to(device)} \\
-    \code{CNNEncoder(..., output\_dim=...)}, \code{RNNEncoder(..., output\_dim=...)} & \code{latent\_dim=...} \\
+    \multicolumn{2}{@{}l}{\emph{Static methods of} \code{NetworkUtils}} \\
+    \code{count\_trainable\_parameters} & \code{count\_parameters} (counts trainable parameters) \\
+    \code{init\_weights} & \code{initialize\_weights} \\
+    \code{clip\_gradients} & \code{clip\_grad\_norm} \\
+    \code{get\_device}, \code{to\_device} & plain PyTorch: \code{torch.device(...)}, \code{module.to(device)} \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{Encoder arguments}} \\
+    \code{output\_dim} of \code{CNNEncoder} and \code{RNNEncoder} & \code{latent\_dim} \\
     \bottomrule
   \end{tabularx}
 \end{table}

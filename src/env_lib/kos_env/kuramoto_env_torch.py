@@ -18,8 +18,8 @@ from typing import Any, Union
 
 import numpy as np
 import torch
-from gymnasium.error import ResetNeeded
 
+from env_lib.errors import ResetNeededError
 from env_lib.kos_env._common import KuramotoEnvBase, check_int, combine_reward, wrap_phases
 
 __all__ = ["KuramotoOscillatorEnvTorch"]
@@ -374,7 +374,7 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
             have been taken; per-system arrays in ``info``.
         """
         if self.phases is None:
-            raise ResetNeeded("Call reset() before step().")
+            raise ResetNeededError("Call reset() before step().")
         action_t = self._action_to_tensor(action)
         n = self.n_oscillators
         control_inputs = action_t[:, :n]
@@ -434,7 +434,7 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
     def get_batch_observations(self) -> torch.Tensor:
         """Observations of all systems, shape ``(n_agents, obs_dim)``, on ``self.device``."""
         if self.phases is None:
-            raise ResetNeeded("Call reset() before get_batch_observations().")
+            raise ResetNeededError("Call reset() before get_batch_observations().")
         parts = [self.phases, self.natural_frequencies]
         if self.coupling_mode == "dynamic":
             parts.append(self.coupling_strengths)
@@ -461,7 +461,7 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
             behaviour of this method.
         """
         if self.phases is None:
-            raise ResetNeeded("Call reset() before get_batch_rewards().")
+            raise ResetNeededError("Call reset() before get_batch_rewards().")
         base, r, _ = self._base_rewards(self.phases, dphases_dt)
         return self._apply_bonus(base, r) if include_bonus else base
 

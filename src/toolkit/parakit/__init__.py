@@ -42,7 +42,6 @@ from .params import (
 from .tune_para import TK_MISSING_MESSAGE, ParameterAdjuster, ParameterTuner
 
 __author__ = "Dongming Wang"
-__email__ = "dongming.wang@email.ucr.edu"
 
 __all__ = [
     "__version__",

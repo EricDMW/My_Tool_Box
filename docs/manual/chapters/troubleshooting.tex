@@ -120,8 +120,8 @@ environment than the one running the code; compare \code{which python} with
 
 \section{``Out of date'' warnings for -v0 environment ids}\label{sec:trouble-outofdate}
 
-\paragraph{Symptom.} \code{gymnasium.make("WirelessComm-v0")} or
-\code{gymnasium.make("KuramotoOscillator-v0")} prints
+\paragraph{Symptom.} Creating \envid{WirelessComm-v0} or
+\envid{KuramotoOscillator-v0} with \code{gymnasium.make} prints
 
 \begin{textcode}
 DeprecationWarning: WARN: The environment WirelessComm-v0 is out of date.
@@ -141,7 +141,8 @@ import warnings
 import gymnasium as gym
 import env_lib  # registers the ids
 
-warnings.filterwarnings("ignore", message=r".*is out of date", category=DeprecationWarning)
+warnings.filterwarnings("ignore", message=r".*is out of date",
+                        category=DeprecationWarning)
 env = gym.make("WirelessComm-v0")
 \end{pycode}
 
@@ -196,7 +197,7 @@ translation when migrating a code base.
 \paragraph{Installing a CPU or a CUDA build.}
 The \code{torch} extra installs the default PyTorch wheel of the platform,
 which on Linux is a large CUDA build. For CPU-only machines install the CPU
-wheel first (\code{pip install torch --index-url
+wheel first (\code{pip install torch -{}-index-url
 https://download.pytorch.org/whl/cpu}); for a specific CUDA version use the
 command shown at \url{https://pytorch.org/get-started/}. Check the result
 with
@@ -308,9 +309,9 @@ reproduce its behaviour before version 1.0 closely with
   \item \emph{Choose the integrator.} For the Kuramoto environments, Euler
     integration is about twice as fast as RK4; use RK4 when accuracy at large
     \code{dt} matters.
-  \item \emph{Batch on the GPU.} Many Kuramoto systems simulated together by
-    \code{KuramotoOscillatorEnvTorch} (\code{n\_agents} systems per step) are
-    much cheaper than separate environments, especially on a GPU.
+  \item \emph{Batch on the GPU.} The PyTorch Kuramoto environment simulates
+    \code{n\_agents} systems per step. One batched environment is much
+    cheaper than many separate ones, especially on a GPU.
   \item \emph{AJLATT.} Keep the default \code{ci\_solver="newton"}, which is
     several times faster than \code{"slsqp"}; the cost per step grows with the
     number of robots because every robot fuses its neighbours' estimates.
@@ -329,10 +330,11 @@ reproduce its behaviour before version 1.0 closely with
 
 \begin{description}[leftmargin=0.6cm,style=nextline]
   \item[\code{step()} raises before the first \code{reset()}]
-    Every environment requires \code{reset()} before the first \code{step()}
-    and raises \code{RuntimeError} (\code{gymnasium.error.ResetNeeded} for the
-    Kuramoto environments) otherwise. Environments created with
-    \code{gymnasium.make} raise Gymnasium's own error from the
+    Every environment requires \code{reset()} before the first
+    \code{step()}. Otherwise it raises \code{env\_lib.ResetNeededError},
+    which can be caught either as a \code{RuntimeError} or as Gymnasium's
+    \code{ResetNeeded} error. Environments created with
+    \code{gymnasium.make} raise Gymnasium's own \code{ResetNeeded} from the
     \code{OrderEnforcing} wrapper.
   \item[An episode is longer or shorter than expected]
     Each environment enforces its own episode limit through a constructor
@@ -343,9 +345,9 @@ reproduce its behaviour before version 1.0 closely with
     shorter of the two limits applies.
   \item[\code{AttributeError} for an environment method]
     \code{gymnasium.make} and \code{env\_lib.make} return a wrapped
-    environment. Access environment-specific methods and attributes through
-    \code{env.unwrapped}, for example
-    \code{env.unwrapped.laplacian\_policy()}.
+    environment. Methods and attributes that only the environment class
+    defines are reached through \code{env.unwrapped}; for example, the
+    consensus controller is \code{env.unwrapped.laplacian\_policy()}.
   \item[\code{render()} returns \code{None} with a warning]
     The environment was created without a render mode. Pass
     \code{render\_mode="rgb\_array"} (or \code{"human"}) to the constructor or

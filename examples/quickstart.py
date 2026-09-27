@@ -12,10 +12,10 @@ import argparse
 import warnings
 from pathlib import Path
 
+import matplotlib.image as mpimg
 import numpy as np
 
 import env_lib
-from env_lib.utils import save_animation
 
 
 def main() -> None:
@@ -45,8 +45,9 @@ def main() -> None:
             f"  {env_id:<46} obs {str(np.shape(obs)):<12} return over {args.steps} steps: {total:10.2f}"
         )
         if args.render:
-            out = Path(args.render) / f"{env_id}.gif"
-            save_animation([env.render()], out, fps=1)
+            out = Path(args.render) / f"{env_id}.png"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            mpimg.imsave(out, env.render())
         env.close()
 
 

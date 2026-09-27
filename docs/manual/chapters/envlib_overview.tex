@@ -172,8 +172,9 @@ Every environment implements
 \end{itemize}
 Observations are \code{float32} NumPy arrays contained in
 \code{observation\_space}. Calling \code{step()} before the first
-\code{reset()} raises an exception (\code{RuntimeError}, or
-\code{gymnasium.error.ResetNeeded} for the Kuramoto environments). Invalid
+\code{reset()} raises \code{env\_lib.ResetNeededError}, which derives from
+both \code{RuntimeError} and \code{gymnasium.error.ResetNeeded}, so either can
+be caught. Invalid
 actions (wrong shape, values outside a discrete range, NaN or infinite values)
 raise \code{ValueError}, and continuous actions are clipped to the action
 bounds. AJLATT is the exception: it only checks the action shape, and clipping

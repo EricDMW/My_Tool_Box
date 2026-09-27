@@ -579,8 +579,9 @@ def apply_parameters(
     Raises
     ------
     ValueError
-        Listing every unknown key (strict mode) and every invalid value. The
-        parser is left unchanged in that case.
+        In strict mode, listing every unknown key (checked before any value is
+        converted); otherwise listing every invalid value. The parser is left
+        unchanged in either case.
     """
     actions = tunable_actions(parser)
     callbacks = dict(validation_callbacks or {})

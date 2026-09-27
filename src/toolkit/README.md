@@ -1,66 +1,31 @@
-# Toolkit: A Comprehensive Research Toolkit
+# toolkit
 
-A comprehensive research toolkit for reinforcement learning and research applications, providing both neural network architectures and plotting utilities.
+Research utilities distributed with the `my-tool-box` package. See the
+repository `README.md` for installation and the handbook in `docs/manual/`
+(Part II, "Toolkit") for the full documentation.
 
-## Components
+| Subpackage | Purpose | Extra dependencies |
+|---|---|---|
+| `toolkit.plotkit` | Publication-quality plots: learning curves with confidence bands, line, bar, scatter, histogram and heatmap plots, style presets and a colour-blind-safe palette | none (matplotlib) |
+| `toolkit.neural_toolkit` | PyTorch policy, value and Q networks (MLP, CNN, RNN, Transformer), encoders, decoders, network utilities and tabular RL tools | `torch` extra |
+| `toolkit.parakit` | Save, load and validate `argparse` experiment parameters; optional Tk editor | tkinter only for the editor |
 
-### Neural Toolkit (`neural_toolkit`)
-
-A flexible neural network toolkit designed for reinforcement learning applications, providing:
-
-- **Policy Networks**: MLP, CNN, RNN, and Transformer-based policy networks
-- **Value Networks**: Various value function approximators
-- **Q-Networks**: Q-function networks including Dueling architectures
-- **Encoders/Decoders**: Flexible encoding and decoding architectures
-- **Discrete Tools**: Tools for discrete action spaces and tabular methods
-- **Utilities**: Network utilities and helper functions
-
-### Plotkit (`plotkit`)
-
-A research-quality plotting toolkit providing:
-
-- **Research-Style Plots**: Publication-ready plotting functions
-- **Specialized Visualizations**: Shadow curves, heatmaps, gray scales
-- **Standard Plots**: Line, bar, and scatter plots with research styling
-- **Color Schemes**: Predefined research color palettes
-
-## Installation
-
-```bash
-pip install toolkit
-```
-
-## Quick Start
+Subpackages are imported lazily, so `import toolkit` does not import PyTorch
+or tkinter.
 
 ```python
-import toolkit
+import numpy as np
+from toolkit.plotkit import plot_learning_curves, save_figure
 
-# Use neural toolkit
-from toolkit.neural_toolkit import MLPPolicyNetwork, MLPValueNetwork
-from toolkit.neural_toolkit import NetworkUtils
-
-# Use plotkit
-from toolkit.plotkit import plot_shadow_curve, plot_heatmap, set_research_style
-from toolkit.plotkit import RESEARCH_COLORS
-
-# Set research style for all plots
-set_research_style()
+runs = {"PPO": np.random.randn(5, 200).cumsum(1)}
+ax = plot_learning_curves(runs, band="ci95", xlabel="Episode", ylabel="Return")
+save_figure(ax, "learning_curves", formats=("pdf", "png"))
 ```
 
-## Dependencies
+```python
+from toolkit.neural_toolkit import MLPPolicyNetwork
 
-- matplotlib >= 3.5.0
-- seaborn >= 0.11.0
-- numpy >= 1.20.0
-- torch >= 1.9.0
-- tensorflow >= 2.6.0
-- scikit-learn >= 1.0.0
-- pandas >= 1.3.0
+policy = MLPPolicyNetwork(input_dim=8, output_dim=2, hidden_dims=[64, 64])
+```
 
-## License
-
-MIT License
-
-## Author
-
-Dongming Wang 
+Run the plot gallery with `plotkit-gallery --demo all --save renders/gallery`.

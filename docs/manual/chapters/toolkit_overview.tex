@@ -131,10 +131,11 @@ Table~\ref{tab:parakit-api} lists the functions; none of them needs Tk.
       Convert \code{true/false}, \code{yes/no}, \code{on/off}, \code{1/0}
       (any case) or a boolean to \code{bool}. \\
     \code{format\_value(action, value)} &
-      Text that \code{parse\_value} converts back (lists as JSON, \code{None}
+      Text that \code{parse\_value} converts back (lists, also nested, as JSON; \code{None}
       as \code{"None"}). \\
     \code{describe\_type(action)} &
-      Short type description such as \code{"float"}, \code{"list[int]"} or
+      Short type description such as \code{"float"}, \code{"list[int]"},
+      \code{"list[list[int]]"} or
       \code{"str or None"}. \\
     \code{tunable\_actions(parser)} &
       Dictionary \code{\{dest: action\}} of the options \pkg{parakit}
@@ -146,7 +147,7 @@ Table~\ref{tab:parakit-api} lists the functions; none of them needs Tk.
 \paragraph{Tunable options.}
 \code{tunable\_actions} skips help, version and sub-parser actions and options
 whose destination or default is \code{argparse.SUPPRESS}. When several options
-share a destination, such as a \code{--flag}/\code{--no-flag} pair, the first
+share a destination, such as a \code{-{}-flag}/\code{-{}-no-flag} pair, the first
 one is used. Positional arguments are included and keyed by their name.
 
 \paragraph{Errors.}
@@ -182,8 +183,9 @@ spaces:
   \item \emph{File names.} Saving into a directory creates
     \code{parameters\_YYYYmmdd\_HHMMSS.json}; if that name exists (two saves in
     the same second), \code{\_1}, \code{\_2}, \ldots\ is appended. Loading from
-    a directory reads the file whose name sorts last, which is the most recent
-    one.
+    a directory reads the most recent file, ranked by the timestamp and counter
+    in its name (so \code{\_10} is newer than \code{\_9}); other
+    \code{parameters\_*.json} names rank below the timestamped ones.
   \item \emph{Values.} JSON numbers, strings, booleans, \code{null} and lists
     are stored as such. NumPy arrays and scalars are converted with
     \code{tolist()}, sets are stored as sorted lists and any other object as its
@@ -194,7 +196,8 @@ spaces:
     contain a subset of the parameters; the other defaults are kept.
   \item \emph{Atomic writes.} Files are written to a temporary file in the
     target directory and renamed, so an interrupted save never leaves a
-    truncated file behind.
+    truncated file behind. The file receives the usual permissions of new files
+    (\code{0o666} minus the umask).
 \end{itemize}
 
 \subsection{Parsing rules}\label{sec:parakit-parsing}
@@ -213,11 +216,16 @@ Table~\ref{tab:parakit-rules} summarises them.
     \toprule
     Declaration & Accepted input and result \\
     \midrule
-    \code{type=callable} &
-      The callable is applied to text (surrounding blanks are removed for
-      \code{int} and \code{float}). Already typed values from JSON are checked:
-      an \code{int} option accepts \code{3} and \code{3.0} but not \code{3.5};
-      a \code{float} option accepts integers. \\
+    \code{type=int}, \code{type=float} &
+      Text is converted after removing surrounding blanks. Already typed values
+      from JSON are checked: an \code{int} option accepts \code{3} and
+      \code{3.0} but not \code{3.5}; a \code{float} option accepts
+      integers. \\
+    Other \code{type=} callables &
+      Text is passed to the callable. A value that is not text (for example
+      from JSON) is passed as it is and, if that fails, as text (booleans as
+      \code{"true"}/\code{"false"}), so converters written for command-line
+      strings, such as \code{lambda s: int(s, 0)}, survive a save and load. \\
     No \code{type} &
       The type is inferred from the default (\code{bool}, \code{int},
       \code{float}, otherwise \code{str}), or from the \code{choices} when all
@@ -231,7 +239,11 @@ Table~\ref{tab:parakit-rules} summarises them.
       A JSON list (\code{[1.0, 2.0]}), a Python literal list or tuple, or
       tokens separated by commas (if the text contains a comma) or by
       whitespace. Each element is converted; \code{"+"} requires at least one
-      element and an integer \code{nargs} exactly that many. \\
+      element and an integer \code{nargs} exactly that many, while
+      \code{append} and \code{extend} accept any number. \code{append} with
+      \code{nargs} holds a list of lists such as \code{[[1, 2], [3, 4]]}; for
+      an integer \code{nargs} a flat list is split into groups of that
+      size. \\
     Default \code{None} or \code{nargs="?"} &
       \code{None}, \code{null} (any case) and the empty string give
       \code{None}. For other options \code{None} is rejected, except that a
@@ -245,9 +257,9 @@ Table~\ref{tab:parakit-rules} summarises them.
 
 \paragraph{Declare types explicitly.}
 Type inference from the default is a convenience of \pkg{parakit}, not of
-\pkg{argparse}. An option declared as \code{add\_argument("--gamma",
+\pkg{argparse}. An option declared as \code{add\_argument("-{}-gamma",
 default=0.99)} is converted to \code{float} by \pkg{parakit}, but
-\code{parser.parse\_args(["--gamma", "0.9"])} returns the \emph{string}
+\code{parser.parse\_args(["-{}-gamma", "0.9"])} returns the \emph{string}
 \code{"0.9"}. Give every option a \code{type=} so that both paths agree.
 
 \paragraph{Validation callbacks.}
@@ -288,7 +300,7 @@ command-line flags.
 \begin{pycode}
 import argparse
 import sys
-from toolkit.parakit import apply_parameters, get_parameters, load_parameters, save_parameters
+from toolkit.parakit import apply_parameters, load_parameters, save_parameters
 
 def build_parser():
     parser = argparse.ArgumentParser()
@@ -348,7 +360,7 @@ closes.
   \end{tabularx}
 \end{table}
 
-\paragraph{Window behaviour.}
+\paragraph{Window behaviour.} The window offers the following controls:
 \begin{itemize}
   \item \emph{Save Parameters} validates all fields and writes a new file.
     Invalid values are listed in an error dialog and nothing is saved.
@@ -404,7 +416,7 @@ except (ImportError, RuntimeError) as exc:
 \end{pycode}
 
 The script \code{examples/parakit\_demo.py} demonstrates the complete
-workflow, including the window (\code{--gui}), loading a file or directory
-(\code{--load}) and command-line overrides (\code{--set KEY=VALUE}).
+workflow, including the window (\code{-{}-gui}), loading a file or directory
+(\code{-{}-load}) and command-line overrides (\code{-{}-set KEY=VALUE}).
 
 \par\endgroup

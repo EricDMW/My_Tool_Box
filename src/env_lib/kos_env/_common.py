@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING, Any
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
-from gymnasium.error import ResetNeeded
 
+from env_lib.errors import ResetNeededError
 from env_lib.utils.rendering import validate_render_mode
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -445,7 +445,7 @@ class KuramotoEnvBase(gym.Env):
                 self._warned_render_none = True
             return None
         if getattr(self, "phases", None) is None:
-            raise ResetNeeded("Call reset() before render().")
+            raise ResetNeededError("Call reset() before render().")
         if self._renderer is None:
             from env_lib.kos_env.rendering import KuramotoRenderer
 

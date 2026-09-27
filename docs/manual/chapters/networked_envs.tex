@@ -111,7 +111,7 @@ agent $i$:
     \toprule
     Parameter & Default & Description \\
     \midrule
-    \code{num\_agents} & \code{10} & Number of agents $N$ ($\ge 3$: a sink, a source and at least one relay). \\
+    \code{num\_agents} & \code{10} & Number of agents $N$ ($\ge 2$: a sink and a source, plus any number of relays). \\
     \code{n\_obs\_neighbors} & \code{1} & Observation radius $k$; $0$ is treated as $1$ with a warning. \\
     \code{max\_iter} & \code{50} & Episode length; reaching it sets \code{truncated}. \\
     \code{render\_mode} & \code{None} & \code{None}, \code{"human"}, \code{"rgb\_array"} or \code{"ansi"}. \\
@@ -125,7 +125,7 @@ The info dictionary of \code{reset()} and \code{step()} contains a single key,
 reset). The attribute \code{state} holds the padded state vector (agent $i$ is
 \code{state[k + i]}), \code{actions} the last joint action with the same padding
 (2 before the first step), and \code{num\_moves} the number of steps taken.
-\code{step()} before \code{reset()} raises \code{RuntimeError}.
+\code{step()} before \code{reset()} raises \code{env\_lib.ResetNeededError}.
 
 % ---------------------------------------------------------------------------
 \subsection{Rendering}\label{sec:linemsg-render}
@@ -296,7 +296,7 @@ The environment also exposes \code{last\_outcomes} and \code{last\_ap\_load}
 (the values of the last step), \code{access\_point\_mapping(i, j, action)},
 which returns the access point $(a, b)$ reached by agent $(i, j)$ or
 \code{(None, None)}, and \code{check\_transmission\_fail(a, b, load)}.
-\code{step()} before \code{reset()} raises \code{RuntimeError}.
+\code{step()} before \code{reset()} raises \code{env\_lib.ResetNeededError}.
 
 % ---------------------------------------------------------------------------
 \subsection{Rendering}\label{sec:wireless-render}

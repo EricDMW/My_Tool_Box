@@ -24,6 +24,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
+from env_lib.errors import ResetNeededError
 from env_lib.utils.rendering import validate_render_mode
 
 __all__ = [
@@ -877,7 +878,7 @@ class ConsensusEnv(gym.Env):
     # ------------------------------------------------------------------
     def _require_reset(self) -> None:
         if self._pos is None:
-            raise RuntimeError("Call reset() before using the environment")
+            raise ResetNeededError("Call reset() before using the environment")
 
     def _state_option(self, name: str, value: Any) -> np.ndarray:
         array = np.array(value, dtype=np.float64)

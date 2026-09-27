@@ -59,6 +59,14 @@ def make(figID: int = 0, *args: Any, render_mode: str | None = None, **kwargs: A
     **kwargs:
         :class:`AJLATTConfig` fields or their legacy names.
     """
+    return _make(args, render_mode, kwargs, stacklevel=3)
+
+
+def _make(
+    args: tuple[Any, ...], render_mode: str | None, kwargs: dict[str, Any], *, stacklevel: int
+) -> AJLATTEnv:
+    # ``stacklevel`` is the warning stack level, seen from this function, of
+    # the user code that called the public factory.
     if args:
         raise TypeError("make() accepts keyword arguments only")
     legacy_render = kwargs.pop("render", None)
@@ -66,11 +74,11 @@ def make(figID: int = 0, *args: Any, render_mode: str | None = None, **kwargs: A
         warnings.warn(
             "The 'render' flag is deprecated; pass render_mode='human' or 'rgb_array'",
             DeprecationWarning,
-            stacklevel=2,
+            stacklevel=stacklevel,
         )
         if render_mode is None and legacy_render:
             render_mode = "human"
-    config = AJLATTConfig.from_kwargs(strict=False, **kwargs)
+    config = AJLATTConfig.from_kwargs(strict=False, _stacklevel=stacklevel + 1, **kwargs)
     return AJLATTEnv(config, render_mode=render_mode)
 
 
@@ -91,8 +99,10 @@ class TeamRewardWrapper(gym.Wrapper):
 class _CallableModule(types.ModuleType):
     """Allow ``env_lib.ajlatt_env(...)`` as an alias of :func:`make`."""
 
-    def __call__(self, *args: Any, **kwargs: Any) -> AJLATTEnv:
-        return make(*args, **kwargs)
+    def __call__(
+        self, figID: int = 0, *args: Any, render_mode: str | None = None, **kwargs: Any
+    ) -> AJLATTEnv:
+        return _make(args, render_mode, kwargs, stacklevel=3)
 
 
 #: Deprecated alias kept for ``from env_lib.ajlatt_env import ajlatt_env``.

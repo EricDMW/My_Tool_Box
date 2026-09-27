@@ -28,6 +28,7 @@ from gymnasium import Env
 from gymnasium.spaces import Box, MultiDiscrete
 from gymnasium.utils import EzPickle, seeding
 
+from env_lib.errors import ResetNeededError
 from env_lib.utils.rendering import validate_render_mode
 
 try:
@@ -507,7 +508,7 @@ class PistonballEnv(Env, EzPickle):
             If :meth:`reset` has not been called.
         """
         if self.space is None or self.ball is None:
-            raise RuntimeError("PistonballEnv.step() called before reset()")
+            raise ResetNeededError("PistonballEnv.step() called before reset()")
         displacement = self._action_to_displacement(action)
 
         # Move the pistons (kinematic bodies are teleported to their new height).
@@ -590,7 +591,7 @@ class PistonballEnv(Env, EzPickle):
                 self._warned_no_render_mode = True
             return None
         if self.ball is None:
-            raise RuntimeError("PistonballEnv.render() called before reset()")
+            raise ResetNeededError("PistonballEnv.render() called before reset()")
         if self._renderer is None:
             from env_lib.pistonball_env.rendering import PistonballLayout, PistonballRenderer
 

@@ -13,7 +13,7 @@ docstrings (\code{help(obj)} in Python) give full details. Names that start
 with an underscore and modules not listed here are internal and may change
 without notice.
 
-\section{env\_lib}\label{sec:api-envlib}
+\section{\texorpdfstring{\pkg{env\_lib}}{env\_lib}}\label{sec:api-envlib}
 
 \subsection{Package functions}
 
@@ -22,6 +22,7 @@ env_lib.make(env_id, **kwargs) -> gym.Env
 env_lib.list_envs() -> list[str]
 env_lib.register_envs()
 env_lib.__version__                       # "1.0.0"
+env_lib.ResetNeededError                  # exception class
 \end{pycode}
 
 \code{make} creates a registered environment (a thin wrapper around
@@ -30,6 +31,9 @@ env_lib.__version__                       # "1.0.0"
 \code{list\_envs} returns the registered ids in the order of
 Table~\ref{tab:api-ids}. \code{register\_envs} registers all ids with
 Gymnasium; it runs automatically on \code{import env\_lib} and is idempotent.
+\code{ResetNeededError} is raised by every environment when \code{step()} or
+\code{render()} is called before \code{reset()}; it subclasses both
+\code{RuntimeError} and \code{gymnasium.error.ResetNeeded}.
 The environment classes below are exported lazily by \pkg{env\_lib}, so
 optional dependencies are imported only when a class is used.
 
@@ -45,12 +49,12 @@ optional dependencies are imported only when a class is used.
     \envid{KuramotoOscillator-v0} & \code{KuramotoOscillatorEnv()} (10 oscillators) \\
     \envid{KuramotoOscillator-v1} & \code{n\_oscillators=5} \\
     \envid{KuramotoOscillator-Constant-v0} & \code{n\_oscillators=6}, \code{coupling\_mode="constant"} \\
-    \envid{KuramotoOscillator-FreqSync-Constant-v0} & as above, \code{reward\_type="frequency\_synchronization"}, \code{target\_frequency=2.0} \\
+    \envid{KuramotoOscillator-\allowbreak FreqSync-Constant-v0} & as above, \code{reward\_type="frequency\_synchronization"}, \code{target\_frequency=2.0} \\
     \envid{KuramotoOscillatorTorch-v0} & \code{KuramotoOscillatorEnvTorch()} (10 oscillators) \\
     \envid{KuramotoOscillatorTorch-v1} & \code{n\_oscillators=8}, \code{n\_agents=4}, \code{device="cpu"} \\
     \envid{KuramotoOscillatorTorch-v2} & \code{n\_oscillators=10}, \code{device="auto"}, \code{integration\_method="rk4"} \\
-    \envid{KuramotoOscillatorTorch-Constant-v0} & \code{n\_oscillators=6}, \code{coupling\_mode="constant"} \\
-    \envid{KuramotoOscillatorTorch-FreqSync-Constant-v0} & as above, frequency synchronisation, \code{target\_frequency=2.0} \\
+    \envid{KuramotoOscillatorTorch-\allowbreak Constant-v0} & \code{n\_oscillators=6}, \code{coupling\_mode="constant"} \\
+    \envid{KuramotoOscillatorTorch-\allowbreak FreqSync-Constant-v0} & as above, frequency synchronisation, \code{target\_frequency=2.0} \\
     \envid{LineMsg-v0} & \code{LineMsgEnv()} \\
     \envid{WirelessComm-v0} & \code{WirelessCommEnv()} ($6 \times 6$ grid) \\
     \envid{WirelessComm-v1} & \code{grid\_x=4}, \code{grid\_y=4} \\
@@ -78,7 +82,7 @@ and has the attributes \code{action\_space}, \code{observation\_space},
 dictionary always contains \code{"agent\_rewards"}, a \code{float64} array of
 shape \code{(n\_agents,)}. Chapter~\ref{chap:envlib} describes the conventions.
 
-\subsection{KuramotoOscillatorEnv and KuramotoOscillatorEnvTorch}
+\subsection{\texorpdfstring{\code{KuramotoOscillatorEnv} and \code{KuramotoOscillatorEnvTorch}}{KuramotoOscillatorEnv and KuramotoOscillatorEnvTorch}}
 
 Module \pkg{env\_lib.kos\_env}; Chapter~\ref{chap:kuramoto}.
 
@@ -110,7 +114,7 @@ PyTorch class:
     \toprule
     Method & Description \\
     \midrule
-    \code{get\_batch\_observations() -> Tensor} & Observations of all systems, \code{(n\_agents, obs\_dim)}, on the device. \\
+    \code{get\_batch\_observations()} & Tensor of the observations of all systems, \code{(n\_agents, obs\_dim)}, on the device. \\
     \code{get\_batch\_rewards(dphases\_dt=None, include\_bonus=False)} & Per-system rewards of the current state, \code{(n\_agents,)}. \\
     \bottomrule
   \end{tabularx}
@@ -119,7 +123,7 @@ PyTorch class:
 \code{env\_lib.kos\_env.register()} is deprecated; registration happens on
 import.
 
-\subsection{LineMsgEnv and WirelessCommEnv}
+\subsection{\texorpdfstring{\code{LineMsgEnv} and \code{WirelessCommEnv}}{LineMsgEnv and WirelessCommEnv}}
 
 Modules \pkg{env\_lib.linemsg\_env} and \pkg{env\_lib.wireless\_comm\_env};
 Chapter~\ref{chap:networked}.
@@ -143,7 +147,7 @@ agent \code{(i, j)} (or \code{(None, None)}), and
 is \code{True} unless exactly one agent uses the access point.
 \code{env\_lib.wireless\_comm\_env.register()} is deprecated.
 
-\subsection{PistonballEnv}
+\subsection{\texorpdfstring{\code{PistonballEnv}}{PistonballEnv}}
 
 Module \pkg{env\_lib.pistonball\_env}; Chapter~\ref{chap:pistonball}. Requires
 the \code{pistonball} extra.
@@ -165,7 +169,7 @@ ManualPolicy(env, agent_id=0, show_obs=False)
     \toprule
     Member & Description \\
     \midrule
-    \code{observable\_mask(ball\_x=None) -> np.ndarray} & Boolean \code{(n\_pistons,)} mask of the pistons within \code{kappa} of the piston under the ball. \\
+    \code{observable\_mask(ball\_x=None)} & Boolean \code{(n\_pistons,)} mask of the pistons within \code{kappa} of the piston under the ball. \\
     \code{get\_local\_reward\_for\_piston(i, prev\_x, curr\_x)} & Reference implementation of one piston's local reward. \\
     \code{get\_local\_reward(prev\_position, curr\_position)} & The ball term of the local reward. \\
     \code{renderer} & The \code{PistonballRenderer}, or \code{None} before the first \code{render()}. \\
@@ -182,7 +186,7 @@ it returns a joint action in which the selected piston follows the keys
 or closes the window. The module also exports \code{PistonballLayout} (screen
 geometry) and \code{PistonballRenderer} (the pygame renderer).
 
-\subsection{ConsensusEnv}
+\subsection{\texorpdfstring{\code{ConsensusEnv}}{ConsensusEnv}}
 
 Module \pkg{env\_lib.consensus\_env}; Chapter~\ref{chap:consensus}.
 
@@ -228,7 +232,7 @@ DYNAMICS = ('single', 'double')
 FORMATION_SHAPES = ('circle', 'line', 'grid', 'wedge')
 \end{pycode}
 
-\subsection{AJLATTEnv and AJLATTConfig}
+\subsection{\texorpdfstring{\code{AJLATTEnv} and \code{AJLATTConfig}}{AJLATTEnv and AJLATTConfig}}
 
 Module \pkg{env\_lib.ajlatt\_env}; Chapter~\ref{chap:ajlatt}.
 
@@ -260,13 +264,13 @@ names with a warning.
     \midrule
     \multicolumn{2}{@{}l}{\emph{AJLATTEnv}} \\
     \code{single\_action\_space}, \code{single\_observation\_space} & Per-robot spaces; the joint spaces have a leading \code{num\_robots} axis. \\
-    \code{observation\_layout() -> dict[str, slice]} & Slices of the per-robot observation vector. \\
-    \code{episode\_statistics() -> dict[str, np.ndarray]} & Per-step traces of the current episode (\code{robot\_cov\_trace}, \code{target\_cov\_trace}, \code{robot\_error}, \code{target\_error}, \code{reward}), each \code{(steps + 1, num\_robots)}. \\
+    \code{observation\_layout()} & Dictionary of slices of the per-robot observation vector. \\
+    \code{episode\_statistics()} & Dictionary of per-step traces of the current episode (\code{robot\_cov\_trace}, \code{target\_cov\_trace}, \code{robot\_error}, \code{target\_error}, \code{reward}), each \code{(steps + 1, num\_robots)}. \\
     \code{config}, \code{MAP} & The configuration and the loaded \code{GridMap}. \\
     \midrule
     \multicolumn{2}{@{}l}{\emph{AJLATTConfig}} \\
     \code{from\_kwargs(strict=True, **kwargs)} & Build from keyword arguments, translating legacy names. \\
-    \code{add\_arguments(parser, prefix="")} & Register every scalar field as \code{--<prefix><name>} on an \pkg{argparse} parser. \\
+    \code{add\_arguments(parser, prefix="")} & Register every scalar field as \code{-{}-<prefix><name>} on an \pkg{argparse} parser. \\
     \code{from\_namespace(namespace, prefix="", strict=False)} & Build from parsed arguments. \\
     \code{to\_dict()}, \code{from\_dict(data, strict=True)} & Plain-dictionary round trip. \\
     \code{replace(**changes)} & Validated copy with some fields replaced. \\
@@ -295,12 +299,12 @@ MAP_DIR                                   # directory of the bundled maps
     \toprule
     \code{GridMap} method & Description \\
     \midrule
-    \code{is\_blocked(start\_pos, end\_pos) -> bool} & Whether the straight line between two positions crosses an obstacle. \\
+    \code{is\_blocked(start\_pos, end\_pos)} & Whether the straight line between two positions crosses an obstacle. \\
     \code{is\_blocked\_batch(start\_pos, end\_pos)} & Vectorised \code{is\_blocked} for arrays of shape \code{(n, 2)} or \code{(n, 3)}. \\
     \code{get\_closest\_obstacle(odom, ang\_res=0.05, fov=pi, r\_max=3.0, return\_pt=False)} & Range and bearing of the closest obstacle cell in a field of view. \\
     \code{get\_front\_obstacle(odom, r\_max=3.0)} & Range to the first obstacle straight ahead, or \code{None}. \\
-    \code{is\_collision(pos, margin=None) -> bool} & Out of bounds or within \code{margin} of an occupied cell. \\
-    \code{in\_bound(pos) -> bool} & At least \code{margin2wall} inside the map boundary. \\
+    \code{is\_collision(pos, margin=None)} & Out of bounds or within \code{margin} of an occupied cell. \\
+    \code{in\_bound(pos)} & At least \code{margin2wall} inside the map boundary. \\
     \code{se2\_to\_cell(pos)}, \code{cell\_to\_se2(cell)} & Conversions between positions and cell indices. \\
     \bottomrule
   \end{tabularx}
@@ -313,7 +317,7 @@ The submodules \pkg{maps.builder} (\code{build\_map}, \code{rasterize},
 \code{bresenham\_batch}, \code{se2\_to\_cell}, \code{cell\_to\_se2} and
 \code{coord\_change2g} are exported as well.
 
-\section{env\_lib.utils}\label{sec:api-utils}
+\section{\texorpdfstring{\pkg{env\_lib.utils}}{env\_lib.utils}}\label{sec:api-utils}
 
 \begin{pycode}
 record_episode(env, policy=None, path=None, *, max_steps=None, seed=None,
@@ -348,7 +352,7 @@ artists once) and \code{\_update(...)} (update their data), and users call
 \code{figure\_to\_rgb}, \code{style\_axes} and \code{with\_alpha} are helpers
 for custom renderers.
 
-\section{toolkit.plotkit}\label{sec:api-plotkit}
+\section{\texorpdfstring{\pkg{toolkit.plotkit}}{toolkit.plotkit}}\label{sec:api-plotkit}
 
 Chapter~\ref{chap:plotkit}. All plot functions return the
 \code{matplotlib.axes.Axes} they drew on.
@@ -366,7 +370,7 @@ plot_learning_curves(runs, x=None, *, band='ci95', smoothing=None, colors=None,
 plot_line(x, y, labels=None, colors=None, ax=None, figsize=(10, 6), title=None,
           xlabel=None, ylabel=None, legend=True, grid=True, style='research',
           **kwargs)
-plot_scatter(x, y, ...same arguments as plot_line...)
+plot_scatter(x, y, labels=None, ...)       # same arguments as plot_line
 plot_bar(x, height, labels=None, colors=None, ax=None, figsize=(10, 6),
          title=None, xlabel=None, ylabel=None, legend=True, grid=True,
          style='research', *, width=0.8, yerr=None, value_labels=False,
@@ -392,7 +396,7 @@ set_research_style()
 reset_style()
 get_palette(name='research', n=None) -> list[str]
 
-STYLE_PRESETS                  # read-only: 'research', 'presentation', 'minimal', 'default'
+STYLE_PRESETS          # read-only; 'research', 'presentation', 'minimal', 'default'
 RESEARCH_COLORS, RESEARCH_COLOR_LIST          # tab10, dict and list
 OKABE_ITO_COLORS, OKABE_ITO_COLOR_LIST        # colour-blind-safe, dict and list
 \end{pycode}
@@ -402,7 +406,7 @@ OKABE_ITO_COLORS, OKABE_ITO_COLOR_LIST        # colour-blind-safe, dict and list
 module \pkg{toolkit.plotkit.core} re-exports the same names for code written
 against earlier versions.
 
-\section{toolkit.neural\_toolkit}\label{sec:api-neural}
+\section{\texorpdfstring{\pkg{toolkit.neural\_toolkit}}{toolkit.neural\_toolkit}}\label{sec:api-neural}
 
 Chapter~\ref{chap:neural}. Requires PyTorch. All networks are
 \code{torch.nn.Module} subclasses; the shapes are given in
@@ -416,8 +420,8 @@ build_mlp(input_dim, hidden_dims, output_dim=None, activation='relu',
           dropout=0.0, layer_norm=False, output_activation=None,
           bias=True) -> nn.Sequential
 PositionalEncoding(d_model, dropout=0.1, max_len=5000)
-ACTIVATION_NAMES          # ('elu', 'gelu', 'identity', 'leaky_relu', 'mish', 'relu',
-                          #  'sigmoid', 'silu', 'softplus', 'swish', 'tanh')
+ACTIVATION_NAMES   # ('elu', 'gelu', 'identity', 'leaky_relu', 'mish', 'relu',
+                   #  'sigmoid', 'silu', 'softplus', 'swish', 'tanh')
 \end{pycode}
 
 \subsection{Policy and value networks}
@@ -505,18 +509,18 @@ VariationalDecoder(latent_dim, output_dim, hidden_dims=(256, 256),
 \subsection{Factories}
 
 \begin{pycode}
-PolicyFactory.create_policy(policy_type, **kwargs)            # mlp cnn rnn transformer
-ValueFactory.create_value_network(network_type, **kwargs)     # mlp cnn rnn transformer
-QNetworkFactory.create_q_network(network_type, **kwargs)      # + dueling
-EncoderFactory.create_encoder(encoder_type, **kwargs)         # + vae
-DecoderFactory.create_decoder(decoder_type, **kwargs)         # + vae
+PolicyFactory.create_policy(policy_type, **kwargs)         # mlp cnn rnn transformer
+ValueFactory.create_value_network(network_type, **kwargs)  # mlp cnn rnn transformer
+QNetworkFactory.create_q_network(network_type, **kwargs)   # + dueling
+EncoderFactory.create_encoder(encoder_type, **kwargs)      # + vae
+DecoderFactory.create_decoder(decoder_type, **kwargs)      # + vae
 \end{pycode}
 
 The abstract base classes \code{BasePolicyNetwork}, \code{BaseValueNetwork},
 \code{BaseQNetwork}, \code{BaseEncoder} and \code{BaseDecoder} are exported
 for subclassing and type checks.
 
-\subsection{NetworkUtils}
+\subsection{\texorpdfstring{\code{NetworkUtils}}{NetworkUtils}}
 
 All methods are static; Table~\ref{tab:neural-utils} describes them.
 
@@ -588,7 +592,7 @@ DiscreteTools.thompson_sampling_policy(q_table, state, visit_counts,
                                        prior_alpha=1.0, prior_beta=1.0) -> int
 \end{pycode}
 
-\section{toolkit.parakit}\label{sec:api-parakit}
+\section{\texorpdfstring{\pkg{toolkit.parakit}}{toolkit.parakit}}\label{sec:api-parakit}
 
 Chapter~\ref{chap:toolkit}, Section~\ref{sec:parakit}.
 

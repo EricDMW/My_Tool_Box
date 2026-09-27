@@ -21,8 +21,8 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-from gymnasium.error import ResetNeeded
 
+from env_lib.errors import ResetNeededError
 from env_lib.kos_env._common import (
     KuramotoEnvBase,
     combine_reward,
@@ -327,7 +327,7 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
             ``agent_rewards`` (shape ``(n_agents,)``).
         """
         if self.phases is None:
-            raise ResetNeeded("Call reset() before step().")
+            raise ResetNeededError("Call reset() before step().")
         action = np.asarray(action, dtype=np.float64)
         if action.shape != self.action_space.shape:
             raise ValueError(

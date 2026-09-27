@@ -40,6 +40,7 @@ from gymnasium.spaces import Box, MultiDiscrete
 from gymnasium.utils import EzPickle, seeding
 from numpy.lib.stride_tricks import sliding_window_view
 
+from env_lib.errors import ResetNeededError
 from env_lib.utils.rendering import validate_render_mode
 
 __all__ = [
@@ -375,7 +376,9 @@ class WirelessCommEnv(Env, EzPickle):
         """
         state = self.state
         if state is None:
-            raise RuntimeError("WirelessCommEnv.step() called before reset(); call reset() first.")
+            raise ResetNeededError(
+                "WirelessCommEnv.step() called before reset(); call reset() first."
+            )
         act = self._validate_action(action)
         n_agents = self.n_agents
 
@@ -458,7 +461,7 @@ class WirelessCommEnv(Env, EzPickle):
                 self._warned_no_render = True
             return None
         if self.state is None or self.actions is None:
-            raise RuntimeError(
+            raise ResetNeededError(
                 "WirelessCommEnv.render() called before reset(); call reset() first."
             )
         if self.render_mode == "ansi":
@@ -521,7 +524,7 @@ class WirelessCommEnv(Env, EzPickle):
     def _get_obs(self) -> np.ndarray:
         """Stack the flattened ``(ddl, w, w)`` windows of all agents as float32."""
         if self.state is None:
-            raise RuntimeError("WirelessCommEnv has no state; call reset() first.")
+            raise ResetNeededError("WirelessCommEnv has no state; call reset() first.")
         if self._window_base is not self.state:
             view = sliding_window_view(self.state, (self.window, self.window), axis=(1, 2))
             # (ddl, grid_x, grid_y, w, w) -> (grid_x, grid_y, ddl, w, w)

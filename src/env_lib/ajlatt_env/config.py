@@ -289,7 +289,9 @@ class AJLATTConfig:
         return [f.name for f in fields(cls)]
 
     @classmethod
-    def from_kwargs(cls, strict: bool = True, **kwargs: Any) -> AJLATTConfig:
+    def from_kwargs(
+        cls, strict: bool = True, *, _stacklevel: int = 2, **kwargs: Any
+    ) -> AJLATTConfig:
         """Build a config from keyword arguments, accepting legacy names.
 
         Parameters
@@ -311,7 +313,7 @@ class AJLATTConfig:
             warnings.warn(
                 "AJLATT parameter 'fix_seed' is deprecated; pass seed=<int> (or reset(seed=...))",
                 DeprecationWarning,
-                stacklevel=3,
+                stacklevel=_stacklevel,
             )
         for key, value in kwargs.items():
             if key in known:
@@ -321,7 +323,7 @@ class AJLATTConfig:
                 warnings.warn(
                     f"AJLATT parameter {key!r} is deprecated; use {new!r}",
                     DeprecationWarning,
-                    stacklevel=3,
+                    stacklevel=_stacklevel,
                 )
                 values.setdefault(new, value)
             elif key == "maxmum_run":
@@ -330,12 +332,12 @@ class AJLATTConfig:
                 warnings.warn(
                     f"AJLATT parameter {key!r} no longer has any effect and is ignored",
                     DeprecationWarning,
-                    stacklevel=3,
+                    stacklevel=_stacklevel,
                 )
             elif strict:
                 raise TypeError(f"Unknown AJLATT parameter {key!r}")
             else:
-                warnings.warn(f"Ignoring unknown AJLATT parameter {key!r}", stacklevel=3)
+                warnings.warn(f"Ignoring unknown AJLATT parameter {key!r}", stacklevel=_stacklevel)
         for key in ("range_noise_proportional", "use_update", "process_noise_fixed"):
             if key in values:
                 values[key] = bool(values[key])
@@ -378,7 +380,7 @@ class AJLATTConfig:
             key = f"{prefix}{name}"
             if hasattr(namespace, key):
                 values[name] = getattr(namespace, key)
-        return cls.from_kwargs(strict=strict, **values)
+        return cls.from_kwargs(strict=strict, _stacklevel=3, **values)
 
     def to_dict(self) -> dict[str, Any]:
         """Plain-dict representation (tuples of poses converted to lists)."""
@@ -395,7 +397,7 @@ class AJLATTConfig:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any], strict: bool = True) -> AJLATTConfig:
         """Inverse of :meth:`to_dict` (legacy names accepted)."""
-        return cls.from_kwargs(strict=strict, **dict(data))
+        return cls.from_kwargs(strict=strict, _stacklevel=3, **dict(data))
 
 
 def _str2bool(text: str) -> bool:

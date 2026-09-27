@@ -187,7 +187,7 @@ coordinated ramps; a light, bouncy ball (\code{ball\_mass=0.5},
 \code{"agent\_rewards"} (both the \code{float64} local rewards $r_i$, shape
 \code{(n,)}) and \code{"total\_reward"} (their sum, equal to the returned
 reward). The info dictionary of \code{reset()} is empty. \code{step()} before
-\code{reset()} raises \code{RuntimeError}.
+\code{reset()} raises \code{env\_lib.ResetNeededError}.
 
 % ---------------------------------------------------------------------------
 \section{Keyboard control}\label{sec:pistonball-manual}

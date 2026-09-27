@@ -92,7 +92,7 @@ from .networks.value_networks import (
 )
 from .utils.network_utils import NetworkUtils
 
-__author__ = "Neural Toolkit Team"
+__author__ = "Dongming Wang"
 
 __all__ = [
     "__version__",

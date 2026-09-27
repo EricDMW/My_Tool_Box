@@ -85,12 +85,21 @@ Every function converts its data inputs with the same rules:
     is \emph{one} series.
   \item A list or tuple of array-likes is \emph{several} series, one per
     element; the elements may have different lengths.
-  \item A 2-D array is read by the function: \code{plot\_shadow\_curve} reads
-    it as \emph{samples of one curve} along \code{axis} (default: rows are
-    samples such as seeds, columns are steps); \code{plot\_line},
-    \code{plot\_scatter}, \code{plot\_bar} and \code{plot\_histogram} read it
-    as \code{(n\_series, n\_points)}.
-  \item A pandas \code{DataFrame} contributes one series per column.
+  \item A 2-D array is read by the function: \code{plot\_shadow\_curve} and
+    \code{plot\_learning\_curves} read it as \emph{samples of one curve}
+    (by default rows are samples such as seeds and columns are steps);
+    \code{plot\_line}, \code{plot\_scatter}, \code{plot\_bar} and
+    \code{plot\_histogram} read it as \code{(n\_series, n\_points)}. For
+    compatibility with matplotlib's \code{ax.plot(x, Y)}, \code{plot\_line}
+    reads a 2-D array whose columns, but not rows, have \code{len(x)} points as
+    one series per column.
+  \item A pandas \code{DataFrame} contributes one series per column, except in
+    \code{plot\_shadow\_curve} and \code{plot\_learning\_curves}, where it is
+    a sample matrix like a 2-D array (rows are samples).
+  \item Dates and times (\code{datetime}, pandas \code{Timestamp}, NumPy
+    \code{datetime64}) are valid x values and are drawn on a date axis;
+    durations (\code{timedelta}, \code{timedelta64}) are converted to seconds.
+    Dates used as bar categories are labelled in ISO format.
   \item pandas \code{Series}, PyTorch tensors (on any device, with or without
     \code{requires\_grad}), TensorFlow eager tensors and JAX arrays are
     converted to NumPy automatically. Masked arrays become NaN.
@@ -134,7 +143,7 @@ plot functions (the heatmap functions have no \code{labels}, \code{colors},
 
 \section{Curves with uncertainty bands}\label{sec:plotkit-curves}
 
-\subsection{plot\_shadow\_curve}
+\subsection{\texorpdfstring{\code{plot\_shadow\_curve}}{plot\_shadow\_curve}}
 
 % norun
 \begin{pycode}
@@ -216,7 +225,7 @@ result equals \code{pandas.Series(y).ewm(alpha=1 - beta).mean()}. Non-finite
 values are skipped. Note that smoothing the band edges does not turn them into a
 confidence band of the smoothed curve; it is a visual aid.
 
-\subsection{plot\_learning\_curves}
+\subsection{\texorpdfstring{\code{plot\_learning\_curves}}{plot\_learning\_curves}}
 
 % norun
 \begin{pycode}
@@ -241,7 +250,7 @@ several series with the input rules of Section~\ref{sec:plotkit-inputs}.
 given; passing per-point values \code{c=...} (for a colormap)
 disables the series colour.
 
-\subsection{plot\_bar}
+\subsection{\texorpdfstring{\code{plot\_bar}}{plot\_bar}}
 
 % norun
 \begin{pycode}
@@ -263,8 +272,8 @@ plot_bar(x, height, labels=None, colors=None, ax=None, figsize=(10, 6),
     \code{x} & required & Category labels (strings or numbers), or \code{None} for the indices. Bars are placed at \code{0, \ldots, n\_categories - 1}. \\
     \code{height} & required & One series (1-D), a list of series, or a 2-D array \code{(n\_series, n\_categories)}. Several series are grouped side by side. \\
     \code{width} & \code{0.8} & Total width of a group in category units; each bar is \code{width / n\_series} wide. \\
-    \code{yerr} & \code{None} & Error bars: a scalar, one array per series (or one shared array), or a \code{(2, n\_categories)} array of lower and upper errors for a single series. \\
-    \code{value\_labels} & \code{False} & Annotate the bars: \code{True} (format \code{".3g"}), a format string such as \code{".1f"}, \code{"\{:.1\%\}"} or \code{"\%.2f"}, or a callable. \\
+    \code{yerr} & \code{None} & Error bars: a scalar, one array per series (or one shared array), or the lower and upper errors of a single series as a \code{(2, n\_categories)} array or a pair of lists. \\
+    \code{value\_labels} & \code{False} & Annotate the bars: \code{True} (format \code{".3g"}), a format spec such as \code{".1f"} or \code{"d"}, a template such as \code{"\{:.1\%\}"}, a printf-style format such as \code{"\%.2f"}, or a callable. \\
     \code{horizontal} & \code{False} & Horizontal bars, first category at the top. \\
     \code{capsize} & \code{3.0} & Error-bar cap size in points. \\
     \code{colors} & \code{None} & As usual; for a single series a list with one colour per category colours each bar. \\
@@ -272,13 +281,14 @@ plot_bar(x, height, labels=None, colors=None, ax=None, figsize=(10, 6),
   \end{tabularx}
 \end{table}
 
-\subsection{plot\_histogram}
+\subsection{\texorpdfstring{\code{plot\_histogram}}{plot\_histogram}}
 
 \code{plot\_histogram(data, bins="auto", ...)} overlays one histogram per
 series; its keyword-only arguments are \code{density=False},
 \code{alpha=0.45} and \code{histtype="stepfilled"}. The bin
 edges are computed once from the pooled data (\code{numpy.histogram\_bin\_edges})
-so that all series share the same bins; NaN and infinite values are dropped.
+so that all series share the same bins; NaN and infinite values are dropped,
+and \code{range=(lo, hi)} restricts the shared bins as in matplotlib.
 \code{density=True} normalises each histogram to unit area, and the default
 y-label is \code{"Density"} or \code{"Count"} accordingly. For the filled
 types the fill uses \code{alpha} while the outline stays opaque.
@@ -312,7 +322,7 @@ work unchanged.
     \code{xlabels}, \code{ylabels} & \code{None} & One tick label per column / row. \code{None} labels cells with their index (up to 30 cells, otherwise automatic integer ticks); \code{False} hides the ticks. Long x labels are rotated. seaborn's \code{xticklabels} / \code{yticklabels} are aliases. \\
     \code{cmap} & \code{"viridis"} & Colormap name or object; use a diverging map (\code{"RdBu\_r"}) with \code{center}. \\
     \code{annot} & \code{False} & \code{True} writes each value into its cell; an array of the same shape writes its entries instead. Text is black or white, whichever contrasts better with the cell colour. \\
-    \code{fmt} & \code{None} & Annotation format (\code{".2g"}, \code{"\{:.1\%\}"}, \code{"\%.2f"} or a callable). Default \code{".0f"} for integer-valued data, else \code{".2g"}. \\
+    \code{fmt} & \code{None} & Annotation format: a format spec (\code{".2g"}, \code{"d"}), a template (\code{"\{:.1\%\}"}), a printf-style format (\code{"\%.2f"}) or a callable. Default \code{".0f"} when all numeric annotations are whole numbers, else \code{".2g"}. \\
     \code{cbar}, \code{cbar\_label} & \code{True}, \code{None} & Colorbar and its label (also \code{cbar\_kws=\{"label": ...\}}). The colorbar is available as \code{ax.images[-1].colorbar}. \\
     \code{vmin}, \code{vmax} & \code{None} & Colour limits (default: data range). \\
     \code{center} & \code{None} & Value mapped to the middle of the colormap; missing limits are chosen symmetrically around it. \\
@@ -636,7 +646,8 @@ suits logs read with \code{pandas.read\_csv}.
 import torch
 from toolkit.plotkit import plot_line
 
-losses = torch.rand(3, 100, requires_grad=True).cumsum(dim=1)   # (n_series, n_points)
+# three series of 100 points, shape (n_series, n_points)
+losses = torch.rand(3, 100, requires_grad=True).cumsum(dim=1)
 ax = plot_line(None, losses, labels=["actor", "critic", "entropy"])
 \end{pycode}
 
@@ -646,9 +657,10 @@ The module is executable and shows every plot type with synthetic data. The
 same program is installed as the console script \code{plotkit-gallery}.
 
 \begin{shellcode}
-python -m toolkit.plotkit --demo all                    # all eight demos in one window
+python -m toolkit.plotkit --demo all        # all eight demos in one window
+# writes renders/plotkit/plotkit_heatmap.png and .pdf
 plotkit-gallery --demo heatmap --style presentation \
-    --save renders/plotkit --format png pdf             # renders/plotkit/plotkit_heatmap.*
+    --save renders/plotkit --format png pdf
 \end{shellcode}
 
 \begin{table}[htbp]
@@ -660,21 +672,21 @@ plotkit-gallery --demo heatmap --style presentation \
     \toprule
     Option & Default & Meaning \\
     \midrule
-    \code{--demo} & \code{all} & \code{shadow}, \code{learning}, \code{heatmap}, \code{grayscale}, \code{line}, \code{bar}, \code{scatter}, \code{histogram}, or \code{all} for a $2 \times 4$ grid of all demos. \\
-    \code{--style} & \code{research} & Style preset. \\
-    \code{--save DIR} & none & Save to \code{DIR/plotkit\_<demo>.<format>} instead of showing a window. \\
-    \code{--format} & \code{png} & One or more output formats. \\
-    \code{--dpi} & \code{150} & Resolution of raster output. \\
-    \code{--seed} & \code{0} & Seed of the synthetic data. \\
+    \code{-{}-demo} & \code{all} & \code{shadow}, \code{learning}, \code{heatmap}, \code{grayscale}, \code{line}, \code{bar}, \code{scatter}, \code{histogram}, or \code{all} for a $2 \times 4$ grid of all demos. \\
+    \code{-{}-style} & \code{research} & Style preset. \\
+    \code{-{}-save DIR} & none & Save to \code{DIR/plotkit\_<demo>.<format>} instead of showing a window. \\
+    \code{-{}-format} & \code{png} & One or more output formats. \\
+    \code{-{}-dpi} & \code{150} & Resolution of raster output. \\
+    \code{-{}-seed} & \code{0} & Seed of the synthetic data. \\
     \bottomrule
   \end{tabularx}
 \end{table}
 
-Without \code{--save} the figure is shown with \code{plt.show()}; when the
+Without \code{-{}-save} the figure is shown with \code{plt.show()}; when the
 active matplotlib backend is non-interactive (for example with
 \code{MPLBACKEND=Agg}), the figure is saved to \code{renders/plotkit/}
 instead. The script \code{examples/plotkit\_gallery.py} builds the
 three-panel figure of Figure~\ref{fig:plotkit-gallery} and is a good starting
-point for a paper figure; run it with \code{--help} for its options.
+point for a paper figure; run it with \code{-{}-help} for its options.
 
 \par\endgroup

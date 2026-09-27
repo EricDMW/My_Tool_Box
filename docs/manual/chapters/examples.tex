@@ -15,7 +15,7 @@ contributors.
 \section{Example scripts}\label{sec:examples-catalogue}
 
 The directory \code{examples/} contains runnable, documented scripts. Every
-script has a \code{--help} option, a module docstring that explains what it
+script has a \code{-{}-help} option, a module docstring that explains what it
 demonstrates, and a \code{main()} function. Media files are written to
 \code{renders/} (relative to the working directory), which Git ignores. Run
 the scripts from the repository root after installing the package with the
@@ -30,11 +30,11 @@ extras they need (\code{pip install ".[all]"} covers all of them).
     \toprule
     Script & What it shows \\
     \midrule
-    \code{quickstart.py} & Creates every registered environment with \code{env\_lib.make}, takes a few random steps and prints the observation shape and return; \code{--render DIR} saves one frame per environment. \\
-    \code{kuramoto\_demo.py} & Drives an oscillator network to synchronisation with a phase-alignment controller and a coupling ramp; NumPy or batched PyTorch backend (\code{--backend}), several topologies. \\
-    \code{linemsg\_demo.py} & Compares random, duty-cycled and always-relay policies on LineMsg (\code{--policy} selects the one to show or record). \\
+    \code{quickstart.py} & Creates every registered environment with \code{env\_lib.make}, takes a few random steps and prints the observation shape and return; \code{-{}-render DIR} saves one PNG frame per environment. \\
+    \code{kuramoto\_demo.py} & Drives an oscillator network to synchronisation with a phase-alignment controller and a coupling ramp; NumPy or batched PyTorch backend (\code{-{}-backend}), several topologies. \\
+    \code{linemsg\_demo.py} & Compares random, duty-cycled and always-relay policies on LineMsg (\code{-{}-policy} selects the one to show or record). \\
     \code{wireless\_comm\_demo.py} & Compares random access, slotted ALOHA and a collision-free rotating schedule on WirelessComm. \\
-    \code{pistonball\_demo.py} & Compares a hand-written heuristic with random actions; \code{--manual} enables keyboard control in a window. \\
+    \code{pistonball\_demo.py} & Compares a hand-written heuristic with random actions; \code{-{}-manual} enables keyboard control in a window. \\
     \code{consensus\_demo.py} & Compares random actions with the distributed Laplacian controller for consensus or formation control on any topology. \\
     \code{ajlatt\_demo.py} & Compares random actions with an encircling heuristic for multi-robot target tracking and reports tracking error, covariance and collisions. \\
     \bottomrule
@@ -46,23 +46,23 @@ extras they need (\code{pip install ".[all]"} covers all of them).
   \small
   \caption{Toolkit examples.}
   \label{tab:examples-toolkit}
-  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{4.9cm}>{\raggedright\arraybackslash}X@{}}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{5.5cm}>{\raggedright\arraybackslash}X@{}}
     \toprule
     Script & What it shows \\
     \midrule
     \code{plotkit\_gallery.py} & The three-panel paper figure of Figure~\ref{fig:plotkit-gallery}: learning curves with confidence bands, grouped bars and a sweep heatmap, saved as PDF and PNG. \\
-    \code{parakit\_demo.py} & Saving, loading and applying \pkg{argparse} parameters with validation callbacks; \code{--gui} opens the Tk editor, \code{--load} reads a file or directory, \code{--set KEY=VALUE} overrides one value. \\
+    \code{parakit\_demo.py} & Saving, loading and applying \pkg{argparse} parameters with validation callbacks; \code{-{}-gui} opens the Tk editor, \code{-{}-load} reads a file or directory, \code{-{}-set KEY=VALUE} overrides one value. \\
     \code{simple\_transformer\_example.py} & A \code{TransformerPolicyNetwork} trained with REINFORCE on a small memory task (requires PyTorch). \\
-    \code{transformer\_rl\_example.py} & PPO with transformer actor and critic networks on batched environments (requires PyTorch; \code{--device auto} uses a GPU when available). \\
+    \code{transformer\_rl\_example.py} & PPO with transformer actor and critic networks on batched environments (requires PyTorch; \code{-{}-device auto} uses a GPU when available). \\
     \bottomrule
   \end{tabularx}
 \end{table}
 
-The environment examples share a set of options: \code{--seed}, \code{--steps}
-(the episode length), \code{--episodes} (evaluation episodes per policy),
-\code{--save PATH} (record an episode; the suffix \code{.gif} or \code{.mp4}
-selects the format), \code{--render-mode} (\code{human} opens a window) and
-\code{--theme dark|light}. The transformer examples accept \code{--quick} for
+The environment examples share a set of options: \code{-{}-seed}, \code{-{}-steps}
+(the episode length), \code{-{}-episodes} (evaluation episodes per policy),
+\code{-{}-save PATH} (record an episode; the suffix \code{.gif} or \code{.mp4}
+selects the format), \code{-{}-render-mode} (\code{human} opens a window) and
+\code{-{}-theme dark|light}. The transformer examples accept \code{-{}-quick} for
 a run of a few seconds, used as a smoke test in continuous integration.
 
 \begin{shellcode}
@@ -71,7 +71,7 @@ python examples/kuramoto_demo.py --topology ring --save renders/kuramoto.gif
 python examples/linemsg_demo.py --policy relay --save renders/linemsg.gif
 python examples/wireless_comm_demo.py --policy schedule --save renders/wireless.gif
 python examples/pistonball_demo.py --episodes 20 --save renders/pistonball.gif
-python examples/consensus_demo.py --task formation --shape wedge --save renders/formation.gif
+python examples/consensus_demo.py --task formation --save renders/formation.gif
 python examples/ajlatt_demo.py --map obstacles05 --save renders/ajlatt.gif
 python examples/plotkit_gallery.py --formats pdf png
 python examples/simple_transformer_example.py --quick
@@ -182,7 +182,7 @@ forever).
 import env_lib
 from env_lib.utils import record_episode, save_animation, set_theme
 
-set_theme("light")                  # renderers created from now on use the light theme
+set_theme("light")          # renderers created from now on use the light theme
 env = env_lib.ConsensusEnv(task="formation", formation_shape="wedge",
                            render_mode="rgb_array")
 frames = record_episode(env, policy=lambda obs: env.laplacian_policy(),
@@ -244,11 +244,11 @@ python benchmarks/benchmark_envs.py --markdown > renders/benchmarks.md
     \toprule
     Option & Default & Meaning \\
     \midrule
-    \code{--steps} & \code{300} & Timed steps per case. \\
-    \code{--render-steps} & \code{40} & Timed rendered steps per case; \code{0} skips the rendering measurement. \\
-    \code{--seed} & \code{0} & Seed of the environment and of the action space. \\
-    \code{--only} & all & Subset of the groups \code{kuramoto}, \code{linemsg}, \code{wireless}, \code{pistonball}, \code{consensus}, \code{ajlatt}. \\
-    \code{--markdown} & off & Print a Markdown table instead of plain text. \\
+    \code{-{}-steps} & \code{300} & Timed steps per case. \\
+    \code{-{}-render-steps} & \code{40} & Timed rendered steps per case; \code{0} skips the rendering measurement. \\
+    \code{-{}-seed} & \code{0} & Seed of the environment and of the action space. \\
+    \code{-{}-only} & all & Subset of the groups \code{kuramoto}, \code{linemsg}, \code{wireless}, \code{pistonball}, \code{consensus}, \code{ajlatt}. \\
+    \code{-{}-markdown} & off & Print a Markdown table instead of plain text. \\
     \bottomrule
   \end{tabularx}
 \end{table}
@@ -345,15 +345,15 @@ jobs:
 
 \begin{description}[leftmargin=0.6cm,style=nextline]
   \item[\code{lint}] On Python 3.11: \code{ruff check} and
-    \code{ruff format --check} on \code{src}, \code{tests}, \code{examples} and
+    \code{ruff format -{}-check} on \code{src}, \code{tests}, \code{examples} and
     \code{benchmarks}.
   \item[\code{test}] On Python 3.9, 3.10, 3.11 and 3.12 with
     \code{MPLBACKEND=Agg} and \code{SDL\_VIDEODRIVER=dummy}: installs the CPU
     build of PyTorch and the package with the \code{pistonball}, \code{video}
     and \code{dev} extras, runs \code{pytest -q}, and smoke-tests the examples
-    with \code{python examples/quickstart.py --steps 5},
-    \code{python examples/simple\_transformer\_example.py --quick --no-plot}
-    and \code{python benchmarks/benchmark\_envs.py --steps 20 --render-steps 2}.
+    with \code{python examples/quickstart.py -{}-steps 5},
+    \code{python examples/simple\_transformer\_example.py -{}-quick -{}-no-plot}
+    and \code{python benchmarks/benchmark\_envs.py -{}-steps 20 -{}-render-steps 2}.
 \end{description}
 
 Running the same commands locally before opening a pull request avoids
@@ -389,10 +389,15 @@ Contributions follow the conventions that the existing code relies on:
     decorative symbols.
 \end{itemize}
 
-A new environment is registered by adding an entry to \code{ENV\_SPECS} in
-\code{src/env\_lib/registration.py} (with a string entry point, so that
-registration does not import optional dependencies), exported lazily from
-\code{src/env\_lib/\_\_init\_\_.py}, tested in \code{tests/envs/}, demonstrated
-in \code{examples/} and documented in a chapter of this manual.
+A new environment needs the following additions:
+\begin{enumerate}
+  \item an entry in \code{ENV\_SPECS} in \code{src/env\_lib/registration.py},
+    with a string entry point so that registration does not import optional
+    dependencies;
+  \item a lazy export in \code{src/env\_lib/\_\_init\_\_.py};
+  \item tests in \code{tests/envs/} and an example script in
+    \code{examples/};
+  \item a chapter in this manual and an entry in \code{CHANGELOG.md}.
+\end{enumerate}
 
 \par\endgroup

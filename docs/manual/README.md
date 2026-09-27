@@ -32,7 +32,9 @@ runs until all cross references are resolved. Remove the build products with
 latexmk -C -outdir=output
 ```
 
-The `output/` directory is ignored by Git.
+The `output/` directory is ignored by Git. A pre-built copy of the manual is
+committed as `main.pdf`; after editing the sources, rebuild and copy
+`output/main.pdf` over it.
 
 ## Structure
 

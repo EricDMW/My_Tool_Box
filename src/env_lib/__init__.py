@@ -19,6 +19,7 @@ import importlib
 from typing import Any
 
 from env_lib._version import __version__
+from env_lib.errors import ResetNeededError
 from env_lib.registration import list_envs, make, register_envs
 
 register_envs()
@@ -49,6 +50,7 @@ _SUBPACKAGES = (
 )
 
 __all__: list[str] = [
+    "ResetNeededError",
     "__version__",
     "list_envs",
     "make",

@@ -86,6 +86,8 @@
 % \pkg{...}    package or module name.
 % \envid{...}  registered Gymnasium id.
 \newcommand{\code}[1]{\texttt{#1}}
+% Keep "--" in inline code as two hyphens (command-line options).
+\DisableLigatures[-]{family=tt*}
 \newcommand{\pkg}[1]{\textsf{#1}}
 \newcommand{\envid}[1]{\texttt{#1}}
 \newcommand{\figwidth}{0.95\textwidth}
@@ -115,7 +117,9 @@
 \begin{document}
 
 \frontmatter
+\hypersetup{pageanchor=false}
 \maketitle
+\hypersetup{pageanchor=true}
 \tableofcontents
 
 \mainmatter

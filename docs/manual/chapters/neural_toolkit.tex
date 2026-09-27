@@ -110,7 +110,7 @@ same classes.
     \code{B}: batch, \code{T}: sequence length, \code{A}: \code{action\_dim},
     \code{O}: \code{output\_dim}, \code{L}: \code{latent\_dim}.}
   \label{tab:neural-shapes}
-  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{5.3cm}>{\raggedright\arraybackslash}p{3.3cm}>{\raggedright\arraybackslash}X@{}}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{5.0cm}>{\raggedright\arraybackslash}p{4.1cm}>{\raggedright\arraybackslash}X@{}}
     \toprule
     Class (alias) & Input & Output \\
     \midrule
@@ -333,7 +333,8 @@ arguments of the constructor.
 \begin{pycode}
 from toolkit.neural_toolkit import PolicyFactory, QNetworkFactory
 
-policy = PolicyFactory.create_policy("mlp", input_dim=8, output_dim=4, hidden_dims=(64, 64))
+policy = PolicyFactory.create_policy("mlp", input_dim=8, output_dim=4,
+                                    hidden_dims=(64, 64))
 q_net = QNetworkFactory.create_q_network("dueling", state_dim=8, action_dim=4)
 \end{pycode}
 
@@ -347,7 +348,8 @@ q_net = QNetworkFactory.create_q_network("dueling", state_dim=8, action_dim=4)
   \small
   \caption{Static methods of \code{NetworkUtils}.}
   \label{tab:neural-utils}
-  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{6.2cm}>{\raggedright\arraybackslash}X@{}}
+  \renewcommand{\arraystretch}{1.05}%
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{6.5cm}>{\raggedright\arraybackslash}X@{}}
     \toprule
     Method & Description \\
     \midrule
@@ -503,7 +505,7 @@ import numpy as np
 from toolkit.neural_toolkit import DiscreteEnvironment, DiscreteTools
 
 class Chain(DiscreteEnvironment):
-    """States 0..n-1; action 1 moves right, 0 moves left; reward 1 at the right end."""
+    """Chain 0..n-1: action 1 moves right, 0 moves left; reward 1 at the end."""
 
     def reset(self):
         self.current_state = 0
@@ -511,8 +513,9 @@ class Chain(DiscreteEnvironment):
 
     def step(self, action):
         move = 1 if action == 1 else -1
-        self.current_state = int(np.clip(self.current_state + move, 0, self.state_space_size - 1))
-        done = self.current_state == self.state_space_size - 1
+        last = self.state_space_size - 1
+        self.current_state = int(np.clip(self.current_state + move, 0, last))
+        done = self.current_state == last
         return self.current_state, float(done), done, {}
 
 env = Chain(state_space_size=6, action_space_size=2, rng=0)
@@ -573,7 +576,7 @@ for step in range(4000):
         with torch.no_grad():
             action = int(q_net(torch.as_tensor(obs.reshape(1, -1))).argmax())
     next_obs, reward, terminated, truncated, info = env.step(action)
-    buffer.append((obs.ravel(), action, reward, next_obs.ravel(), float(terminated)))
+    buffer.append((obs.ravel(), action, reward, next_obs.ravel(), terminated))
     obs = next_obs
     if terminated or truncated:
         obs, info = env.reset()
@@ -582,8 +585,9 @@ for step in range(4000):
         batch = [buffer[i] for i in rng.integers(len(buffer), size=64)]
         s, a, r, s2, done = (torch.as_tensor(np.array(x)) for x in zip(*batch))
         with torch.no_grad():
-            target = r.float() + 0.99 * (1.0 - done.float()) * target_net(s2).max(dim=1).values
-        loss = F.smooth_l1_loss(q_net(s, a), target)     # q_net(s, a) = Q(s, a), shape (B,)
+            next_q = target_net(s2).max(dim=1).values
+            target = r.float() + 0.99 * (1.0 - done.float()) * next_q
+        loss = F.smooth_l1_loss(q_net(s, a), target)   # q_net(s, a): Q(s, a), (B,)
         optimizer.zero_grad()
         loss.backward()
         NetworkUtils.clip_grad_norm(q_net, max_norm=10.0)
@@ -611,9 +615,14 @@ def evaluate(policy, episodes=10):
     return float(np.mean(returns))
 
 restored = MLPQNetwork(obs_dim, n_actions, hidden_dims=(64, 64))
-epoch, last_loss = NetworkUtils.load_checkpoint(restored, None, "checkpoints/dqn_linemsg.pt")
-with torch.no_grad():
-    greedy_return = evaluate(lambda o: int(restored(torch.as_tensor(o.reshape(1, -1))).argmax()))
+epoch, last_loss = NetworkUtils.load_checkpoint(restored, None,
+                                                "checkpoints/dqn_linemsg.pt")
+
+def greedy(obs):
+    with torch.no_grad():
+        return int(restored(torch.as_tensor(obs.reshape(1, -1))).argmax())
+
+greedy_return = evaluate(greedy)
 random_return = evaluate(lambda o: int(rng.integers(n_actions)))
 print(f"greedy {greedy_return:.1f}, random {random_return:.1f}")
 \end{pycode}

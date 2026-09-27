@@ -333,7 +333,7 @@ larger teams need explicit \code{robot\_init\_pose} and \code{robot\_init\_cov}
     \code{SIGPERCENT} & \code{range\_noise\_proportional} \\
     \code{useupdate} & \code{use\_update} \\
     \code{fix\_seed} & \code{seed} (\code{fix\_seed=True} sets \code{seed=1}) \\
-    \code{render=True} & \code{render\_mode="human"} (factory only) \\
+    \code{render=True} & \code{render\_mode="human"} \\
     obsolete keys (\code{figID}, \code{ssh\_debug}, \code{episode\_num}, \dots) & ignored with a warning \\
     \bottomrule
   \end{tabularx}
@@ -508,8 +508,10 @@ A static map consists of two files with the same name:
 \end{itemize}
 Cell $(c_x, c_y)$ has its centre at $(c + 0.5)\,r + $\code{mapmin}. A grid with
 fewer cells than its header declares is padded with occupied cells and a
-warning. Maps whose name contains \code{empty} are treated as obstacle-free and
-need no grid. A dynamic map has only a header, which defines
+warning. An empty (zero-byte) \code{.cfg} file denotes an obstacle-free map in
+which only the boundary blocks rays; a map whose name contains \code{empty} may
+omit the file altogether, while a missing grid for any other static map raises
+\code{FileNotFoundError}. A dynamic map has only a header, which defines
 \code{submaporigin} (four $(\text{row}, \text{column})$ cell anchors, flattened
 to eight numbers) and \code{lib\_path} (a directory of \code{.npy} obstacle
 masks relative to the header).

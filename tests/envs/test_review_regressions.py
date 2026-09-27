@@ -135,3 +135,40 @@ def test_linemsg_two_agents():
     obs, _ = env.reset(seed=0)
     assert obs.shape == (2, 3)
     env.step(3)
+
+
+@pytest.mark.parametrize(
+    ("factory", "action"),
+    [
+        (lambda: env_lib.KuramotoOscillatorEnv(n_oscillators=4), None),
+        (lambda: env_lib.LineMsgEnv(num_agents=3), None),
+        (lambda: env_lib.WirelessCommEnv(grid_x=2, grid_y=2), None),
+        (lambda: env_lib.ConsensusEnv(n_agents=3), None),
+        (lambda: env_lib.AJLATTEnv(num_robots=2), None),
+    ],
+)
+def test_step_before_reset_raises_shared_error(factory, action):
+    from gymnasium.error import ResetNeeded
+
+    env = factory()
+    with pytest.raises(env_lib.ResetNeededError) as excinfo:
+        env.step(env.action_space.sample() if action is None else action)
+    assert isinstance(excinfo.value, RuntimeError)
+    assert isinstance(excinfo.value, ResetNeeded)
+    env.close()
+
+
+@pytest.mark.parametrize("entry", ["module", "make", "class"])
+def test_legacy_ajlatt_warnings_point_at_caller(entry):
+    from env_lib import ajlatt_env
+
+    create = {
+        "module": ajlatt_env,
+        "make": ajlatt_env.make,
+        "class": env_lib.AJLATTEnv,
+    }[entry]
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        create(num_Robot=2, render=False).close()
+    assert record
+    assert {w.filename for w in record} == {__file__}

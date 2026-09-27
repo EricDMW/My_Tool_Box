@@ -44,6 +44,7 @@ from env_lib.ajlatt_env.estimation import (
     psd_inverse,
 )
 from env_lib.ajlatt_env.maps import DynamicMap, GridMap, load_grid_map
+from env_lib.errors import ResetNeededError
 from env_lib.utils.rendering import validate_render_mode
 
 __all__ = ["AJLATTEnv", "make"]
@@ -91,9 +92,9 @@ class AJLATTEnv(gym.Env):
                 render_mode = "human"
         validate_render_mode(render_mode)
         if config is None:
-            config = AJLATTConfig.from_kwargs(**overrides)
+            config = AJLATTConfig.from_kwargs(_stacklevel=3, **overrides)
         elif overrides:
-            config = AJLATTConfig.from_kwargs(**{**config.to_dict(), **overrides})
+            config = AJLATTConfig.from_kwargs(_stacklevel=3, **{**config.to_dict(), **overrides})
         self.config = config
         self.render_mode = render_mode
 
@@ -213,7 +214,7 @@ class AJLATTEnv(gym.Env):
 
     def step(self, action):
         if self._needs_reset:
-            raise RuntimeError("AJLATTEnv.step() called before reset()")
+            raise ResetNeededError("AJLATTEnv.step() called before reset()")
         actions = self._validate_action(action)
         cfg = self.config
         rng = self.np_random
@@ -283,7 +284,7 @@ class AJLATTEnv(gym.Env):
             )
             return None
         if self._needs_reset:
-            raise RuntimeError("AJLATTEnv.render() called before reset()")
+            raise ResetNeededError("AJLATTEnv.render() called before reset()")
         if self._renderer is None:
             from env_lib.ajlatt_env.rendering import AJLATTRenderer
 
