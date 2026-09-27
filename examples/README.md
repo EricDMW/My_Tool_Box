@@ -50,6 +50,22 @@ Constructor arguments are passed as `--kwarg key=value ...`; `env-lib <command> 
 lists the options. The handbook (`docs/manual`, chapter "Vectorised Simulation,
 Adapters, Baselines and Evaluation") describes every command.
 
+## Multi-agent reinforcement learning
+
+| Script | Shows | Typical invocation |
+|---|---|---|
+| `marl_training_demo.py` | `marl_algorithms` on the environments: MAPPO on PowerGrid, MADDPG on Consensus, QMIX on LineMsg and VDN on WirelessComm, each trained with its tuned preset on batched copies, then compared with random actions and the classical controller; learning curves saved as PNG | `python examples/marl_training_demo.py` (a few minutes on one core), `--algo mappo --env PowerGrid-v0 --gif renders/mappo.gif`, `--quick` |
+
+The `marl-train` command line trains any algorithm without writing code:
+
+```bash
+marl-train list                          # the seven algorithms and their papers
+marl-train presets                       # tuned (algorithm, environment) pairs
+marl-train run mappo PowerGrid-v0        # train with the preset, then evaluate
+marl-train run qmix LineMsg-v0 --save runs/qmix.pt --csv runs/qmix.csv
+marl-train evaluate runs/qmix.pt LineMsg-v0
+```
+
 ## Toolkit
 
 | Script | Shows | Typical invocation |

@@ -125,15 +125,18 @@ def print_table(results: list[RunResult], episodes: int) -> None:
 
 
 def plot_curves(results: list[RunResult], path: Path) -> Path:
+    """Training-return curves with the random and baseline evaluation returns as reference lines."""
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib.ticker import FuncFormatter
 
     from toolkit.plotkit import OKABE_ITO_COLOR_LIST, save_figure, style_context
 
+    thousands = FuncFormatter(lambda x, _: f"{x / 1000:.0f}k" if x else "0")
     with style_context("research"):
-        fig, axes = plt.subplots(1, len(results), figsize=(3.6 * len(results), 3.0), squeeze=False)
+        fig, axes = plt.subplots(1, len(results), figsize=(3.4 * len(results), 2.7), squeeze=False)
         for ax, r in zip(axes[0], results):
             steps, returns = r.curve
             ax.plot(
@@ -144,10 +147,12 @@ def plot_curves(results: list[RunResult], path: Path) -> Path:
                 ax.axhline(
                     r.baseline, color=OKABE_ITO_COLOR_LIST[2], ls="--", lw=1.2, label="baseline"
                 )
-            ax.set_title(f"{r.algorithm.upper()} on {r.env_id}", fontsize=9)
-            ax.set_xlabel("environment steps")
-            ax.set_ylabel("episode return")
-            ax.legend(fontsize=7, frameon=False)
+            ax.set_title(f"{r.algorithm.upper()} on {r.env_id}", fontsize=10)
+            ax.xaxis.set_major_formatter(thousands)
+            ax.tick_params(labelsize=8)
+            ax.set_xlabel("environment steps", fontsize=9)
+            ax.set_ylabel("training return", fontsize=9)
+            ax.legend(fontsize=7, frameon=False, loc="lower right")
         fig.tight_layout()
         saved = save_figure(fig, path.with_suffix(""), formats=("png",))
         plt.close(fig)

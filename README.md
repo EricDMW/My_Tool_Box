@@ -1,6 +1,6 @@
 # My Tool Box
 
-**Networked multi-agent control environments and research utilities for Python.**
+**Networked multi-agent control environments, classical MARL algorithms and research utilities for Python.**
 
 [![CI](https://github.com/EricDMW/My_Tool_Box/actions/workflows/ci.yml/badge.svg)](https://github.com/EricDMW/My_Tool_Box/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-2563EB)
@@ -12,9 +12,11 @@ quantities and interact through a network: generators holding the grid
 frequency, vehicles keeping a safe gap, oscillators synchronising, robots
 tracking targets as a team. Every environment speaks the Gymnasium API,
 simulates thousands of copies as one batch, and comes with a classical
-controller to compare against. The `toolkit` package covers the rest of a
-study: publication-quality plots, neural-network building blocks and
-reproducible experiment parameters.
+controller to compare against. The `marl_algorithms` package trains seven
+classical multi-agent reinforcement learning algorithms (IPPO, MAPPO, MADDPG,
+MATD3, IQL, VDN and QMIX) directly on these environments, and the `toolkit`
+package covers the rest of a study: publication-quality plots, neural-network
+building blocks and reproducible experiment parameters.
 
 <p align="center">
   <img src="docs/images/hero.gif" width="820" alt="Platoon-v0 under cooperative adaptive cruise control">
@@ -43,6 +45,11 @@ reproducible experiment parameters.
   single-agent libraries and the PettingZoo parallel API, and
   `env_lib.baseline_policy(env)`, a decentralised classical controller for
   every environment.
+- **Algorithms included.** Seven classical MARL methods share one small core
+  and train on the batched environments in one call
+  (`marl_algorithms.train("mappo", "PowerGrid-v0", 250_000)`) or one command
+  (`marl-train run mappo PowerGrid-v0`); tuned presets learn in one to two
+  minutes on one CPU core and are evaluated against the classical controller.
 - **Reproducible.** Randomness comes only from seeded generators, rendering
   works headless in dark and light themes, and episodes export to GIF, MP4 or
   `.npz` trajectories.
@@ -65,7 +72,7 @@ Heavier dependencies are extras:
 
 | Extra | Adds | Needed for |
 |---|---|---|
-| `torch` | PyTorch | `KuramotoOscillatorTorch-*`, `toolkit.neural_toolkit` |
+| `torch` | PyTorch | `marl_algorithms`, `KuramotoOscillatorTorch-*`, `toolkit.neural_toolkit` |
 | `pistonball` | pygame, pymunk | `Pistonball-v0` |
 | `video` | imageio, imageio-ffmpeg | MP4 export (GIF export works without it) |
 | `dev` | pytest, pytest-cov, ruff | tests and linters |
@@ -97,9 +104,20 @@ flat = FlattenJointSpaces(env_lib.make("Platoon-v0"))  # 1-D spaces for single-a
 par = to_parallel("Platoon-v0")                        # PettingZoo parallel API, per-agent dicts
 ```
 
+Train a classical multi-agent algorithm on them:
+
+```python
+from marl_algorithms import train
+
+algo, log = train("mappo", "PowerGrid-v0", total_steps=250_000, num_envs=16)
+print(log.summary())
+print(algo.evaluate(env_lib.make_vec("PowerGrid-v0", 64), n_episodes=64, seed=1))
+```
+
 Or stay in the shell:
 
 ```bash
+marl-train run mappo PowerGrid-v0                  # tuned preset, then random / trained / baseline
 env-lib list --continuous                          # catalogue of continuous environments
 env-lib describe Platoon-v0                        # spaces, observation layout, parameters
 env-lib run Formation-v0 --gif renders/run.gif     # roll out the baseline and record it
@@ -156,6 +174,31 @@ Every environment ships a decentralised baseline, returned by
 
 Mean return over 64 seeded episodes (8 for AJLATT, 16 for Pistonball),
 higher is better, measured with `env_lib.evaluate` on vector environments.
+
+## Multi-agent reinforcement learning algorithms
+
+`marl_algorithms` implements seven classical methods against one small core:
+a per-agent view of the joint spaces (`MultiAgentSpec`), experience collection
+on the native batched environments, rollout and replay buffers, network
+building blocks with shared or per-agent parameters, and two training loops.
+Every algorithm acts on per-agent observations, saves and loads, and evaluates
+through `env_lib.evaluate`.
+
+| Algorithm | Family | Actions | Idea | Reference |
+|---|---|---|---|---|
+| IPPO | on-policy | continuous, discrete | PPO per agent on its own observation and reward | de Witt et al., 2020 |
+| MAPPO | on-policy | continuous, discrete | decentralised actors, centralised critic V(s, i) | Yu et al., 2022 |
+| MADDPG | off-policy actor-critic | continuous | deterministic actors, centralised Q-critics on joint actions | Lowe et al., 2017 |
+| MATD3 | off-policy actor-critic | continuous | MADDPG with twin critics, target smoothing, delayed actors | Ackermann et al., 2019 |
+| IQL | value-based | discrete | independent DQN per agent | Tan, 1993 |
+| VDN | value-based | discrete | team value as the sum of agent utilities | Sunehag et al., 2018 |
+| QMIX | value-based | discrete | monotonic, state-conditioned mixing of agent utilities | Rashid et al., 2018 |
+
+Every preset trained on one CPU core and then evaluated on 64 seeded episodes
+against uniformly random actions and the environment's classical controller
+(higher is better; reproduce with `benchmarks/benchmark_marl.py`):
+
+MARL_RESULTS_TABLE
 
 ## Design
 
@@ -224,12 +267,13 @@ the AJLATT, Kuramoto and Consensus speed-ups of 1.1 are bitwise identical.
 - **Handbook** (`docs/manual/main.pdf`, built by `docs/manual/build.sh`): model
   equations, observation layouts, parameters and rendering of every
   environment, the workflow chapter (vectorised simulation, adapters,
-  baselines, evaluation), the toolkit, examples, troubleshooting, an API
+  baselines, evaluation), the multi-agent RL algorithms, the toolkit, examples, troubleshooting, an API
   reference and a migration guide.
 - **Slides** (`docs/slides/my_tool_box_slides.pdf`, built by
   `docs/slides/build.sh`): a short introduction to the package.
 - **Examples** (`examples/`, see `examples/README.md`): one script per
-  environment and an end-to-end workflow.
+  environment, an end-to-end workflow, and `marl_training_demo.py`, which
+  trains MAPPO, MADDPG, QMIX and VDN on four environments.
 
 ## Development
 
@@ -240,6 +284,7 @@ ruff check src tests examples benchmarks           # lint
 ruff format src tests examples benchmarks          # format
 python benchmarks/benchmark_envs.py                # single-environment timings
 python benchmarks/benchmark_vector.py              # batched throughput
+python benchmarks/benchmark_marl.py                # train and evaluate every MARL preset
 ```
 
 Tests run headless (`tests/conftest.py` selects matplotlib's Agg backend and
