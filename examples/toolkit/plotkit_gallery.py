@@ -15,8 +15,8 @@ All numbers are generated from ``--seed`` and do not describe real algorithms.
 
 Run::
 
-    python examples/plotkit_gallery.py
-    python examples/plotkit_gallery.py --style presentation --save renders/gallery_talk --show
+    python examples/toolkit/plotkit_gallery.py
+    python examples/toolkit/plotkit_gallery.py --style presentation --save renders/gallery_talk --show
 """
 
 from __future__ import annotations

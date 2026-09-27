@@ -13,10 +13,10 @@ The script walks through the convenience layer in six short steps:
 
 Run::
 
-    python examples/workflow_demo.py
-    python examples/workflow_demo.py --env Consensus-v0 --num-envs 128 --episodes 128
-    python examples/workflow_demo.py --save renders/workflow.gif --steps 120
-    python examples/workflow_demo.py --no-save
+    python examples/getting_started/workflow_demo.py
+    python examples/getting_started/workflow_demo.py --env Consensus-v0 --num-envs 128 --episodes 128
+    python examples/getting_started/workflow_demo.py --save renders/workflow.gif --steps 120
+    python examples/getting_started/workflow_demo.py --no-save
 
 The same steps are available on the command line: ``env-lib list --continuous``,
 ``env-lib evaluate Formation-v0 --num-envs 32`` and

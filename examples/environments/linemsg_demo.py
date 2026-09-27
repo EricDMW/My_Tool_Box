@@ -24,10 +24,10 @@ episode of the chosen policy.
 
 Run it with::
 
-    python examples/linemsg_demo.py
-    python examples/linemsg_demo.py --num-agents 30 --action-space-type multibinary
-    python examples/linemsg_demo.py --duty 0.8 --save renders/linemsg.gif
-    python examples/linemsg_demo.py --render-mode human
+    python examples/environments/linemsg_demo.py
+    python examples/environments/linemsg_demo.py --num-agents 30 --action-space-type multibinary
+    python examples/environments/linemsg_demo.py --duty 0.8 --save renders/linemsg.gif
+    python examples/environments/linemsg_demo.py --render-mode human
 """
 
 from __future__ import annotations

@@ -12,21 +12,21 @@ Examples
 --------
 Compare the policies (headless)::
 
-    python examples/pistonball_demo.py --episodes 10
+    python examples/environments/pistonball_demo.py --episodes 10
 
 Discrete actions, wider observation range and a movement penalty::
 
-    python examples/pistonball_demo.py --discrete --kappa 2 --movement-penalty -0.05
+    python examples/environments/pistonball_demo.py --discrete --kappa 2 --movement-penalty -0.05
 
 Record one heuristic episode as a GIF (works headless)::
 
-    python examples/pistonball_demo.py --save renders/pistonball.gif --theme light
+    python examples/environments/pistonball_demo.py --save renders/pistonball.gif --theme light
 
 Watch the heuristic in a window, or play yourself (W/S move the selected
 piston, A/D change the selection, Backspace resets, Esc quits)::
 
-    python examples/pistonball_demo.py --render-mode human --episodes 2
-    python examples/pistonball_demo.py --manual --n-pistons 8
+    python examples/environments/pistonball_demo.py --render-mode human --episodes 2
+    python examples/environments/pistonball_demo.py --manual --n-pistons 8
 """
 
 from __future__ import annotations

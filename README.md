@@ -50,6 +50,9 @@ building blocks and reproducible experiment parameters.
   (`marl_algorithms.train("mappo", "PowerGrid-v0", 250_000)`) or one command
   (`marl-train run mappo PowerGrid-v0`); tuned presets learn in one to two
   minutes on one CPU core and are evaluated against the classical controller.
+  `marl_algorithms.compare` turns them into ready-made baselines for your own
+  method: one call trains them over several seeds and evaluates them with the
+  classical controller, random actions and your policy on the same episodes.
 - **Reproducible.** Randomness comes only from seeded generators, rendering
   works headless in dark and light themes, and episodes export to GIF, MP4 or
   `.npz` trajectories.
@@ -114,10 +117,21 @@ print(log.summary())
 print(algo.evaluate(env_lib.make_vec("PowerGrid-v0", 64), n_episodes=64, seed=1))
 ```
 
+Compare your own method with all of them, as baselines, on the same episodes
+([details](#using-the-algorithms-as-baselines)):
+
+```python
+from marl_algorithms import compare
+
+report = compare("PowerGrid-v0", seeds=(0, 1, 2), policies={"mine": my_policy})
+print(report)                              # random, controller, IPPO, MAPPO, MADDPG, MATD3, mine
+```
+
 Or stay in the shell:
 
 ```bash
 marl-train run mappo PowerGrid-v0                  # tuned preset, then random / trained / baseline
+marl-train compare PowerGrid-v0 --seeds 0 1 2      # every preset algorithm as a baseline
 env-lib list --continuous                          # catalogue of continuous environments
 env-lib describe Platoon-v0                        # spaces, observation layout, parameters
 env-lib run Formation-v0 --gif renders/run.gif     # roll out the baseline and record it
@@ -231,6 +245,73 @@ while VDN reaches the collision-free schedule.
   <img src="docs/images/marl_training.png" width="900" alt="Learning curves of MAPPO, MADDPG, QMIX and VDN">
 </p>
 
+### Using the algorithms as baselines
+
+Every environment comes with three kinds of reference for a new method:
+random actions, its classical controller (`env_lib.baseline_policy`) and the
+seven learning algorithms with tuned presets. `marl_algorithms.compare` trains
+the learning baselines over several seeds and evaluates everything, your
+method included, on the same seeded episodes:
+
+```python
+from marl_algorithms import compare, per_copy
+
+report = compare(
+    "PowerGrid-v0",
+    ["mappo", "ippo"],                    # default: every algorithm with a preset here
+    seeds=(0, 1),
+    policies={"my method": my_policy},    # (num_envs, n_agents, obs_dim) -> actions
+)
+print(report)
+report.to_csv("results/power_grid.csv")  # also .to_markdown() and .records()
+mappo = report.algorithms[("mappo", 0)]   # the trained baselines, ready to save or record
+```
+
+```
+PowerGrid-v0: mean team return over 64 evaluation episodes (seed 1); higher is better
+
+method     kind       mean return    std  seeds  env steps  train [s]
+---------  ---------  -----------  -----  -----  ---------  ---------
+random     reference       -629.3      -      -          -          -
+baseline   reference       -0.786      -      -          -          -
+mappo      algorithm        -1.02  0.182      2    251,904      101.9
+ippo       algorithm        -2.25  0.172      2    200,704       65.2
+my method  policy          -0.675      -      -          -          -
+```
+
+`std` is the standard deviation over the training seeds. Here "my method" is a
+distributed droop controller that also reacts to the neighbours' mean
+frequency deviation ([`examples/algorithms/baseline_comparison.py`](examples/algorithms/baseline_comparison.py),
+about six minutes on one core):
+
+<p align="center">
+  <img src="docs/images/baseline_comparison.png" width="560" alt="Mean return of the proposed controller, MAPPO, IPPO and the classical controller on PowerGrid-v0">
+</p>
+
+The same from the shell, where `--csv`, `--markdown` and `--save-dir` export
+the table and the trained models:
+
+```bash
+marl-train compare PowerGrid-v0 --seeds 0 1 2                   # every preset algorithm
+marl-train compare LineMsg-v0 --algos iql qmix --markdown --csv results/linemsg.csv
+marl-train compare Formation-v0 --algos mappo --steps 200000    # no preset: give a budget
+```
+
+A few rules of thumb:
+
+- `total_steps` and `num_envs` (`--steps`, `--num-envs`) replace the presets'
+  budget, for a quick check before the full run; algorithms without a preset
+  for the environment need `total_steps`.
+- `env_kwargs={"n_buses": 32}` (`--env-kwarg n_buses=32`) trains and evaluates
+  every method on a variant of the environment with the presets'
+  hyperparameters, which may then need more steps.
+- A policy written for one environment works after `per_copy(policy)`; a
+  modified algorithm of this package is passed as the trained object.
+- With training seed 0 and the default evaluation seed 1, the numbers match
+  the results table above.
+
+The handbook section "Using the algorithms as baselines" has more recipes.
+
 ## Design
 
 <p align="center">
@@ -298,13 +379,17 @@ the AJLATT, Kuramoto and Consensus speed-ups of 1.1 are bitwise identical.
 - **Handbook** (`docs/manual/main.pdf`, built by `docs/manual/build.sh`): model
   equations, observation layouts, parameters and rendering of every
   environment, the workflow chapter (vectorised simulation, adapters,
-  baselines, evaluation), the multi-agent RL algorithms, the toolkit, examples, troubleshooting, an API
-  reference and a migration guide.
+  baselines, evaluation), the multi-agent RL algorithms and their use as
+  baselines, the toolkit, examples, troubleshooting, an API reference and a
+  migration guide.
 - **Slides** (`docs/slides/my_tool_box_slides.pdf`, built by
   `docs/slides/build.sh`): a short introduction to the package.
-- **Examples** (`examples/`, see `examples/README.md`): one script per
-  environment, an end-to-end workflow, and `marl_training_demo.py`, which
-  trains MAPPO, MADDPG, QMIX and VDN on four environments.
+- **Examples** (`examples/`, see `examples/README.md`), grouped by topic:
+  `getting_started/` (every environment, the end-to-end workflow),
+  `environments/` (one script per environment with its classical controller),
+  `algorithms/` (`marl_training_demo.py` trains MAPPO, MADDPG, QMIX and VDN on
+  four environments; `baseline_comparison.py` compares a proposed controller
+  with the baselines) and `toolkit/`.
 
 ## Development
 

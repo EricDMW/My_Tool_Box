@@ -2,8 +2,8 @@
 
 Run::
 
-    python examples/quickstart.py
-    python examples/quickstart.py --render renders/quickstart
+    python examples/getting_started/quickstart.py
+    python examples/getting_started/quickstart.py --render renders/quickstart
 """
 
 from __future__ import annotations

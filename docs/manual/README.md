@@ -59,13 +59,15 @@ docs/manual/
     ajlatt_env.tex          multi-robot localisation and target tracking
     workflow.tex            vector environments, catalogue, env-lib command line,
                             wrappers, baseline controllers, evaluation
-    marl_algorithms.tex     multi-agent RL algorithms: core design, IPPO/MAPPO,
+    marl_algorithms.tex     multi-agent RL algorithms: quick start, using them
+                            as baselines, core design, IPPO/MAPPO,
                             MADDPG/MATD3, IQL/VDN/QMIX, presets and results,
                             marl-train command line, adding an algorithm
     toolkit_overview.tex    toolkit structure and parakit
     plotkit.tex             plotting
     neural_toolkit.tex      PyTorch networks and tabular tools
-    examples.tex            example scripts (including the MARL training demo),
+    examples.tex            example scripts by folder (including the MARL
+                            training demo and the baseline comparison),
                             env-lib command line, recording, benchmarks,
                             contributing
     troubleshooting.tex     common problems and solutions

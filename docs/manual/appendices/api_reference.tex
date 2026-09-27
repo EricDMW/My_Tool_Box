@@ -875,8 +875,9 @@ marl_algorithms.__version__                 # "1.2.0"
 get_preset(algorithm, env_id) -> dict | None     # a copy
 list_presets() -> list[tuple[str, str]]          # (algorithm, env_id) pairs
 train_preset(algorithm, env_id, *, seed=0, total_steps=None, num_envs=None,
-             device='cpu', callback=None,
+             env_kwargs=None, device='cpu', callback=None,
              **config) -> tuple[Algorithm, TrainingLog]
+PRESETS                   # {algorithm: {env_id: preset}}, all families
 \end{pycode}
 
 \code{train} creates the copies with \code{make\_vector\_env}, builds the
@@ -887,9 +888,46 @@ the seed to both; it closes the copies and sets \code{log.env\_id}.
 \code{get\_preset} and \code{train\_preset} raise \code{KeyError} for an unknown
 algorithm, and \code{train\_preset} also when the pair has no preset. A preset
 is a dictionary with the keys \code{"total\_steps"}, \code{"num\_envs"},
-\code{"config"} and \code{"env\_kwargs"}; the tables are the module-level
-\code{PRESETS} dictionaries \code{\{algorithm: \{env\_id: preset\}\}} of the
-algorithm modules.
+\code{"config"} and \code{"env\_kwargs"}; \code{train\_preset} merges its
+\code{env\_kwargs} into the preset's. \code{PRESETS} collects the tables of the
+modules \pkg{marl\_algorithms.presets.ppo}, \pkg{.ddpg} and
+\pkg{.q\_learning}.
+
+\subsection{Baselines}
+
+Module \pkg{marl\_algorithms.baselines} (exported by the package);
+Section~\ref{sec:marl-baselines}.
+
+% norun
+\begin{pycode}
+compare(env_id, algorithms=None, *, seeds=(0,), policies=None, n_episodes=64,
+        eval_seed=1, total_steps=None, num_envs=None, env_kwargs=None,
+        include_random=True, include_baseline=True, device='cpu',
+        verbose=False, **config) -> Comparison
+per_copy(policy) -> policy          # single-environment policy -> batched
+
+Comparison(env_id, env_kwargs, n_episodes, eval_seed, rows, algorithms, logs)
+report[name] -> ComparisonRow       # KeyError for an unknown name
+report.ranking(kinds=("algorithm", "policy")) -> list[ComparisonRow]
+report.records() -> list[dict]; report.to_markdown() -> str
+report.to_csv(path) -> Path; str(report)       # aligned table
+report.algorithms[(name, seed)] -> Algorithm; report.logs[(name, seed)]
+
+ComparisonRow(name, kind, returns, seeds=(), env_steps=(), train_seconds=())
+row.mean, row.std                   # over seeds; std is NaN for one value
+\end{pycode}
+
+\code{algorithms=None} selects every algorithm with a preset for the
+environment and an empty sequence none; \code{policies} maps names to batched
+policies or trained algorithms. Rows are in the order references
+(\code{"random"}, \code{"baseline"}), algorithms, policies, with
+\code{kind} \code{"reference"}, \code{"algorithm"} or \code{"policy"}.
+\code{compare} raises \code{KeyError} for an unknown algorithm and
+\code{ValueError} for an algorithm without a preset when \code{total\_steps}
+is not given, a preset whose environment arguments differ from
+\code{env\_kwargs}, a policy name that repeats another row's name, empty
+\code{seeds} or \code{n\_episodes < 1}. The classical controller row is
+omitted for environments without one.
 
 \subsection{Agent spec and experience collection}
 
@@ -1043,10 +1081,12 @@ unless it is called on the class that saved the file.
 
 \subsection{Algorithms and their configurations}
 
-Modules \pkg{marl\_algorithms.algorithms.ppo}, \pkg{.ddpg} and
-\pkg{.value\_decomposition}; Sections~\ref{sec:marl-ppo}
-to~\ref{sec:marl-value}. All seven classes take the constructor arguments of
-\code{Algorithm}.
+Packages \pkg{marl\_algorithms.algorithms.ppo} (modules \pkg{common},
+\pkg{ippo}, \pkg{mappo}), \pkg{.ddpg} (\pkg{common}, \pkg{maddpg},
+\pkg{matd3}) and \pkg{.q\_learning} (\pkg{common}, \pkg{iql}, \pkg{vdn},
+\pkg{qmix}); every family package exports its classes and its configuration.
+Sections~\ref{sec:marl-ppo} to~\ref{sec:marl-value}. All seven classes take
+the constructor arguments of \code{Algorithm}.
 
 % norun
 \begin{pycode}
@@ -1069,7 +1109,7 @@ algo.q_values(obs, *, target=False) -> torch.Tensor    # (..., n, n_actions)
 algo.mix(agent_q, obs, *, target=False) -> torch.Tensor
 algo.td_target(batch) -> torch.Tensor
 algo.td_loss(batch) -> tuple[torch.Tensor, dict[str, float]]
-VDNMixer()                           # value_decomposition module
+VDNMixer()                           # q_learning.vdn module
 
 PPOConfig(<OnPolicyConfig fields>, n_epochs=10, num_minibatches=4,
           clip_range=0.2, value_clip_range=0.2, huber_delta=None,
@@ -1086,7 +1126,6 @@ QLearningConfig(<OffPolicyConfig fields>, lr=0.0005, epsilon_start=1.0,
                 epsilon_end=0.05, epsilon_decay_steps=50000, double_q=True,
                 target_update_interval=0, loss='huber', mixer_embed_dim=32,
                 hypernet_hidden=64)
-PRESETS              # in each algorithm module: {algorithm: {env_id: preset}}
 \end{pycode}
 
 Tables~\ref{tab:marl-config-common}, \ref{tab:marl-ppo-config},
@@ -1108,19 +1147,28 @@ marl-train run ALGORITHM ENV_ID [--steps N] [--num-envs N] [--seed S]
                [--no-preset] [--set KEY=VALUE [KEY=VALUE ...]]
                [--env-kwarg KEY=VALUE [KEY=VALUE ...]] [--eval-episodes N]
                [--reports N] [--save PATH] [--csv PATH] [--threads N]
+marl-train compare ENV_ID [--algos ALGO [ALGO ...]] [--seeds S [S ...]]
+                   [--steps N] [--num-envs N] [--episodes N] [--eval-seed S]
+                   [--set KEY=VALUE [KEY=VALUE ...]]
+                   [--env-kwarg KEY=VALUE [KEY=VALUE ...]] [--markdown]
+                   [--csv PATH] [--save-dir DIR] [--threads N]
 marl-train evaluate CHECKPOINT ENV_ID [--episodes N] [--seed S]
                     [--env-kwarg KEY=VALUE [KEY=VALUE ...]]
 \end{shellcode}
 
 Defaults: \code{run} uses the preset's steps and copies (100\,000 and 16
 without a preset), \code{-{}-seed 0}, \code{-{}-eval-episodes 64},
-\code{-{}-reports 10} and \code{-{}-threads 1}; \code{evaluate} uses
-\code{-{}-episodes 64} and \code{-{}-seed 1}. \code{KEY=VALUE} values are
-parsed as Python literals (plain text otherwise); a malformed pair ends the
-command with the message \code{expected KEY=VALUE} and exit status 1, and
-command-line usage errors exit with status 2. An unknown algorithm or
-configuration field raises the library's \code{KeyError} or
-\code{TypeError}.
+\code{-{}-reports 10} and \code{-{}-threads 1}; \code{compare} uses every
+algorithm with a preset, \code{-{}-seeds 0}, the presets' budgets,
+\code{-{}-episodes 64}, \code{-{}-eval-seed 1} and \code{-{}-threads 1};
+\code{evaluate} uses \code{-{}-episodes 64} and \code{-{}-seed 1}.
+\code{KEY=VALUE} values are parsed as Python literals (plain text otherwise); a
+malformed pair ends the command with the message \code{expected KEY=VALUE} and
+exit status 1. Command-line usage errors, and an unknown environment,
+algorithm, configuration field or checkpoint, an algorithm that does not
+support the environment's actions (\code{compare}) or one without a preset
+and without \code{-{}-steps} (\code{compare}), end the command before any
+training with a message on standard error and exit status 2.
 
 \section{\texorpdfstring{\pkg{toolkit.plotkit}}{toolkit.plotkit}}\label{sec:api-plotkit}
 

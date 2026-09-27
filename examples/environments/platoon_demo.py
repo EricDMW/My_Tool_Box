@@ -21,20 +21,20 @@ Examples
 --------
 Default comparison (8 followers, predecessor following, mixed scenario)::
 
-    python examples/platoon_demo.py
+    python examples/environments/platoon_demo.py
 
 Stop-and-go wave, predecessor-leader topology, GIF of the CACC controller::
 
-    python examples/platoon_demo.py --scenario stop_and_go --topology predecessor_leader \\
+    python examples/environments/platoon_demo.py --scenario stop_and_go --topology predecessor_leader \\
         --render renders/platoon.gif
 
 ACC with a longer headway is string stable again::
 
-    python examples/platoon_demo.py --headway 1.2 --scenario stop_and_go
+    python examples/environments/platoon_demo.py --headway 1.2 --scenario stop_and_go
 
 Watch the controller live in a window::
 
-    python examples/platoon_demo.py --render-mode human
+    python examples/environments/platoon_demo.py --render-mode human
 """
 
 from __future__ import annotations

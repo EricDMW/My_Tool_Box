@@ -8,19 +8,20 @@
 
 This appendix explains what code written for earlier versions of the package
 has to change. Section~\ref{sec:migration-12} covers the step from version 1.1
-to 1.2, which only adds a package. Section~\ref{sec:migration-11} covers the
-step from version 1.0 to 1.1, which adds features and changes little existing
-behaviour. Section~\ref{sec:migration-pre10} covers code written for the
-versions before 1.0, when the package consisted of two separate projects. The
-complete list of changes is in \code{CHANGELOG.md}.
+to 1.2, which adds a package and moves the example scripts.
+Section~\ref{sec:migration-11} covers the step from version 1.0 to 1.1, which
+adds features and changes little existing behaviour.
+Section~\ref{sec:migration-pre10} covers code written for the versions before
+1.0, when the package consisted of two separate projects. The complete list of
+changes is in \code{CHANGELOG.md}.
 
 \section{From 1.1 to 1.2}\label{sec:migration-12}
 
 Version 1.2 adds the import package \pkg{marl\_algorithms}
 (Chapter~\ref{chap:marl}) and the \code{marl-train} command. The packages
 \pkg{env\_lib} and \pkg{toolkit} are unchanged apart from their version
-number, so code written for version 1.1 runs without changes. Two points
-concern the new package only:
+number, so code written for version 1.1 runs without changes. Three points
+are new:
 
 \begin{itemize}
   \item \pkg{marl\_algorithms} needs PyTorch, which the base installation
@@ -32,6 +33,12 @@ concern the new package only:
   submodule pointer without code and was removed; its role is taken by
   \pkg{marl\_algorithms}, whose MAPPO implementation replaces the
   \code{light\_mappo} submodule.
+  \item The example scripts moved into topic folders:
+  \code{examples/getting\_started/} (\code{quickstart.py},
+  \code{workflow\_demo.py}), \code{examples/environments/} (the environment
+  demonstrations), \code{examples/algorithms/} and \code{examples/toolkit/}
+  (the \pkg{plotkit}, \pkg{parakit} and transformer examples). Scripts or
+  notes that call them by path need the new folder.
 \end{itemize}
 
 \section{From 1.0 to 1.1}\label{sec:migration-11}

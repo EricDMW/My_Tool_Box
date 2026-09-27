@@ -22,10 +22,10 @@ episode of the chosen policy.
 
 Run it with::
 
-    python examples/wireless_comm_demo.py
-    python examples/wireless_comm_demo.py --grid 8 8 --tau 0.5 --episodes 50
-    python examples/wireless_comm_demo.py --policy aloha --save renders/wireless_comm.gif
-    python examples/wireless_comm_demo.py --render-mode human
+    python examples/environments/wireless_comm_demo.py
+    python examples/environments/wireless_comm_demo.py --grid 8 8 --tau 0.5 --episodes 50
+    python examples/environments/wireless_comm_demo.py --policy aloha --save renders/wireless_comm.gif
+    python examples/environments/wireless_comm_demo.py --render-mode human
 """
 
 from __future__ import annotations

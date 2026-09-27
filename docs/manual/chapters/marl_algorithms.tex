@@ -333,6 +333,21 @@ override the preset's configuration and environment arguments.
       (\code{TrainingLog.to\_csv}) \\
     \quad \code{-{}-threads N} & PyTorch threads [1]; 0 keeps the PyTorch
       default \\
+    \code{compare ENV\_ID} & train baseline algorithms over one or more
+      seeds and compare them with random actions and the classical controller
+      on the same episodes (Section~\ref{sec:marl-baselines}) \\
+    \quad \code{-{}-algos ALGO ...} & algorithms [every one with a preset for
+      the environment] \\
+    \quad \code{-{}-seeds S ...} & training seeds [0] \\
+    \quad \code{-{}-steps N}, \code{-{}-num-envs N} & budget and copies per run
+      [preset] \\
+    \quad \code{-{}-episodes N}, \code{-{}-eval-seed S} & evaluation episodes
+      [64] and seed [1] \\
+    \quad \code{-{}-set}, \code{-{}-env-kwarg} & as for \code{run} \\
+    \quad \code{-{}-markdown}, \code{-{}-csv PATH} & print a Markdown table,
+      save the report as CSV \\
+    \quad \code{-{}-save-dir DIR} & save every trained algorithm as
+      \code{DIR/NAME\_seedS.pt} \\
     \code{evaluate CHECKPOINT ENV\_ID} & evaluate a saved algorithm against
       random actions and the baseline \\
     \quad \code{-{}-episodes N}, \code{-{}-seed S} & evaluation episodes [64]
@@ -384,33 +399,191 @@ are the mean team return of the deterministic policy, the half-width of its
 (Table~\ref{tab:workflow-result}).
 
 % ---------------------------------------------------------------------------
+\section{Using the algorithms as baselines}\label{sec:marl-baselines}
+
+A new method for one of the environments is judged against established ones.
+Three kinds of reference are available for every environment: uniformly
+random actions (the floor), the environment's classical controller
+(\code{env\_lib.baseline\_policy}, the standard of its field) and the seven
+learning algorithms, with tuned presets for the environments of
+Table~\ref{tab:marl-presets}. The function \code{marl\_algorithms.compare}
+trains the learning baselines, over as many seeds as you ask for, and
+evaluates everything, your methods included, on the same seeded episodes.
+
+\subsection{In one call}
+
+\begin{pycode}
+import numpy as np
+from marl_algorithms import compare
+
+def my_policy(obs):
+    """Your method: (num_envs, n_agents, obs_dim) -> (num_envs, n_agents)."""
+    return np.zeros(obs.shape[:-1], dtype=np.float32)   # replace me
+
+report = compare("PowerGrid-v0", ["mappo", "ippo"], seeds=(0, 1),
+                 policies={"my method": my_policy},
+                 total_steps=4_096, num_envs=16)       # small budget: seconds
+print(report)
+report.to_csv("runs/power_grid_comparison.csv")
+\end{pycode}
+
+Without \code{total\_steps} and \code{num\_envs} every algorithm trains with
+its preset. The script \code{examples/algorithms/baseline\_comparison.py} runs
+exactly this comparison with a proposed method, a distributed droop controller
+that also reacts to the neighbours' mean frequency deviation, and the full
+presets (about six minutes on one core):
+
+\begin{textcode}
+PowerGrid-v0: mean team return over 64 evaluation episodes (seed 1); higher is better
+
+method     kind       mean return    std  seeds  env steps  train [s]
+---------  ---------  -----------  -----  -----  ---------  ---------
+random     reference       -629.3      -      -          -          -
+baseline   reference       -0.786      -      -          -          -
+mappo      algorithm        -1.02  0.182      2    251,904      101.9
+ippo       algorithm        -2.25  0.172      2    200,704       65.2
+my method  policy          -0.675      -      -          -          -
+\end{textcode}
+
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.72\textwidth]{baseline_comparison.png}
+  \caption{Output figure of \code{baseline\_comparison.py}: mean return on
+    \envid{PowerGrid-v0} over 64 evaluation episodes; the error bars are the
+    standard deviation over two training seeds. Random actions ($-629.3$) are
+    off the scale.}
+  \label{fig:marl-baselines}
+\end{figure}
+
+Figure~\ref{fig:marl-baselines} draws the same numbers. The rows are the
+references first, then the algorithms with the mean and the
+standard deviation over the training seeds, the environment steps and the
+wall-clock training time of one run, then your policies. \code{compare} works
+in four steps:
+
+\begin{enumerate}
+  \item it creates the evaluation environment,
+    \code{make\_vector\_env(env\_id, min(n\_episodes, 64), **env\_kwargs)};
+  \item it evaluates random actions, the classical controller (when the
+    environment has one) and your policies, first, so that an error in a
+    policy shows before any training;
+  \item it trains every algorithm once per seed, with its preset
+    (\code{train\_preset}) or, without a preset, with its default
+    configuration and \code{total\_steps}, and evaluates the deterministic
+    policy;
+  \item it returns a \code{Comparison}, which also keeps every trained
+    algorithm and training log.
+\end{enumerate}
+
+Every evaluation resets the same environment copies with the same seed, so all
+rows see identical initial conditions and disturbances. With the default
+training seed 0 and evaluation seed 1 the numbers reproduce the published
+results of Table~\ref{tab:marl-results-table}.
+
+\subsection{From the command line}
+
+\begin{shellcode}
+marl-train compare PowerGrid-v0                       # every preset algorithm, seed 0
+marl-train compare PowerGrid-v0 --algos mappo ippo --seeds 0 1 2 --csv runs/pg.csv
+marl-train compare LineMsg-v0 --markdown              # a table for a README or a paper
+marl-train compare Consensus-v0 --save-dir runs/baselines  # keep the trained baselines
+marl-train compare Formation-v0 --algos mappo --steps 200000   # no preset: set a budget
+\end{shellcode}
+
+\code{marl-train compare} checks the environment, the algorithm names, their
+action kinds and the \code{-{}-set} fields before training
+(Table~\ref{tab:marl-cli}).
+
+\subsection{Recipes}
+
+\begin{description}[leftmargin=0.6cm,style=nextline]
+  \item[Choose the baselines and the budget]
+    \code{algorithms=["mappo", "maddpg"]} selects methods (by default every
+    algorithm with a preset for the environment, \code{marl-train presets});
+    \code{seeds=(0, 1, 2, 3, 4)} adds seeds; \code{total\_steps} and
+    \code{num\_envs} replace the presets' budget, for example for a quick
+    check before a long run.
+  \item[Another configuration of the environment]
+    \code{env\_kwargs=\{"n\_buses": 32\}} trains and evaluates every method on
+    the variant. The presets' hyperparameters are kept; a larger variant may
+    need a larger \code{total\_steps}.
+  \item[An algorithm without a preset]
+    Pass \code{total\_steps} to train it with its default configuration, or
+    tune it yourself with \code{train(...)} and pass the trained algorithm in
+    \code{policies}.
+  \item[A policy written for a single environment]
+    \code{compare} evaluates batched observations. Wrap a policy that maps one
+    observation \code{(n\_agents, obs\_dim)} to one action with
+    \code{per\_copy(policy)}; batched policies are faster.
+  \item[A method built on this package]
+    A modified algorithm (a new loss, another critic) is an \code{Algorithm}:
+    train it and pass the object in \code{policies}; its deterministic policy
+    is evaluated like the baselines. For several seeds of your method, train
+    one per seed and pass them under separate names, or register it
+    (Section~\ref{sec:marl-extending}) and list it in \code{algorithms}.
+  \item[Reuse the trained baselines]
+    \code{report.algorithms[("mappo", 0)]} is the trained MAPPO of seed 0:
+    save it, record an episode with \code{record\_episode(env,
+    algo.policy(), path)} or evaluate it on other scenarios;
+    \code{report.logs} holds the training logs for learning curves
+    (Section~\ref{sec:plotkit-curves}).
+  \item[Tables and further analysis]
+    \code{report.to\_markdown()}, \code{report.to\_csv(path)} and
+    \code{report.records()} (one dictionary per row, for example for
+    \code{pandas.DataFrame}); \code{report["mappo"].returns} gives the
+    per-seed returns and \code{report.ranking()} orders the algorithms and
+    your policies by mean return.
+\end{description}
+
+% ---------------------------------------------------------------------------
 \section{Design of the core}\label{sec:marl-core}
 
-The algorithms share the modules of \pkg{marl\_algorithms.core}; the algorithm
-modules contain only what is specific to a family:
+The package separates what all methods share, what distinguishes each
+method, and the settings tuned for the environments. Every algorithm has its
+own module, next to the \code{common} module of its family, and the algorithm
+modules contain only what is specific to them:
 
 \begin{textcode}
 src/marl_algorithms/
-  __init__.py         lazy exports (train, algorithms, configurations, ...)
-  registry.py         AlgorithmInfo, get_algorithm, make_algorithm, train
-  presets.py          get_preset, list_presets, train_preset
-  __main__.py         the marl-train command line
-  core/
-    spec.py           MultiAgentSpec: per-agent view of the joint spaces
-    runner.py         make_vector_env, VectorRunner, Transition
-    buffers.py        RolloutBuffer, compute_gae, ReplayBuffer
-    normalization.py  RunningMeanStd, ObservationNormalizer, RewardScaler
-    networks.py       mlp, policies, QMixer, PerAgent, agent_one_hot,
-                      soft_update
-    config.py         AlgorithmConfig, OnPolicyConfig, OffPolicyConfig
-    base.py           Algorithm, OnPolicyAlgorithm, OffPolicyAlgorithm,
-                      TrainingLog
-  algorithms/
-    ppo.py            PPOConfig, IPPO, MAPPO, PRESETS
-    ddpg.py           DDPGConfig, MADDPG, MATD3, PRESETS
-    value_decomposition.py
-                      QLearningConfig, IQL, VDN, QMIX, VDNMixer, PRESETS
+  __init__.py           lazy exports (train, compare, algorithms, ...)
+  __main__.py           the marl-train command line
+  registry.py           AlgorithmInfo, get_algorithm, make_algorithm, train
+  baselines.py          compare, Comparison, per_copy: baselines
+  core/                 shared by all methods
+    spec.py             MultiAgentSpec: per-agent view of the joint spaces
+    runner.py           make_vector_env, VectorRunner, Transition
+    buffers.py          RolloutBuffer, compute_gae, ReplayBuffer
+    normalization.py    RunningMeanStd, ObservationNormalizer, RewardScaler
+    networks.py         mlp, policies, QMixer, PerAgent, agent_one_hot,
+                        soft_update
+    config.py           AlgorithmConfig, OnPolicyConfig, OffPolicyConfig
+    base.py             Algorithm, OnPolicyAlgorithm, OffPolicyAlgorithm,
+                        TrainingLog
+  algorithms/           one module per algorithm, grouped by family
+    ppo/                on-policy
+      common.py         PPOConfig and the shared PPO implementation
+      ippo.py           IPPO (decentralised critics)
+      mappo.py          MAPPO (centralised critic)
+    ddpg/               off-policy actor-critic
+      common.py         DDPGConfig and the shared implementation
+      maddpg.py         MADDPG
+      matd3.py          MATD3 (twin critics, smoothing, delayed actors)
+    q_learning/         value-based
+      common.py         QLearningConfig and the shared implementation
+      iql.py            IQL (no mixing)
+      vdn.py            VDN and VDNMixer (additive mixing)
+      qmix.py           QMIX (monotonic mixing with QMixer)
+  presets/              tuned settings for the env_lib environments
+    __init__.py         PRESETS, get_preset, list_presets, train_preset
+    ppo.py, ddpg.py, q_learning.py
+                        the tables of each family, with tuning notes
 \end{textcode}
+
+The docstring of every family package (for example
+\code{help(marl\_algorithms.algorithms.ppo)}) describes the methods, the
+implementation choices and the references; the docstring of every class gives
+its losses.
 
 \subsection{The per-agent view: \texorpdfstring{\code{MultiAgentSpec}}{MultiAgentSpec}}\label{sec:marl-spec}
 
@@ -1183,8 +1356,10 @@ agent it is (double) DQN.
 % ---------------------------------------------------------------------------
 \section{Presets and results}\label{sec:marl-results}
 
-Every algorithm module defines a table \code{PRESETS[algorithm][env\_id]} of
-tuned demonstration settings: the environment steps (\code{"total\_steps"}),
+The package \pkg{marl\_algorithms.presets} holds a table
+\code{PRESETS[algorithm][env\_id]} of tuned settings, collected from one module
+per family (\pkg{presets.ppo}, \pkg{presets.ddpg} and
+\pkg{presets.q\_learning}, each with the notes from tuning). A preset fixes the environment steps (\code{"total\_steps"}),
 the number of copies (\code{"num\_envs"}), configuration overrides
 (\code{"config"}) and environment arguments (\code{"env\_kwargs"}, empty for
 all current presets). The presets were tuned to train in at most about two
@@ -1363,7 +1538,7 @@ method and confidence intervals, for example with
 % ---------------------------------------------------------------------------
 \section{The demonstration script}\label{sec:marl-demo}
 
-\code{examples/marl\_training\_demo.py} trains one algorithm of every family
+\code{examples/algorithms/marl\_training\_demo.py} trains one algorithm of every family
 with its preset, each on a different environment:
 
 \begin{itemize}
@@ -1385,7 +1560,7 @@ few minutes on one CPU core.
 
 \begin{table}[htbp]
   \centering\small
-  \caption{Options of \code{examples/marl\_training\_demo.py}.}
+  \caption{Options of \code{examples/algorithms/marl\_training\_demo.py}.}
   \label{tab:marl-demo-options}
   \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{2.9cm}>{\raggedright\arraybackslash}p{4.6cm}>{\raggedright\arraybackslash}X@{}}
     \toprule
@@ -1403,11 +1578,11 @@ few minutes on one CPU core.
 \end{table}
 
 \begin{shellcode}
-python examples/marl_training_demo.py                 # the suite, a few minutes
-python examples/marl_training_demo.py --algo mappo --env PowerGrid-v0
-python examples/marl_training_demo.py --algo qmix --env LineMsg-v0 \
+python examples/algorithms/marl_training_demo.py                 # the suite, a few minutes
+python examples/algorithms/marl_training_demo.py --algo mappo --env PowerGrid-v0
+python examples/algorithms/marl_training_demo.py --algo qmix --env LineMsg-v0 \
     --gif renders/qmix.gif
-python examples/marl_training_demo.py --quick --plot ''   # smoke test
+python examples/algorithms/marl_training_demo.py --quick --plot ''   # smoke test
 \end{shellcode}
 
 Table~\ref{tab:marl-demo-results} shows the results of the full suite with its
@@ -1418,7 +1593,7 @@ shown there.
 
 \begin{table}[htbp]
   \centering\small
-  \caption{Output of \code{examples/marl\_training\_demo.py} with default
+  \caption{Output of \code{examples/algorithms/marl\_training\_demo.py} with default
     arguments: training seed 0 on one CPU core (``Time'' is the wall-clock
     training time), 64 evaluation episodes with seed 1 on a 64-copy vector
     environment.}
@@ -1438,7 +1613,7 @@ shown there.
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\textwidth]{marl_training.png}
-  \caption{Learning curves saved by \code{examples/marl\_training\_demo.py}
+  \caption{Learning curves saved by \code{examples/algorithms/marl\_training\_demo.py}
     (default suite, seed 0): mean return of the exploratory training episodes
     over environment steps, with the evaluation returns of random actions
     (dotted) and of the baseline controller (dashed) for reference. The
@@ -1453,7 +1628,9 @@ shown there.
 % ---------------------------------------------------------------------------
 \section{Adding an algorithm}\label{sec:marl-extending}
 
-A new algorithm reuses the core and implements only what is specific to it:
+A new algorithm reuses the core and implements only what is specific to it.
+Inside the package it gets its own module in the folder of its family (or a
+new family folder with a \code{common.py} when it shares code with a sibling):
 
 \begin{enumerate}
   \item Define a configuration dataclass that derives from
@@ -1482,9 +1659,10 @@ A new algorithm reuses the core and implements only what is specific to it:
     find it. An unregistered class can still be trained directly
     (\code{MyAlgorithm(envs, seed=0).learn(envs, ...)}) and loaded with
     \code{MyAlgorithm.load(path)}.
-  \item Add presets as a module-level \code{PRESETS} table
-    \code{\{name: \{env\_id: preset\}\}} in the algorithm's module, where
-    \code{get\_preset} and \code{marl-train presets} look them up.
+  \item Add presets as a table \code{\{name: \{env\_id: preset\}\}} in a
+    module of \pkg{marl\_algorithms.presets} and merge it into \code{PRESETS} in
+    \code{presets/\_\_init\_\_.py}, where \code{get\_preset}, \code{compare} and
+    \code{marl-train presets} look them up.
   \item Add tests in \code{tests/algorithms/}: action shapes on several
     environments, \code{policy()} with \code{env\_lib.evaluate}, the
     \code{TypeError} for an unsupported action kind, a short \code{learn} with
@@ -1574,7 +1752,8 @@ class IA2C(OnPolicyAlgorithm):
         return {"loss": loss.item(), "entropy": entropy.mean().item()}
 
 
-# Registration (in marl_algorithms/registry.py) and a preset (in the module):
+# Registration (in marl_algorithms/registry.py) and a preset (in a module of
+# marl_algorithms/presets/, merged into PRESETS):
 # AlgorithmInfo("ia2c", "my_package.ia2c:IA2C", "on-policy", ("discrete",),
 #               "independent advantage actor-critic", "<reference>")
 PRESETS = {"ia2c": {"LineMsg-v0": {"num_envs": 32, "total_steps": 100_000,

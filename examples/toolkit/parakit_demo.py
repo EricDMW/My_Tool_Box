@@ -16,12 +16,12 @@ Examples
 --------
 Save the defaults, then reload the newest file with one override::
 
-    python examples/parakit_demo.py
-    python examples/parakit_demo.py --load renders/parakit --set batch_size=128
+    python examples/toolkit/parakit_demo.py
+    python examples/toolkit/parakit_demo.py --load renders/parakit --set batch_size=128
 
 Edit the values in a window (auto-closes after 30 s without activity)::
 
-    python examples/parakit_demo.py --gui --inactivity-timeout 30
+    python examples/toolkit/parakit_demo.py --gui --inactivity-timeout 30
 """
 
 from __future__ import annotations

@@ -520,10 +520,10 @@ The example script compares zero, random and droop control on a few seeded
 episodes and can record the droop controller:
 
 \begin{shellcode}
-python examples/power_grid_demo.py
-python examples/power_grid_demo.py --buses 32 --topology ring --episodes 5 \
+python examples/environments/power_grid_demo.py
+python examples/environments/power_grid_demo.py --buses 32 --topology ring --episodes 5 \
     --theme light --render renders/power_grid.gif
-python examples/power_grid_demo.py --render-mode human
+python examples/environments/power_grid_demo.py --render-mode human
 \end{shellcode}
 
 % ---------------------------------------------------------------------------

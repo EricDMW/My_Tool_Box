@@ -627,12 +627,13 @@ random_return = evaluate(lambda o: int(rng.integers(n_actions)))
 print(f"greedy {greedy_return:.1f}, random {random_return:.1f}")
 \end{pycode}
 
-Two larger examples ship with the repository (Chapter~\ref{chap:examples}):
+Two larger examples ship with the repository, in \code{examples/toolkit/}
+(Chapter~\ref{chap:examples}):
 \begin{itemize}
-  \item \code{examples/simple\_transformer\_example.py} trains a
+  \item \code{simple\_transformer\_example.py} trains a
     \code{TransformerPolicyNetwork} with REINFORCE on a memory task;
-  \item \code{examples/transformer\_rl\_example.py} trains transformer actor
-    and critic networks with PPO on batched environments.
+  \item \code{transformer\_rl\_example.py} trains transformer actor and critic
+    networks with PPO on batched environments.
 \end{itemize}
 
 \section{Changes in version 1.0}\label{sec:neural-changes}

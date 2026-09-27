@@ -19,15 +19,15 @@ Examples
 --------
 Record the default NumPy run::
 
-    python examples/kuramoto_demo.py
+    python examples/environments/kuramoto_demo.py
 
 Four parallel systems on the PyTorch backend, light theme::
 
-    python examples/kuramoto_demo.py --backend torch --n-agents 4 --theme light
+    python examples/environments/kuramoto_demo.py --backend torch --n-agents 4 --theme light
 
 Fixed distance-based coupling on two clusters, live window::
 
-    python examples/kuramoto_demo.py --mode constant --topology two_clusters --render-mode human
+    python examples/environments/kuramoto_demo.py --mode constant --topology two_clusters --render-mode human
 """
 
 from __future__ import annotations

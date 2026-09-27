@@ -13,9 +13,9 @@ flattened window, and saves a learning curve to ``renders/``.
 
 Usage::
 
-    python examples/simple_transformer_example.py              # full run (about a minute on CPU)
-    python examples/simple_transformer_example.py --quick      # smoke test (a few seconds)
-    python examples/simple_transformer_example.py --episodes 500 --save renders/curve.png
+    python examples/toolkit/simple_transformer_example.py              # full run (about a minute on CPU)
+    python examples/toolkit/simple_transformer_example.py --quick      # smoke test (a few seconds)
+    python examples/toolkit/simple_transformer_example.py --episodes 500 --save renders/curve.png
 """
 
 from __future__ import annotations

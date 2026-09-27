@@ -15,9 +15,9 @@ bonus. Training curves are saved to ``renders/``.
 
 Usage::
 
-    python examples/transformer_rl_example.py              # full run (about a minute on CPU)
-    python examples/transformer_rl_example.py --quick      # smoke test (a few seconds)
-    python examples/transformer_rl_example.py --iterations 100 --device cuda
+    python examples/toolkit/transformer_rl_example.py              # full run (about a minute on CPU)
+    python examples/toolkit/transformer_rl_example.py --quick      # smoke test (a few seconds)
+    python examples/toolkit/transformer_rl_example.py --iterations 100 --device cuda
 """
 
 from __future__ import annotations

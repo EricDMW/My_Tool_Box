@@ -9,9 +9,9 @@ per-episode metrics and can record a GIF of the baseline.
 
 Run::
 
-    python examples/ajlatt_demo.py --episodes 3
-    python examples/ajlatt_demo.py --map obstacles05 --save renders/ajlatt.gif
-    python examples/ajlatt_demo.py --render-mode human
+    python examples/environments/ajlatt_demo.py --episodes 3
+    python examples/environments/ajlatt_demo.py --map obstacles05 --save renders/ajlatt.gif
+    python examples/environments/ajlatt_demo.py --render-mode human
 """
 
 from __future__ import annotations

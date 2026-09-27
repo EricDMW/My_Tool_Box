@@ -11,16 +11,16 @@ Examples
 --------
 Rendezvous on a ring (default)::
 
-    python examples/consensus_demo.py
+    python examples/environments/consensus_demo.py
 
 Wedge formation of double integrators on a proximity graph, light theme::
 
-    python examples/consensus_demo.py --task formation --shape wedge \\
+    python examples/environments/consensus_demo.py --task formation --shape wedge \\
         --topology proximity --dynamics double --theme light --save renders/wedge.gif
 
 Watch the controller live in a window::
 
-    python examples/consensus_demo.py --render-mode human
+    python examples/environments/consensus_demo.py --render-mode human
 """
 
 from __future__ import annotations

@@ -175,11 +175,11 @@ env-lib list
 python -m env_lib list            # the same without the console script
 
 # 3. Create every environment and take a few random steps
-python examples/quickstart.py --steps 5
+python examples/getting_started/quickstart.py --steps 5
 
 # 4. The algorithms (needs the torch extra) and a few seconds of training
 marl-train list
-python examples/marl_training_demo.py --quick --plot ''
+python examples/algorithms/marl_training_demo.py --quick --plot ''
 
 # 5. Full test suite (requires the dev extra)
 pytest -q

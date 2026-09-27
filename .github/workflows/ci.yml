@@ -44,14 +44,16 @@ jobs:
         run: pytest -q
       - name: Smoke-test examples
         run: |
-          python examples/quickstart.py --steps 5
-          python examples/simple_transformer_example.py --quick --no-plot
-          python examples/workflow_demo.py --no-save
-          python examples/power_grid_demo.py --episodes 2 --steps 50
-          python examples/platoon_demo.py --episodes 2 --steps 100
+          python examples/getting_started/quickstart.py --steps 5
+          python examples/toolkit/simple_transformer_example.py --quick --no-plot
+          python examples/getting_started/workflow_demo.py --no-save
+          python examples/environments/power_grid_demo.py --episodes 2 --steps 50
+          python examples/environments/platoon_demo.py --episodes 2 --steps 100
           env-lib list
           env-lib evaluate Formation-v0 --episodes 8 --num-envs 8
           python benchmarks/benchmark_envs.py --steps 20 --render-steps 2
           python benchmarks/benchmark_vector.py --quick
           marl-train list
-          python examples/marl_training_demo.py --quick --plot ''
+          python examples/algorithms/marl_training_demo.py --quick --plot ''
+          python examples/algorithms/baseline_comparison.py --quick --seeds 0 --episodes 16 --plot ''
+          marl-train compare LineMsg-v0 --algos iql vdn --steps 1000 --num-envs 8 --episodes 8

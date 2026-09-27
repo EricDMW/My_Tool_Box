@@ -19,10 +19,10 @@ results table and saves the learning curves.
 
 Run::
 
-    python examples/marl_training_demo.py                          # default suite
-    python examples/marl_training_demo.py --algo mappo --env PowerGrid-v0
-    python examples/marl_training_demo.py --algo qmix --env LineMsg-v0 --gif renders/qmix.gif
-    python examples/marl_training_demo.py --quick                  # smoke test, seconds
+    python examples/algorithms/marl_training_demo.py                          # default suite
+    python examples/algorithms/marl_training_demo.py --algo mappo --env PowerGrid-v0
+    python examples/algorithms/marl_training_demo.py --algo qmix --env LineMsg-v0 --gif renders/qmix.gif
+    python examples/algorithms/marl_training_demo.py --quick                  # smoke test, seconds
 """
 
 from __future__ import annotations

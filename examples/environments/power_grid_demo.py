@@ -21,16 +21,16 @@ Examples
 --------
 Default benchmark system (16 buses, small-world network)::
 
-    python examples/power_grid_demo.py
+    python examples/environments/power_grid_demo.py
 
 A larger ring network, five episodes, with a recording in the light theme::
 
-    python examples/power_grid_demo.py --buses 32 --topology ring --episodes 5 \\
+    python examples/environments/power_grid_demo.py --buses 32 --topology ring --episodes 5 \\
         --theme light --render renders/power_grid.gif
 
 Watch the droop controller live in a window::
 
-    python examples/power_grid_demo.py --render-mode human
+    python examples/environments/power_grid_demo.py --render-mode human
 """
 
 from __future__ import annotations

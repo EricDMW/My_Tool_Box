@@ -16,9 +16,12 @@ multi-agent reinforcement learning algorithms, trained directly on the
 
 - Algorithms: IPPO and MAPPO (on-policy, continuous and discrete actions),
   MADDPG and MATD3 (off-policy actor-critic, continuous actions), IQL, VDN
-  and QMIX (value-based, discrete actions). Each module documents the method,
-  its losses and references, and any standard simplification (for example
-  feed-forward agents on a transition replay for the value-based family).
+  and QMIX (value-based, discrete actions). One module per algorithm, grouped
+  by family (`algorithms/ppo/`, `algorithms/ddpg/`, `algorithms/q_learning/`,
+  each with a `common` module for what its algorithms share); the family
+  packages document the methods, their losses and references, and any
+  standard simplification (for example feed-forward agents on a transition
+  replay for the value-based family).
 - Core shared by all methods:
   - `MultiAgentSpec`: per-agent view of any environment's joint spaces
     (Box, MultiDiscrete, MultiBinary, whole-system single agent) with
@@ -35,24 +38,39 @@ multi-agent reinforcement learning algorithms, trained directly on the
     without global side effects, `save`/`load`, evaluation through
     `env_lib.evaluate`, and `TrainingLog`.
 - `marl_algorithms.train(algorithm, env_id, total_steps)` and tuned presets
-  (`train_preset`, `get_preset`, `list_presets`) that learn in one to two
-  minutes on one CPU core; results against random actions and the classical
-  controllers are in the README and the handbook.
+  in the package `marl_algorithms.presets` (`PRESETS`, `train_preset`,
+  `get_preset`, `list_presets`) that learn in one to two minutes on one CPU
+  core; results against random actions and the classical controllers are in
+  the README and the handbook.
+- The algorithms as baselines: `marl_algorithms.compare(env_id, ...)` trains
+  the algorithms with a preset for the environment (or the ones named) over
+  one or several seeds and evaluates them with random actions, the classical
+  controller and your own policies on the same seeded episodes; the
+  `Comparison` report prints as a table, exports to CSV and Markdown and keeps
+  the trained algorithms. `per_copy` batches a single-environment policy.
 - `marl-train` command line: `list`, `presets`, `run` (train, then compare
-  random, trained and baseline returns) and `evaluate`. Unknown algorithms,
-  environments and configuration fields are reported before training, with
-  exit status 2.
+  random, trained and baseline returns), `compare` (the baselines on one
+  environment, over seeds) and `evaluate`. Unknown algorithms, environments
+  and configuration fields are reported before training, with exit status 2.
 - PyTorch stays optional: `import marl_algorithms` works without it, and using
   an algorithm raises an `ImportError` that names the `torch` extra.
-- `examples/marl_training_demo.py` trains MAPPO on PowerGrid, MADDPG on
-  Consensus, QMIX on LineMsg and VDN on WirelessComm and plots the learning
-  curves; `benchmarks/benchmark_marl.py` trains and evaluates every preset.
+- `examples/algorithms/marl_training_demo.py` trains MAPPO on PowerGrid,
+  MADDPG on Consensus, QMIX on LineMsg and VDN on WirelessComm and plots the
+  learning curves; `examples/algorithms/baseline_comparison.py` compares a
+  proposed controller with MAPPO, IPPO, the classical controller and random
+  actions; `benchmarks/benchmark_marl.py` trains and evaluates every preset.
+
+### Changed
+
+- The examples are grouped by topic: `examples/getting_started/`,
+  `examples/environments/`, `examples/algorithms/` and `examples/toolkit/`.
 
 ### Documentation
 
 - Handbook chapter on the algorithms (core design, equations of every method,
-  configuration, presets and results, extending), API reference and examples
-  updated; README and slides describe the new package.
+  using them as baselines, configuration, presets and results, extending),
+  API reference and examples updated; README and slides describe the new
+  package and how to compare a method with the baselines.
 
 ### Removed
 

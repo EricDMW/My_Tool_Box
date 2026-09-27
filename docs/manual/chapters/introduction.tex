@@ -311,14 +311,20 @@ My_Tool_Box/
       wireless_comm_env/   WirelessComm
     marl_algorithms/       learning algorithms (import name marl_algorithms)
       core/                agent spec, runner, buffers, networks, base classes
-      algorithms/          IPPO and MAPPO, MADDPG and MATD3, IQL, VDN and QMIX
-      registry.py          train(), algorithm records; presets.py: presets
+      algorithms/          one module per algorithm, by family: ppo/ (IPPO,
+                           MAPPO), ddpg/ (MADDPG, MATD3), q_learning/ (IQL,
+                           VDN, QMIX)
+      presets/             tuned settings for the environments
+      registry.py          train(), algorithm records
+      baselines.py         compare(): the algorithms as baselines
       __main__.py          the marl-train command line
     toolkit/               research utilities (import name toolkit)
       plotkit/             plotting
       neural_toolkit/      PyTorch networks and tabular tools
       parakit/             argparse parameter management
-  examples/                runnable, documented example scripts
+  examples/                runnable, documented example scripts:
+                           getting_started/, environments/, algorithms/,
+                           toolkit/
   benchmarks/              performance measurements
   tests/                   pytest suite
   docs/manual/             this manual (LaTeX sources)

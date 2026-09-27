@@ -175,9 +175,9 @@ The example script compares a random policy, duty-cycled relays and the
 always-relay policy and can record an episode:
 
 \begin{shellcode}
-python examples/linemsg_demo.py --policy relay --save renders/linemsg.gif
-python examples/linemsg_demo.py --num-agents 30 --episodes 50
-python examples/linemsg_demo.py --render-mode ansi
+python examples/environments/linemsg_demo.py --policy relay --save renders/linemsg.gif
+python examples/environments/linemsg_demo.py --num-agents 30 --episodes 50
+python examples/environments/linemsg_demo.py --render-mode ansi
 \end{shellcode}
 
 Over 20 episodes with $N = 10$ and \code{max\_iter=50} the mean returns are
@@ -358,9 +358,9 @@ The example script compares uniformly random actions, $p$-persistent slotted
 ALOHA and the rotating schedule:
 
 \begin{shellcode}
-python examples/wireless_comm_demo.py --policy schedule \
+python examples/environments/wireless_comm_demo.py --policy schedule \
     --save renders/wireless.gif
-python examples/wireless_comm_demo.py --grid 8 8 --tau 0.5 --episodes 50
+python examples/environments/wireless_comm_demo.py --grid 8 8 --tau 0.5 --episodes 50
 \end{shellcode}
 
 Over 20 episodes on the $6 \times 6$ grid the mean returns are 385 for random
