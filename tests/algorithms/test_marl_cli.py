@@ -45,6 +45,10 @@ def test_train_preset_with_overrides():
     assert algo.env_steps >= 600 and log.env_id == "LineMsg-v0"
     with pytest.raises(KeyError):
         train_preset("maddpg", "LineMsg-v0")
+    small, _ = train_preset(
+        "vdn", "LineMsg-v0", total_steps=200, num_envs=4, env_kwargs={"num_agents": 4}
+    )
+    assert small.spec.n_agents == 4
 
 
 def test_run_and_evaluate_commands(tmp_path, capsys):

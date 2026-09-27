@@ -15,14 +15,31 @@ VDN         value-based               discrete
 QMIX        value-based               discrete
 ==========  ========================  ==========================
 
+Layout::
+
+    core/          shared building blocks: agent spec, experience collection,
+                   buffers, normalisation, networks, base classes
+    algorithms/    one module per algorithm, grouped by family:
+                   ppo/ (IPPO, MAPPO), ddpg/ (MADDPG, MATD3),
+                   q_learning/ (IQL, VDN, QMIX)
+    presets/       tuned settings for the env_lib environments
+    registry.py    algorithm names and train()
+    baselines.py   compare(): the algorithms and classical controllers as
+                   baselines for your own method
+    __main__.py    the marl-train command line
+
 Quick start::
 
     import env_lib
-    from marl_algorithms import train
+    from marl_algorithms import compare, train
 
     algo, log = train("mappo", "PowerGrid-v0", total_steps=200_000, num_envs=32)
     print(log.summary())
     print(algo.evaluate(env_lib.make_vec("PowerGrid-v0", 16), n_episodes=32))
+
+    # Baselines: every preset algorithm, random actions, the classical
+    # controller and your policy, on the same evaluation episodes
+    print(compare("PowerGrid-v0", seeds=(0, 1, 2), policies={"mine": my_policy}))
 
 The package requires PyTorch (``pip install "my-tool-box[torch]"``).
 """
@@ -54,6 +71,10 @@ _LAZY: dict[str, str] = {
     "get_preset": "marl_algorithms.presets",
     "list_presets": "marl_algorithms.presets",
     "train_preset": "marl_algorithms.presets",
+    # Baselines
+    "Comparison": "marl_algorithms.baselines",
+    "compare": "marl_algorithms.baselines",
+    "per_copy": "marl_algorithms.baselines",
     # Algorithms
     "IPPO": "marl_algorithms.algorithms.ppo",
     "MAPPO": "marl_algorithms.algorithms.ppo",
