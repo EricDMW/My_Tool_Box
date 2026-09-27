@@ -2,6 +2,9 @@
 % Chapter: Installation
 % ---------------------------------------------------------------------------
 \chapter{Installation}\label{chap:install}
+% Long monospaced identifiers leave little room for line breaking; allow some
+% extra inter-word stretch in this chapter (the group keeps it local).
+\begingroup\setlength{\emergencystretch}{3em}% chapter-local
 
 My Tool Box is a standard Python project described by a single
 \code{pyproject.toml} file. It is installed from its source repository with
@@ -225,8 +228,9 @@ uninstall the old distributions and then follow Appendix~\ref{app:migration}.
 
 The manual is written in LaTeX and lives in \code{docs/manual/}. Building it
 requires a TeX distribution that provides \code{pdflatex} and \code{latexmk},
-such as TeX Live (\code{sudo apt-get install texlive-latex-extra
-texlive-fonts-recommended latexmk} on Debian and Ubuntu) or MacTeX. The
+such as TeX Live or MacTeX. On Debian and Ubuntu the packages
+\code{latexmk}, \code{texlive-latex-extra}, \code{texlive-fonts-recommended}
+and \code{lmodern} are sufficient. The
 document uses only standard packages (\pkg{listings}, \pkg{booktabs},
 \pkg{tabularx}, \pkg{hyperref}, \pkg{fancyhdr} and similar).
 
@@ -242,3 +246,5 @@ latexmk -C -outdir=output                    # remove build products
 references. All build products are written to \code{docs/manual/output/},
 which is ignored by Git. The file \code{docs/manual/README.md} describes the
 source layout of the manual.
+
+\par\endgroup

@@ -2,6 +2,9 @@
 % Appendix: API reference
 % ---------------------------------------------------------------------------
 \chapter{API Reference}\label{app:api}
+% Long monospaced identifiers leave little room for line breaking; allow some
+% extra inter-word stretch in this chapter (the group keeps it local).
+\begingroup\setlength{\emergencystretch}{3em}% chapter-local
 
 This appendix lists the public classes and functions of version 1.0 with their
 signatures, grouped by module. Signatures omit type annotations; defaults are
@@ -608,3 +611,5 @@ ParameterTuner.tune_parameters(parser, ...same arguments...)    # class method
 ParameterAdjuster = ParameterTuner
 TK_MISSING_MESSAGE                        # str: how to install Tk
 \end{pycode}
+
+\par\endgroup

@@ -2,6 +2,9 @@
 % Appendix: Migration from pre-1.0 versions
 % ---------------------------------------------------------------------------
 \chapter{Migration from pre-1.0 versions}\label{app:migration}
+% Long monospaced identifiers leave little room for line breaking; allow some
+% extra inter-word stretch in this chapter (the group keeps it local).
+\begingroup\setlength{\emergencystretch}{3em}% chapter-local
 
 Before version 1.0 the code lived in two separate projects,
 \code{envlib\_project/env\_lib} and \code{toolkit\_project/toolkit}, each with
@@ -92,7 +95,7 @@ done = bool(np.any(terminated)) or truncated
 Pistonball) and emits a \code{DeprecationWarning}; use
 \code{env.reset(seed=s)}. No environment seeds the global NumPy or PyTorch
 generators any more (the Kuramoto environments used to call
-\code{np.random.seed(42)} and \code{torch.manual_seed(42)}); code that relied
+\code{np.random.seed(42)} and \code{torch.manual\_seed(42)}); code that relied
 on these side effects for its own random numbers must seed its own generator.
 
 \paragraph{Episode limits and termination.}
@@ -419,3 +422,5 @@ apply_parameters(parser, load_parameters(path),
 apply_parameters(parser, {"learning_rate": "0.02"},
                  validation_callbacks={"learning_rate": validate_lr})
 \end{pycode}
+
+\par\endgroup

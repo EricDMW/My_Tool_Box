@@ -2,6 +2,9 @@
 % Chapter: Toolkit overview and parakit
 % ---------------------------------------------------------------------------
 \chapter{Toolkit Overview and Parameter Management}\label{chap:toolkit}
+% Long monospaced identifiers leave little room for line breaking; allow some
+% extra inter-word stretch in this chapter (the group keeps it local).
+\begingroup\setlength{\emergencystretch}{3em}% chapter-local
 
 The \pkg{toolkit} package collects research utilities that are independent of
 the environments. This chapter describes its structure and then documents
@@ -403,3 +406,5 @@ except (ImportError, RuntimeError) as exc:
 The script \code{examples/parakit\_demo.py} demonstrates the complete
 workflow, including the window (\code{--gui}), loading a file or directory
 (\code{--load}) and command-line overrides (\code{--set KEY=VALUE}).
+
+\par\endgroup

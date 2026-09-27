@@ -2,6 +2,9 @@
 % Chapter: neural_toolkit
 % ---------------------------------------------------------------------------
 \chapter{neural\_toolkit: Networks and Tabular Tools}\label{chap:neural}
+% Long monospaced identifiers leave little room for line breaking; allow some
+% extra inter-word stretch in this chapter (the group keeps it local).
+\begingroup\setlength{\emergencystretch}{3em}% chapter-local
 
 \pkg{toolkit.neural\_toolkit} provides configurable PyTorch modules for
 reinforcement learning: policy, value and Q-networks with MLP, convolutional,
@@ -653,3 +656,5 @@ checkpoints written by versions before 1.0 cannot be loaded into 1.0 networks:
 parameter shapes happen to match, the networks compute different functions.
 Retrain models with version 1.0; Appendix~\ref{app:migration} lists the other
 API changes.
+
+\par\endgroup

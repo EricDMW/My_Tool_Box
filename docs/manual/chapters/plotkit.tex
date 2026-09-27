@@ -2,6 +2,9 @@
 % Chapter: plotkit
 % ---------------------------------------------------------------------------
 \chapter{plotkit: Publication-Quality Plots}\label{chap:plotkit}
+% Long monospaced identifiers leave little room for line breaking; allow some
+% extra inter-word stretch in this chapter (the group keeps it local).
+\begingroup\setlength{\emergencystretch}{3em}% chapter-local
 
 \pkg{toolkit.plotkit} produces the figures that research papers on
 reinforcement learning need most often: learning curves aggregated over seeds
@@ -673,3 +676,5 @@ active matplotlib backend is non-interactive (for example with
 instead. The script \code{examples/plotkit\_gallery.py} builds the
 three-panel figure of Figure~\ref{fig:plotkit-gallery} and is a good starting
 point for a paper figure; run it with \code{--help} for its options.
+
+\par\endgroup

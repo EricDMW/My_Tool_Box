@@ -2,6 +2,9 @@
 % Chapter: Introduction
 % ---------------------------------------------------------------------------
 \chapter{Introduction}\label{chap:intro}
+% Long monospaced identifiers leave little room for line breaking; allow some
+% extra inter-word stretch in this chapter (the group keeps it local).
+\begingroup\setlength{\emergencystretch}{3em}% chapter-local
 
 My Tool Box is a Python package for research on multi-agent reinforcement
 learning (MARL) and networked control. It is distributed as a single
@@ -274,3 +277,5 @@ When results depend on a particular environment, please also cite the
 original description of the underlying model or benchmark (for example the
 Kuramoto model of coupled oscillators), as given in the corresponding
 environment chapter.
+
+\par\endgroup

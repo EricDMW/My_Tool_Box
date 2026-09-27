@@ -2,6 +2,9 @@
 % Chapter: Troubleshooting
 % ---------------------------------------------------------------------------
 \chapter{Troubleshooting}\label{chap:troubleshooting}
+% Long monospaced identifiers leave little room for line breaking; allow some
+% extra inter-word stretch in this chapter (the group keeps it local).
+\begingroup\setlength{\emergencystretch}{3em}% chapter-local
 
 This chapter collects the problems that users most often run into, grouped by
 symptom, together with their causes and solutions. If a problem is not
@@ -363,3 +366,5 @@ reproduce its behaviour before version 1.0 closely with
     applied on top of those settings; call \code{matplotlib.rcdefaults()} to
     start from the matplotlib defaults.
 \end{description}
+
+\par\endgroup

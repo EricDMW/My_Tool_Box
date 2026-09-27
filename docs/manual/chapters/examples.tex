@@ -2,6 +2,9 @@
 % Chapter: Examples, recording, benchmarks and development workflow
 % ---------------------------------------------------------------------------
 \chapter{Examples, Benchmarks and Development}\label{chap:examples}
+% Long monospaced identifiers leave little room for line breaking; allow some
+% extra inter-word stretch in this chapter (the group keeps it local).
+\begingroup\setlength{\emergencystretch}{3em}% chapter-local
 
 This chapter is a practical companion to the reference chapters. It lists the
 example scripts that ship with the repository, shows how to write evaluation
@@ -391,3 +394,5 @@ A new environment is registered by adding an entry to \code{ENV\_SPECS} in
 registration does not import optional dependencies), exported lazily from
 \code{src/env\_lib/\_\_init\_\_.py}, tested in \code{tests/envs/}, demonstrated
 in \code{examples/} and documented in a chapter of this manual.
+
+\par\endgroup
