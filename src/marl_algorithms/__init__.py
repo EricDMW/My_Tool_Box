@@ -1,0 +1,78 @@
+"""marl_algorithms: classical multi-agent reinforcement learning algorithms.
+
+Reference implementations of seven widely used methods, written against one
+small core and trained directly on the ``env_lib`` environments:
+
+==========  ========================  ==========================
+Algorithm   Family                    Actions
+==========  ========================  ==========================
+IPPO        on-policy                 continuous and discrete
+MAPPO       on-policy                 continuous and discrete
+MADDPG      off-policy actor-critic   continuous
+MATD3       off-policy actor-critic   continuous
+IQL         value-based               discrete
+VDN         value-based               discrete
+QMIX        value-based               discrete
+==========  ========================  ==========================
+
+Quick start::
+
+    import env_lib
+    from marl_algorithms import train
+
+    algo, log = train("mappo", "PowerGrid-v0", total_steps=200_000, num_envs=32)
+    print(log.summary())
+    print(algo.evaluate(env_lib.make_vec("PowerGrid-v0", 16), n_episodes=32))
+
+The package requires PyTorch (``pip install "my-tool-box[torch]"``).
+"""
+
+from __future__ import annotations
+
+import importlib
+from typing import Any
+
+from marl_algorithms._version import __version__
+
+_LAZY: dict[str, str] = {
+    # Core
+    "Algorithm": "marl_algorithms.core.base",
+    "OnPolicyAlgorithm": "marl_algorithms.core.base",
+    "OffPolicyAlgorithm": "marl_algorithms.core.base",
+    "TrainingLog": "marl_algorithms.core.base",
+    "MultiAgentSpec": "marl_algorithms.core.spec",
+    "VectorRunner": "marl_algorithms.core.runner",
+    "Transition": "marl_algorithms.core.runner",
+    "make_vector_env": "marl_algorithms.core.runner",
+    # Registry
+    "AlgorithmInfo": "marl_algorithms.registry",
+    "get_algorithm": "marl_algorithms.registry",
+    "list_algorithms": "marl_algorithms.registry",
+    "make_algorithm": "marl_algorithms.registry",
+    "train": "marl_algorithms.registry",
+    # Algorithms
+    "IPPO": "marl_algorithms.algorithms.ppo",
+    "MAPPO": "marl_algorithms.algorithms.ppo",
+    "PPOConfig": "marl_algorithms.algorithms.ppo",
+    "MADDPG": "marl_algorithms.algorithms.ddpg",
+    "MATD3": "marl_algorithms.algorithms.ddpg",
+    "DDPGConfig": "marl_algorithms.algorithms.ddpg",
+    "IQL": "marl_algorithms.algorithms.value_decomposition",
+    "VDN": "marl_algorithms.algorithms.value_decomposition",
+    "QMIX": "marl_algorithms.algorithms.value_decomposition",
+    "QLearningConfig": "marl_algorithms.algorithms.value_decomposition",
+}
+
+__all__ = ["__version__", *sorted(_LAZY)]
+
+
+def __getattr__(name: str) -> Any:
+    if name in _LAZY:
+        value = getattr(importlib.import_module(_LAZY[name]), name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))
