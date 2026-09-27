@@ -295,7 +295,8 @@ def test_append_and_extend_with_nargs():
     for value in ([[7, 8]], [], [[1, 2], [3, 4]]):
         assert parse_value(a["point"], format_value(a["point"], value)) == value
     assert parse_value(a["ext"], format_value(a["ext"], [1, 2, 3])) == [1, 2, 3]
-    args = apply_parameters(parser, {"point": [[9, 9]], "ext": [4]}).parse_args(["--point", "0", "1"])
+    apply_parameters(parser, {"point": [[9, 9]], "ext": [4]})
+    args = parser.parse_args(["--point", "0", "1"])
     assert args.point == [[9, 9], [0, 1]] and args.ext == [4]
 
 

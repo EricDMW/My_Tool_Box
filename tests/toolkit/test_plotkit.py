@@ -295,7 +295,7 @@ def test_dates_times_and_durations_are_scalars():
     # Durations are drawn as seconds; dates keep a date axis.
     np.testing.assert_allclose(pk.plot_line(spans, [1, 2, 3]).lines[0].get_xdata(), [0, 60, 120])
     ax = pk.plot_bar(days, [1, 2, 3])
-    assert [t.get_text() for t in ax.get_xticklabels()] == ["2024-01-01", "2024-01-02", "2024-01-03"]
+    assert [t.get_text() for t in ax.get_xticklabels()] == [str(d) for d in days]
     ax = pk.plot_bar(spans, [1, 2, 3])
     assert [t.get_text() for t in ax.get_xticklabels()] == ["0:00:00", "0:01:00", "0:02:00"]
     ax = pk.plot_bar([datetime.time(9, 30), datetime.time(10, 0)], [1, 2])

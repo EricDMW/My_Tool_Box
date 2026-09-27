@@ -1040,9 +1040,7 @@ def plot_histogram(
         series.append(finite)
     if isinstance(bins, (int, np.integer, str)):
         # ax.hist ignores ``range`` when given explicit edges, so apply it here.
-        edges = np.histogram_bin_edges(
-            np.concatenate(series), bins=bins, range=kwargs.get("range")
-        )
+        edges = np.histogram_bin_edges(np.concatenate(series), bins=bins, range=kwargs.get("range"))
     else:
         edges = as_float_array(bins, name="bins")
     if ylabel is None:
