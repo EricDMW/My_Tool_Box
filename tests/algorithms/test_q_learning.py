@@ -18,8 +18,9 @@ from marl_algorithms import (
     QLearningConfig,
     make_vector_env,
 )
-from marl_algorithms.algorithms.value_decomposition import PRESETS, VDNMixer
+from marl_algorithms.algorithms.q_learning import VDNMixer
 from marl_algorithms.core.networks import QMixer
+from marl_algorithms.presets.q_learning import PRESETS
 from marl_algorithms.registry import get_algorithm, train
 
 ALGORITHMS = [IQL, VDN, QMIX]

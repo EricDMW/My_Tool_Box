@@ -61,10 +61,10 @@ _LAZY: dict[str, str] = {
     "MADDPG": "marl_algorithms.algorithms.ddpg",
     "MATD3": "marl_algorithms.algorithms.ddpg",
     "DDPGConfig": "marl_algorithms.algorithms.ddpg",
-    "IQL": "marl_algorithms.algorithms.value_decomposition",
-    "VDN": "marl_algorithms.algorithms.value_decomposition",
-    "QMIX": "marl_algorithms.algorithms.value_decomposition",
-    "QLearningConfig": "marl_algorithms.algorithms.value_decomposition",
+    "IQL": "marl_algorithms.algorithms.q_learning",
+    "VDN": "marl_algorithms.algorithms.q_learning",
+    "QMIX": "marl_algorithms.algorithms.q_learning",
+    "QLearningConfig": "marl_algorithms.algorithms.q_learning",
 }
 
 __all__ = ["__version__", *sorted(_LAZY)]

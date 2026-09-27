@@ -1,35 +1,44 @@
-"""Tuned training settings ("presets") for the demonstration environments.
+"""Tuned training settings ("presets") of the algorithms on the env_lib environments.
 
-Every algorithm module defines a ``PRESETS`` table
-``{algorithm: {env_id: preset}}`` where a preset is a dictionary with the keys
+A preset fixes everything needed to reproduce one training run of an
+algorithm on an environment. It is a dictionary with the keys
 
-* ``"total_steps"`` -- environment steps to train for;
+* ``"total_steps"`` -- environment steps to train for (summed over copies);
 * ``"num_envs"`` -- batched copies;
-* ``"config"`` -- configuration overrides;
-* ``"env_kwargs"`` -- environment constructor arguments (optional).
+* ``"config"`` -- configuration overrides of the algorithm;
+* ``"env_kwargs"`` -- environment constructor arguments.
 
-The presets were tuned to train in one to two minutes on one CPU core.
+The tables live in one module per algorithm family, together with the notes
+from tuning them: :mod:`~marl_algorithms.presets.ppo` (IPPO, MAPPO),
+:mod:`~marl_algorithms.presets.ddpg` (MADDPG, MATD3) and
+:mod:`~marl_algorithms.presets.q_learning` (IQL, VDN, QMIX). Every preset
+trains in one to two minutes on one CPU core.
 """
 
 from __future__ import annotations
 
 import copy
-import importlib
 from typing import Any
 
 from marl_algorithms.core.base import Algorithm, Callback, TrainingLog
+from marl_algorithms.presets import ddpg, ppo, q_learning
 from marl_algorithms.registry import _REGISTRY, train
 
-__all__ = ["get_preset", "list_presets", "train_preset"]
+__all__ = ["PRESETS", "get_preset", "list_presets", "train_preset"]
+
+#: Every preset, ``PRESETS[algorithm][env_id]``.
+PRESETS: dict[str, dict[str, dict[str, Any]]] = {
+    **ppo.PRESETS,
+    **ddpg.PRESETS,
+    **q_learning.PRESETS,
+}
 
 
 def _table(algorithm: str) -> dict[str, dict[str, Any]]:
     key = algorithm.lower()
     if key not in _REGISTRY:
         raise KeyError(f"unknown algorithm {algorithm!r}; available: {sorted(_REGISTRY)}")
-    module = importlib.import_module(_REGISTRY[key].entry_point.split(":")[0])
-    presets = getattr(module, "PRESETS", {})
-    return presets.get(key, {})
+    return PRESETS.get(key, {})
 
 
 def get_preset(algorithm: str, env_id: str) -> dict[str, Any] | None:
@@ -50,6 +59,7 @@ def train_preset(
     seed: int | None = 0,
     total_steps: int | None = None,
     num_envs: int | None = None,
+    env_kwargs: dict[str, Any] | None = None,
     device: str = "cpu",
     callback: Callback | None = None,
     **config: Any,
@@ -57,7 +67,8 @@ def train_preset(
     """Train with the preset of ``algorithm`` on ``env_id``.
 
     ``total_steps``, ``num_envs`` and configuration overrides replace the
-    preset's values.
+    preset's values; ``env_kwargs`` are merged into the preset's environment
+    arguments.
 
     Raises
     ------
@@ -73,7 +84,7 @@ def train_preset(
         total_steps if total_steps is not None else int(preset["total_steps"]),
         num_envs=num_envs if num_envs is not None else int(preset.get("num_envs", 16)),
         seed=seed,
-        env_kwargs=preset.get("env_kwargs"),
+        env_kwargs={**preset.get("env_kwargs", {}), **(env_kwargs or {})},
         device=device,
         callback=callback,
         **{**preset.get("config", {}), **config},

@@ -1,66 +1,11 @@
-"""Off-policy multi-agent actor-critic methods: MADDPG and MATD3.
+"""Shared implementation of MADDPG and MATD3.
 
-Both methods train *decentralised deterministic actors* ``mu_i(o_i)`` with
-*centralised critics* ``Q_i(s, a_1, ..., a_n)`` that see the global state ``s``
-(here the concatenation of all agents' observations) and the joint action
-(centralised training, decentralised execution). Experience comes from a
-replay buffer, so every transition is reused many times.
-
-* **MADDPG** (Lowe et al., 2017) extends DDPG (Lillicrap et al., 2016) to
-  several agents. Critic ``i`` regresses on the one-step TD target computed with
-  target actors and target critics; actor ``i`` follows the deterministic policy
-  gradient (Silver et al., 2014) of ``Q_i`` with its own action replaced by
-  ``mu_i(o_i)`` and the other agents' actions taken from the replay batch.
-* **MATD3** (Ackermann et al., 2019) carries the three TD3 corrections
-  (Fujimoto et al., 2018) over to centralised critics: twin critics with the
-  minimum in the target (against overestimation), clipped Gaussian noise on the
-  target actions (target policy smoothing), and actor and target-network
-  updates only every ``policy_delay`` critic updates.
-
-Implementation notes (standard choices, stated here once):
-
-* Feed-forward networks; the global state is the concatenation of all agents'
-  observations.
-* Parameter sharing (default): one actor and one critic for all agents, with a
-  one-hot agent identifier appended to the actor input ``o_i`` and to the critic
-  input ``[s, a_1..a_n]``; the shared critic evaluated at agent ``i``'s
-  identifier is ``Q_i``. With ``share_parameters=False`` every agent has its own
-  actor and critic (:class:`~marl_algorithms.core.networks.PerAgent`).
-* Agent-specific critic inputs (default, ``critic_local_inputs``): the input of
-  ``Q_i`` also repeats agent ``i``'s own observation and action,
-  ``[s, a_1..a_n, o_i, a_i, id_i]``. This is still a function of ``(s, a)``
-  and ``i`` only (the "agent-specific global state" of Yu et al., 2022), but a
-  shared critic no longer has to learn from the one-hot identifier which of
-  the ``n`` blocks of ``s`` and ``a`` belong to agent ``i``. On Consensus-v0
-  (8 agents) MADDPG does not learn without it and approaches the Laplacian
-  baseline with it.
-* Actors output normalised actions in ``[-1, 1]`` (``tanh``); the per-agent
-  bounds of the environment map them to physical units. Critics, exploration
-  noise and target smoothing all work in these normalised units, so one set of
-  hyperparameters suits environments with very different action ranges.
-* Optional observation normalisation uses statistics computed once from the
-  warm-up data at the first gradient step and frozen afterwards, so the stored
-  transitions and the learned values stay consistent.
-
-References
-----------
-Lowe, R., Wu, Y., Tamar, A., Harb, J., Abbeel, P., Mordatch, I. (2017).
-Multi-agent actor-critic for mixed cooperative-competitive environments. NeurIPS.
-
-Ackermann, J., Gabler, V., Osa, T., Sugiyama, M. (2019). Reducing overestimation
-bias in multi-agent domains using double centralized critics. NeurIPS Deep RL
-Workshop, arXiv:1910.01465.
-
-Fujimoto, S., van Hoof, H., Meger, D. (2018). Addressing function approximation
-error in actor-critic methods. ICML.
-
-Lillicrap, T. P., et al. (2016). Continuous control with deep reinforcement
-learning. ICLR.
-
-Silver, D., et al. (2014). Deterministic policy gradient algorithms. ICML.
-
-Yu, C., Velu, A., Vinitsky, E., Gao, J., Wang, Y., Bayen, A., Wu, Y. (2022). The
-surprising effectiveness of PPO in cooperative multi-agent games. NeurIPS.
+:class:`DDPGConfig` holds the options of both methods, and
+:class:`_MADDPGBase` implements the decentralised deterministic actors, the
+centralised critics and their target copies, exploration and the updates.
+MATD3 switches on its three TD3 corrections through class attributes
+(:mod:`~marl_algorithms.algorithms.ddpg.matd3`); the methods, implementation
+notes and references are described in :mod:`marl_algorithms.algorithms.ddpg`.
 """
 
 from __future__ import annotations
@@ -85,7 +30,7 @@ from marl_algorithms.core.networks import (
 )
 from marl_algorithms.core.normalization import ObservationNormalizer
 
-__all__ = ["DDPGConfig", "MADDPG", "MATD3", "PRESETS"]
+__all__ = ["DDPGConfig"]
 
 _REWARD_SOURCES = ("agent", "team")
 _CRITIC_LOSSES = ("mse", "huber")
@@ -127,7 +72,7 @@ class DDPGConfig(OffPolicyConfig):
         at the first gradient step.
     critic_local_inputs:
         Append agent ``i``'s own observation and action to the input of
-        ``Q_i`` (agent-specific global state; see the module docstring).
+        ``Q_i`` (agent-specific global state; see :mod:`marl_algorithms.algorithms.ddpg`).
     critic_loss:
         ``"mse"`` (squared TD error, as in the papers) or ``"huber"``
         (squared up to ``|TD error| = 1``, linear beyond), which bounds the
@@ -204,11 +149,8 @@ class _QNetworks(nn.Module):
         return torch.cat([net(x) for net in self.nets], dim=-1)
 
 
-# ---------------------------------------------------------------------------
-# Algorithms
-# ---------------------------------------------------------------------------
 class _MADDPGBase(OffPolicyAlgorithm):
-    """Shared implementation of MADDPG and MATD3 (see the module docstring).
+    """Shared implementation of MADDPG and MATD3 (see :mod:`marl_algorithms.algorithms.ddpg`).
 
     Subclasses choose the variant with three class attributes: the number of
     critics per agent, whether target actions are smoothed with noise, and
@@ -442,166 +384,3 @@ class _MADDPGBase(OffPolicyAlgorithm):
         nn.utils.clip_grad_norm_(self.actor.parameters(), cfg.max_grad_norm)
         self.actor_optimizer.step()
         return actor_loss.item()
-
-
-class MADDPG(_MADDPGBase):
-    """Multi-agent deep deterministic policy gradient (Lowe et al., 2017).
-
-    Agent ``i`` has a deterministic actor ``mu_i(o_i)`` and a centralised critic
-    ``Q_i(s, a_1, ..., a_n)`` with target copies ``mu'_i`` and ``Q'_i``. On a
-    replay batch ``(o, a, r, o', d)`` with global states ``s = (o_1..o_n)``:
-
-    * critic loss (TD regression, ``c`` = ``reward_scale``)::
-
-          y_i = c r_i + gamma (1 - d) Q'_i(s', mu'_1(o'_1), ..., mu'_n(o'_n))
-          L(Q_i) = mean (Q_i(s, a_1, ..., a_n) - y_i)^2
-
-      (or the Huber loss of the TD error with ``critic_loss="huber"``);
-
-    * actor loss (deterministic policy gradient; the other agents' actions come
-      from the replay batch)::
-
-          L(mu_i) = -mean Q_i(s, a_1, ..., mu_i(o_i), ..., a_n)
-
-    * target networks: ``theta' <- (1 - tau) theta' + tau theta`` after every
-      update.
-
-    ``d`` is the ``terminated`` flag: truncated episodes bootstrap from their
-    final observations. ``r_i`` is agent ``i``'s own reward
-    (``reward_source="agent"``) or the team reward (``"team"``). Exploration
-    adds Gaussian noise to ``mu_i(o_i)``. With shared parameters (default) one
-    critic, evaluated with agent ``i``'s one-hot identifier, plays all ``Q_i``;
-    by default its input also repeats ``o_i`` and ``a_i``
-    (``critic_local_inputs``). Losses are averaged over agents, and all agents
-    are updated in one batched pass.
-
-    Parameters
-    ----------
-    spec:
-        Agent structure, or an environment (single or vector) to read it from.
-        The actions must be continuous.
-    config:
-        :class:`DDPGConfig`; defaults to ``DDPGConfig()``.
-    device:
-        Torch device.
-    seed:
-        Seed of initialisation, exploration and replay sampling.
-    **overrides:
-        :class:`DDPGConfig` fields, for example ``actor_lr=3e-4``.
-
-    Raises
-    ------
-    TypeError
-        For discrete action spaces or unknown configuration fields.
-
-    Examples
-    --------
-    >>> from marl_algorithms import MADDPG, make_vector_env
-    >>> envs = make_vector_env("PowerGrid-v0", num_envs=16, n_buses=6)
-    >>> algo = MADDPG(envs, seed=0, warmup_steps=1_000)
-    >>> log = algo.learn(envs, total_steps=5_000, seed=0)
-    >>> algo.act(envs.reset(seed=1)[0], deterministic=True).shape
-    (16, 6, 1)
-    """
-
-    name: ClassVar[str] = "maddpg"
-
-
-class MATD3(_MADDPGBase):
-    """Multi-agent TD3: MADDPG with double centralised critics (Ackermann et al., 2019).
-
-    Every agent has twin critics ``Q_{i,1}, Q_{i,2}`` (and targets). With target
-    actions smoothed by clipped noise,
-    ``a'_j = clip(mu'_j(o'_j) + clip(eps_j, -c, c), -1, 1)``,
-    ``eps_j ~ N(0, sigma^2)`` (``sigma = target_noise``, ``c =
-    target_noise_clip``, normalised action units), the TD target takes the
-    smaller estimate::
-
-        y_i = c_r r_i + gamma (1 - d) min_k Q'_{i,k}(s', a'_1, ..., a'_n)
-        L(Q_{i,1}, Q_{i,2}) = sum_k mean (Q_{i,k}(s, a_1, ..., a_n) - y_i)^2
-
-    The actors maximise the first critic,
-    ``L(mu_i) = -mean Q_{i,1}(s, a_1, ..., mu_i(o_i), ..., a_n)``, and they and
-    all target networks are updated only every ``policy_delay`` critic
-    updates. Everything else (parameter sharing, exploration, reward source,
-    terminal masking) is as in :class:`MADDPG`.
-
-    Parameters
-    ----------
-    spec, config, device, seed, **overrides:
-        See :class:`MADDPG`.
-    """
-
-    name: ClassVar[str] = "matd3"
-    n_critics: ClassVar[int] = 2
-    smooth_targets: ClassVar[bool] = True
-    delayed_policy: ClassVar[bool] = True
-
-
-# ---------------------------------------------------------------------------
-# Tuned settings for the demonstrations
-# ---------------------------------------------------------------------------
-# PowerGrid-v0 (16 buses): the team reward (the evaluation objective) avoids a
-# free-rider effect of the per-agent rewards, where each bus sees only about
-# 1/16 of the benefit of its frequency support but pays its full control cost.
-# The Huber loss keeps the rare trip transitions (team reward about -1600) from
-# dominating the critic updates. Consensus-v0 (8 agents on a ring): per-agent
-# rewards (each agent's own neighbourhood disagreement), rewards scaled by 0.01
-# to order one, observations normalised with warm-up statistics.
-_POWER_GRID: dict[str, Any] = {
-    "num_envs": 16,
-    "total_steps": 64_000,
-    "config": {
-        "hidden_sizes": (64, 64),
-        "critic_hidden_sizes": (128, 128),
-        "batch_size": 64,
-        "warmup_steps": 3_200,
-        "gamma": 0.99,
-        "reward_source": "team",
-        "critic_loss": "huber",
-    },
-    "env_kwargs": {},
-}
-_CONSENSUS: dict[str, Any] = {
-    "num_envs": 16,
-    "total_steps": 96_000,
-    "config": {
-        "hidden_sizes": (64, 64),
-        "critic_hidden_sizes": (128, 128),
-        "batch_size": 64,
-        "warmup_steps": 3_200,
-        "gamma": 0.95,
-        "reward_scale": 0.01,
-        "normalize_observations": True,
-        "exploration_noise": 0.2,
-        "final_exploration_noise": 0.02,
-        "noise_decay_steps": 96_000,
-    },
-    "env_kwargs": {},
-}
-
-#: Tuned settings, ``PRESETS[algorithm][env_id]``, for ``algorithm`` in
-#: ``("maddpg", "matd3")``. Every entry holds ``num_envs`` (parallel copies),
-#: ``total_steps`` (environment steps summed over copies), ``config``
-#: (:class:`DDPGConfig` overrides) and ``env_kwargs`` (environment arguments), so
-#: ``marl_algorithms.train(algorithm, env_id, preset["total_steps"],
-#: num_envs=preset["num_envs"], env_kwargs=preset["env_kwargs"], **preset["config"])``
-#: reproduces a demonstration run. Each trains in about 60-120 s on one CPU core.
-PRESETS: dict[str, dict[str, dict[str, Any]]] = {
-    "maddpg": {
-        "PowerGrid-v0": copy.deepcopy(_POWER_GRID),
-        "Consensus-v0": copy.deepcopy(_CONSENSUS),
-    },
-    "matd3": {
-        "PowerGrid-v0": {
-            **copy.deepcopy(_POWER_GRID),
-            "config": {
-                **_POWER_GRID["config"],
-                "exploration_noise": 0.3,
-                "final_exploration_noise": 0.05,
-                "noise_decay_steps": 64_000,
-            },
-        },
-        "Consensus-v0": copy.deepcopy(_CONSENSUS),
-    },
-}

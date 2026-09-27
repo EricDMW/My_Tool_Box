@@ -9,7 +9,7 @@ torch = pytest.importorskip("torch")
 
 import env_lib
 from marl_algorithms import MADDPG, MATD3, DDPGConfig, get_algorithm, make_vector_env, train
-from marl_algorithms.algorithms.ddpg import PRESETS
+from marl_algorithms.presets.ddpg import PRESETS
 
 # Small continuous environments: (env_id, kwargs, n_agents, obs_dim, action_dim).
 CONTINUOUS = [

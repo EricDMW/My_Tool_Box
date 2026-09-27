@@ -11,9 +11,9 @@ torch = pytest.importorskip("torch")
 
 import env_lib
 from marl_algorithms import IPPO, MAPPO, PPOConfig, make_vector_env, train
-from marl_algorithms.algorithms.ppo import PRESETS
 from marl_algorithms.core.base import Algorithm
 from marl_algorithms.core.buffers import RolloutBuffer
+from marl_algorithms.presets.ppo import PRESETS
 from marl_algorithms.registry import get_algorithm
 
 ALGORITHMS = (IPPO, MAPPO)

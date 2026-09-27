@@ -1,50 +1,13 @@
-"""Proximal policy optimisation for cooperative multi-agent control: IPPO and MAPPO.
+"""Shared implementation of IPPO and MAPPO.
 
-Both methods train decentralised stochastic actors ``pi(a_i | o_i)`` with the
-clipped surrogate objective of PPO and differ only in the critic:
-
-* **IPPO** (independent PPO) gives every agent a decentralised critic
-  ``V(o_i)`` trained on the agent's own reward; each agent is an independent
-  PPO learner that treats the others as part of the environment.
-* **MAPPO** (multi-agent PPO) gives every agent a centralised critic
-  ``V(s, i)`` on the global state ``s`` -- the concatenation of all agents'
-  (normalised) observations -- trained on the team reward. The critic is only
-  used during training, so execution stays decentralised (centralised training,
-  decentralised execution).
-
-The shared implementation follows the PPO recipe of the references below:
-generalised advantage estimation per agent, advantage normalisation, several
-epochs of shuffled minibatch SGD, clipped (and optionally Huber) value loss,
-entropy bonus, gradient-norm clipping, optional linear learning-rate annealing,
-running observation normalisation and reward scaling by the running standard
-deviation of the return. With the default parameter sharing, one actor and one
-critic serve all agents and a one-hot agent identifier is appended to their
-inputs; every forward pass covers all copies and agents at once.
-
-Standard simplifications, stated once: feed-forward networks instead of the
-recurrent ones MAPPO uses for partially observed tasks (the ``env_lib``
-observations carry the recent history that matters, such as previous actions
-and rates of change), a state-independent Gaussian standard deviation for
-continuous actions (sampled unbounded, clipped by the environment adapter, the
-log-probability is that of the unclipped sample), and reward scaling instead of
-MAPPO's value normalisation (PopArt / ValueNorm); both keep value targets of
-order one. The global state of MAPPO is the concatenation of the local
-observations (the paper's "CL" state), not an environment-specific state.
-
-References
-----------
-* J. Schulman, F. Wolski, P. Dhariwal, A. Radford and O. Klimov, "Proximal
-  policy optimization algorithms", arXiv:1707.06347, 2017.
-* J. Schulman, P. Moritz, S. Levine, M. Jordan and P. Abbeel, "High-dimensional
-  continuous control using generalized advantage estimation", ICLR 2016.
-* C. S. de Witt, T. Gupta, D. Makoviichuk, V. Makoviychuk, P. H. S. Torr, M. Sun
-  and S. Whiteson, "Is independent learning all you need in the StarCraft
-  multi-agent challenge?", arXiv:2011.09533, 2020.
-* C. Yu, A. Velu, E. Vinitsky, J. Gao, Y. Wang, A. Bayen and Y. Wu, "The
-  surprising effectiveness of PPO in cooperative multi-agent games", NeurIPS
-  Datasets and Benchmarks 2022.
-* M. Andrychowicz et al., "What matters in on-policy reinforcement learning? A
-  large-scale empirical study", ICLR 2021.
+:class:`PPOConfig` holds the options of both methods, and :class:`_PPOBase`
+implements everything they have in common: rollouts on the vector
+environment, generalised advantage estimation, the clipped policy and value
+losses, observation normalisation, reward scaling and the optimisers. The two
+algorithms only choose the inputs of the critic
+(:mod:`~marl_algorithms.algorithms.ppo.ippo`,
+:mod:`~marl_algorithms.algorithms.ppo.mappo`); the method and its references
+are described in :mod:`marl_algorithms.algorithms.ppo`.
 """
 
 from __future__ import annotations
@@ -64,12 +27,11 @@ from marl_algorithms.core.networks import (
     CategoricalPolicy,
     GaussianPolicy,
     PerAgent,
-    agent_one_hot,
     mlp,
 )
 from marl_algorithms.core.normalization import ObservationNormalizer, RewardScaler
 
-__all__ = ["IPPO", "MAPPO", "PRESETS", "PPOConfig"]
+__all__ = ["PPOConfig"]
 
 _REWARD_SOURCES = ("agent", "team")
 
@@ -168,7 +130,7 @@ class PPOConfig(OnPolicyConfig):
 
 
 # ---------------------------------------------------------------------------
-# Algorithms
+# Shared implementation
 # ---------------------------------------------------------------------------
 class _PPOBase(OnPolicyAlgorithm):
     """Shared implementation of IPPO and MAPPO (see the subclasses).
@@ -522,133 +484,6 @@ class _PPOBase(OnPolicyAlgorithm):
             self.reward_scaler.load_state_dict(state["reward_scaler"])
 
 
-class IPPO(_PPOBase):
-    """Independent PPO (de Witt et al., 2020).
-
-    Every agent ``i`` has a decentralised actor ``pi_theta(a_i | o_i)`` and a
-    decentralised critic ``V_phi(o_i)``, trained on the agent's own reward
-    ``r_t^i`` (``reward_source="agent"``, the default; ``"team"`` trains every
-    critic on the team reward). With ``share_parameters`` (default) all agents
-    use the same actor and critic and the input is ``[o_i, onehot(i)]``.
-
-    For every agent the advantages are generalised advantage estimates,
-
-    ``delta_t^i = r_t^i + gamma (1 - term_t) V_phi(o_{t+1}^i) - V_phi(o_t^i)``,
-    ``A_t^i = sum_l (gamma lambda)^l delta_{t+l}^i`` (cut at episode ends),
-
-    with ``V(o_{t+1})`` of the final observation for truncated episodes, and the
-    value targets are ``R_t^i = A_t^i + V_old(o_t^i)``. With the probability
-    ratio ``rho_t^i = pi_theta(a_t^i | o_t^i) / pi_old(a_t^i | o_t^i)`` the actor
-    minimises
-
-    ``L_pi = -mean[min(rho A, clip(rho, 1 - eps, 1 + eps) A)] - c_H mean[H(pi_theta(. | o_t^i))]``
-
-    and the critic minimises
-
-    ``L_V = mean[max(l(V_phi - R), l(V_old + clip(V_phi - V_old, -eps_V, eps_V) - R))]``
-
-    with ``l(x) = x^2 / 2`` or the Huber loss, the means running over steps,
-    copies and agents. Actor and critic have separate Adam optimisers and
-    gradient-norm clipping.
-
-    Parameters
-    ----------
-    spec:
-        Agent structure, or an environment (single or vector) to read it from.
-    config:
-        :class:`PPOConfig`; defaults to ``PPOConfig()``.
-    device:
-        Torch device.
-    seed:
-        Seed of the initialisation and of all sampling.
-    **overrides:
-        :class:`PPOConfig` fields, for example ``lr=1e-3``.
-
-    Examples
-    --------
-    >>> from marl_algorithms import IPPO, make_vector_env
-    >>> envs = make_vector_env("PowerGrid-v0", 16)
-    >>> algo = IPPO(envs, seed=0)
-    >>> log = algo.learn(envs, 20_000, seed=0)
-    >>> actions = algo.act(envs.reset(seed=1)[0], deterministic=True)  # (16, 16, 1)
-    """
-
-    name: ClassVar[str] = "ippo"
-    default_reward_source: ClassVar[str] = "agent"
-
-    @property
-    def critic_input_dim(self) -> int:
-        return self.agent_input_dim
-
-    def _critic_inputs(self, obs: torch.Tensor) -> torch.Tensor:
-        return self.agent_inputs(obs)
-
-
-class MAPPO(_PPOBase):
-    """Multi-agent PPO with a centralised critic (Yu et al., 2022).
-
-    The actors are decentralised, ``pi_theta(a_i | o_i)``, exactly as in
-    :class:`IPPO`. The critic of agent ``i`` sees the global state
-    ``s = [o_1, ..., o_n]`` (all normalised observations concatenated),
-    ``V_phi(s, i)``: with shared parameters (default) one network takes
-    ``[s, onehot(i)]`` -- effectively one value head per agent over the shared
-    state -- and without sharing agent ``i`` has its own network on ``s``. The
-    critics learn the value of the team reward (``reward_source="team"``,
-    default) or of each agent's own reward (``"agent"``). The critic is used
-    only in training; acting needs the local observation only.
-
-    The losses are those of :class:`IPPO` with ``V_phi(o_t^i)`` replaced by
-    ``V_phi(s_t, i)`` and ``r_t^i`` by the team reward ``r_t``:
-
-    ``delta_t^i = r_t + gamma (1 - term_t) V_phi(s_{t+1}, i) - V_phi(s_t, i)``,
-    ``A_t^i = sum_l (gamma lambda)^l delta_{t+l}^i``,
-
-    ``L_pi = -mean[min(rho A, clip(rho, 1 - eps, 1 + eps) A)] - c_H mean[H]``,
-    ``L_V = mean[max(l(V_phi - R), l(V_old + clip(V_phi - V_old, -eps_V, eps_V) - R))]``.
-
-    The global state of every copy is built once by reshaping the ``(B, n, d)``
-    observations to ``(B, n d)`` and repeating it for the ``n`` agents, so all
-    critic values come from one batched forward pass.
-
-    Parameters
-    ----------
-    spec:
-        Agent structure, or an environment (single or vector) to read it from.
-    config:
-        :class:`PPOConfig`; defaults to ``PPOConfig()``.
-    device:
-        Torch device.
-    seed:
-        Seed of the initialisation and of all sampling.
-    **overrides:
-        :class:`PPOConfig` fields, for example ``lr=1e-3``.
-
-    Examples
-    --------
-    >>> from marl_algorithms import MAPPO, make_vector_env
-    >>> envs = make_vector_env("LineMsg-v0", 16, num_agents=4)
-    >>> algo = MAPPO(envs, seed=0, ent_coef=0.01)
-    >>> log = algo.learn(envs, 10_000, seed=0)
-    >>> actions = algo.act(envs.reset(seed=1)[0], deterministic=True)  # (16, 4) int64
-    """
-
-    name: ClassVar[str] = "mappo"
-    default_reward_source: ClassVar[str] = "team"
-
-    @property
-    def critic_input_dim(self) -> int:
-        spec = self.spec
-        return spec.state_dim + (spec.n_agents if self.uses_agent_ids else 0)
-
-    def _critic_inputs(self, obs: torch.Tensor) -> torch.Tensor:
-        n = self.spec.n_agents
-        batch = obs.shape[:-2]
-        state = obs.reshape(*batch, 1, self.spec.state_dim).expand(*batch, n, self.spec.state_dim)
-        if not self.uses_agent_ids:
-            return state
-        return torch.cat([state, agent_one_hot(batch, n, obs.device)], dim=-1)
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -668,148 +503,3 @@ def _explained_variance(predictions: np.ndarray, targets: np.ndarray) -> float:
     if variance == 0.0:
         return float("nan")
     return 1.0 - float(np.var(targets - predictions)) / variance
-
-
-# ---------------------------------------------------------------------------
-# Demonstration presets
-# ---------------------------------------------------------------------------
-#: Tuned settings, ``PRESETS[algorithm][env_id]``, for ``algorithm`` in
-#: ``("ippo", "mappo")``. Every entry holds ``num_envs`` (parallel copies),
-#: ``total_steps`` (environment steps summed over copies), ``config``
-#: (:class:`PPOConfig` overrides) and ``env_kwargs`` (environment arguments), so
-#: ``marl_algorithms.train(algorithm, env_id, preset["total_steps"],
-#: num_envs=preset["num_envs"], env_kwargs=preset["env_kwargs"], **preset["config"])``
-#: reproduces a demonstration run.
-#:
-#: Mean team return of the deterministic policy after training with seed 0
-#: (``env_lib.evaluate`` on 64 copies, 64 episodes, seed 1;
-#: ``benchmarks/benchmark_marl.py``); training time is CPU time on one core
-#: (``torch.set_num_threads(1)``) and "baseline" is ``env_lib.baseline_policy``:
-#:
-#: ============  =====  ==========  ========  ========  =======  ========
-#: environment   algo   env steps   CPU time  random    trained  baseline
-#: ============  =====  ==========  ========  ========  =======  ========
-#: PowerGrid-v0  IPPO   200,704     69 s      -629.3    -2.37    -0.79
-#: PowerGrid-v0  MAPPO  251,904     106 s     -629.3    -0.89    -0.79
-#: Platoon-v0    IPPO   450,560     88 s      -5,350    -84.8    -46.4
-#: Platoon-v0    MAPPO  450,560     102 s     -5,350    -65.0    -46.4
-#: Consensus-v0  IPPO   401,408     83 s      -18,041   -1,550   -1,518
-#: Consensus-v0  MAPPO  401,408     96 s      -18,041   -1,586   -1,518
-#: LineMsg-v0    IPPO   100,800     26 s      43.2      95.0     95.0
-#: LineMsg-v0    MAPPO  100,800     26 s      43.2      95.0     95.0
-#: ============  =====  ==========  ========  ========  =======  ========
-#:
-#: Lessons from tuning, reflected in the settings:
-#:
-#: * PowerGrid: a small initial exploration noise (``log_std_init=-1.5``) is
-#:   essential -- with more noise the mean policy learns to compensate its own
-#:   (observed) previous actions and performs poorly when executed without
-#:   noise; a shorter horizon (``gamma=0.95``) and ``lr=1e-3`` speed learning.
-#: * Platoon and Consensus: the critics learn each agent's own reward
-#:   (``reward_source="agent"``), which isolates the effect of a follower's or
-#:   agent's own command, and the observations are used unnormalised: they
-#:   are already scaled to order one (Platoon) or in arena units (Consensus),
-#:   and running statistics dominated by the large errors of early training
-#:   hide the small errors that matter once the task is nearly solved. On
-#:   Platoon, MAPPO with the team reward and normalised observations stalls
-#:   at about -800 (the followers never learn the predecessor-acceleration
-#:   feed-forward that makes the platoon string stable, and every episode
-#:   ends in a collision).
-#: * LineMsg: MAPPO learns the relay from the team reward in about 30,000
-#:   steps, so the preset is shorter than the others.
-PRESETS: dict[str, dict[str, dict[str, Any]]] = {
-    "ippo": {
-        "PowerGrid-v0": {
-            "num_envs": 32,
-            "total_steps": 200_000,
-            "config": {
-                "rollout_length": 64,
-                "n_epochs": 5,
-                "lr": 1e-3,
-                "gamma": 0.95,
-                "log_std_init": -1.5,
-            },
-            "env_kwargs": {},
-        },
-        "Platoon-v0": {
-            "num_envs": 32,
-            "total_steps": 450_000,
-            "config": {
-                "rollout_length": 64,
-                "n_epochs": 5,
-                "lr": 3e-4,
-                "gamma": 0.99,
-                "log_std_init": -1.0,
-                "normalize_observations": False,
-                "value_clip_range": None,
-            },
-            "env_kwargs": {},
-        },
-        "Consensus-v0": {
-            "num_envs": 32,
-            "total_steps": 400_000,
-            "config": {
-                "rollout_length": 64,
-                "n_epochs": 5,
-                "lr": 1e-3,
-                "gamma": 0.95,
-                "normalize_observations": False,
-            },
-            "env_kwargs": {},
-        },
-        "LineMsg-v0": {
-            "num_envs": 32,
-            "total_steps": 100_000,
-            "config": {"rollout_length": 50, "n_epochs": 5, "lr": 1e-3, "ent_coef": 0.01},
-            "env_kwargs": {},
-        },
-    },
-    "mappo": {
-        "PowerGrid-v0": {
-            "num_envs": 32,
-            "total_steps": 250_000,
-            "config": {
-                "rollout_length": 64,
-                "n_epochs": 5,
-                "lr": 1e-3,
-                "gamma": 0.95,
-                "log_std_init": -1.5,
-            },
-            "env_kwargs": {},
-        },
-        "Platoon-v0": {
-            "num_envs": 32,
-            "total_steps": 450_000,
-            "config": {
-                "rollout_length": 64,
-                "n_epochs": 5,
-                "lr": 3e-4,
-                "gamma": 0.99,
-                "log_std_init": -1.0,
-                "reward_source": "agent",
-                "normalize_observations": False,
-                "value_clip_range": None,
-            },
-            "env_kwargs": {},
-        },
-        "Consensus-v0": {
-            "num_envs": 32,
-            "total_steps": 400_000,
-            "config": {
-                "rollout_length": 64,
-                "n_epochs": 5,
-                "lr": 1e-3,
-                "gamma": 0.9,
-                "reward_source": "agent",
-                "normalize_observations": False,
-            },
-            "env_kwargs": {},
-        },
-        "LineMsg-v0": {
-            "num_envs": 32,
-            "total_steps": 100_000,
-            "config": {"rollout_length": 50, "n_epochs": 5, "lr": 1e-3, "ent_coef": 0.01},
-            "env_kwargs": {},
-        },
-    },
-}

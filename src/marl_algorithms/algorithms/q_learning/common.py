@@ -1,70 +1,21 @@
-"""Value-based cooperative multi-agent Q-learning: IQL, VDN and QMIX.
+"""Shared implementation of IQL, VDN and QMIX.
 
-All three methods learn per-agent *utilities* ``Q_i(o_i, a_i)`` with the DQN
-machinery (replay buffer, target networks, epsilon-greedy exploration) and act
-greedily and decentrally on them: agent ``i`` picks ``argmax_a Q_i(o_i, a)``
-from its own observation. They differ only in how the utilities are trained.
-
-* **IQL** -- independent Q-learning (Tan, 1993), here with DQN function
-  approximation (Mnih et al., 2015). Every agent regresses its utility on its
-  *own* reward with its *own* TD target; the other agents are part of a
-  non-stationary environment.
-* **VDN** -- value decomposition networks (Sunehag et al., 2018). The team
-  value is the sum of the utilities, ``Q_tot = sum_i Q_i(o_i, a_i)``, trained
-  end to end on the *team* reward with one TD target.
-* **QMIX** (Rashid et al., 2018). The team value is a monotonic function of the
-  utilities, ``Q_tot = f_mix(Q_1, ..., Q_n; s)`` with ``dQ_tot / dQ_i >= 0``,
-  computed by a mixing network whose non-negative weights are produced by
-  hypernetworks from the global state ``s``.
-
-Because the VDN and QMIX mixing is monotonic in every utility, the joint greedy
-action ``argmax_a Q_tot(s, a)`` is obtained by every agent maximising its own
-utility (the individual-global-max property). The centralised TD target
-``max_a' Q_tot^-(s', a')`` is therefore computed from per-agent maxima, and
-execution stays decentralised.
-
-Implementation choices (standard simplifications, stated explicitly):
-
-* **Feed-forward agents on a transition replay.** The VDN and QMIX papers use
-  recurrent (LSTM/GRU) agent networks trained on whole episodes sampled from an
-  episode replay to cope with partial observability. Here the agent networks
-  are MLPs trained on single transitions. The ``env_lib`` observations (local
-  message/queue windows of LineMsg and WirelessComm, piston and ball features
-  of Pistonball) are Markov enough for the demonstrations, and the
-  feed-forward version is much cheaper on a CPU.
-* **Parameter sharing.** By default one utility network serves all agents,
-  with a one-hot agent identifier appended to the observation (as in the QMIX
-  paper); ``share_parameters=False`` gives one network per agent.
-* **Global state.** The ``env_lib`` environments do not expose a separate
-  state, so the QMIX hypernetworks are conditioned on the concatenation of all
-  agents' observations.
-* One-step TD targets, double Q-learning (van Hasselt et al., 2016) by default,
-  Adam instead of RMSprop, and Polyak-averaged target networks by default
-  (hard copies every ``K`` gradient steps are available).
-
-References
-----------
-Tan, M. (1993). Multi-agent reinforcement learning: independent vs.
-cooperative agents. *ICML*.
-
-Mnih, V. et al. (2015). Human-level control through deep reinforcement
-learning. *Nature* 518, 529-533.
-
-van Hasselt, H., Guez, A. and Silver, D. (2016). Deep reinforcement learning
-with double Q-learning. *AAAI*.
-
-Sunehag, P. et al. (2018). Value-decomposition networks for cooperative
-multi-agent learning based on team reward. *AAMAS*.
-
-Rashid, T. et al. (2018). QMIX: monotonic value function factorisation for
-deep multi-agent reinforcement learning. *ICML*.
+:class:`QLearningConfig` holds the options of the three methods, and
+:class:`_ValueBase` implements the agent utilities, epsilon-greedy
+exploration, the double-Q targets, the target networks and the updates. The
+methods differ only in the mixer that combines the utilities
+(:mod:`~marl_algorithms.algorithms.q_learning.iql`,
+:mod:`~marl_algorithms.algorithms.q_learning.vdn`,
+:mod:`~marl_algorithms.algorithms.q_learning.qmix`); the methods, the
+simplifications and the references are described in
+:mod:`marl_algorithms.algorithms.q_learning`.
 """
 
 from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import ClassVar
 
 import numpy as np
 import torch
@@ -73,9 +24,9 @@ from torch.nn import functional as F
 
 from marl_algorithms.core.base import OffPolicyAlgorithm
 from marl_algorithms.core.config import AlgorithmConfig, OffPolicyConfig
-from marl_algorithms.core.networks import PerAgent, QMixer, mlp, soft_update
+from marl_algorithms.core.networks import PerAgent, mlp, soft_update
 
-__all__ = ["IQL", "PRESETS", "QMIX", "VDN", "QLearningConfig", "VDNMixer"]
+__all__ = ["QLearningConfig"]
 
 _LOSSES = ("huber", "mse")
 
@@ -155,25 +106,9 @@ class QLearningConfig(OffPolicyConfig):
             )
 
 
-# ----------------------------------------------------------------------
-# Mixers
-# ----------------------------------------------------------------------
-class VDNMixer(nn.Module):
-    """Additive mixing of VDN: ``Q_tot = sum_i Q_i`` (no parameters).
-
-    Takes the same arguments as :class:`~marl_algorithms.core.networks.QMixer`
-    so that both mixers are interchangeable; the state is ignored.
-    """
-
-    def forward(self, q: torch.Tensor, state: torch.Tensor | None = None) -> torch.Tensor:
-        """Team value of shape ``q.shape[:-1]`` from utilities ``(..., n_agents)``."""
-        del state
-        return q.sum(dim=-1)
-
-
-# ----------------------------------------------------------------------
-# Algorithms
-# ----------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Shared implementation
+# ---------------------------------------------------------------------------
 class _ValueBase(OffPolicyAlgorithm):
     """Shared implementation of IQL, VDN and QMIX, parameterised by the mixer.
 
@@ -383,169 +318,3 @@ class _ValueBase(OffPolicyAlgorithm):
         else:
             for target, online in pairs:
                 soft_update(target, online, cfg.tau)
-
-
-class IQL(_ValueBase):
-    """Independent Q-learning with DQN agents (Tan, 1993; Mnih et al., 2015).
-
-    Every agent learns ``Q_i(o_i, a_i)`` from its own reward
-    ``r_i`` (``info["agent_rewards"]``) with its own TD target::
-
-        y_i = c r_i + gamma (1 - terminated) Q_i^-(o'_i, argmax_a Q_i(o'_i, a))
-        L   = mean_batch mean_i  l(Q_i(o_i, a_i) - y_i)
-
-    No mixing and no centralised information: the other agents are part of
-    the environment. Environments that report no per-agent rewards give every
-    agent the team reward; with a single agent IQL is (double) DQN.
-
-    Agents are feed-forward networks trained on single transitions from a
-    transition replay (see the module docstring for this simplification).
-
-    Parameters
-    ----------
-    spec:
-        Agent structure, or a discrete-action environment to read it from.
-    config:
-        :class:`QLearningConfig`; defaults to ``QLearningConfig()``.
-    device:
-        Torch device.
-    seed:
-        Seed of initialisation, exploration and replay sampling.
-    **overrides:
-        Configuration fields to override.
-
-    Raises
-    ------
-    TypeError
-        For continuous-action environments.
-
-    Examples
-    --------
-    >>> from marl_algorithms import IQL, make_vector_env
-    >>> envs = make_vector_env("LineMsg-v0", num_envs=16)
-    >>> algo = IQL(envs, seed=0)
-    >>> log = algo.learn(envs, total_steps=20_000, seed=0)
-    """
-
-    name: ClassVar[str] = "iql"
-
-
-class VDN(_ValueBase):
-    """Value decomposition networks (Sunehag et al., 2018).
-
-    The team value is the sum of the agent utilities, trained on the team
-    reward ``r``::
-
-        Q_tot(o, a) = sum_i Q_i(o_i, a_i)
-        y           = c r + gamma (1 - terminated) sum_i Q_i^-(o'_i, argmax_a Q_i(o'_i, a))
-        L           = mean_batch  l(Q_tot(o, a) - y)
-
-    Agents are feed-forward networks trained on single transitions from a
-    transition replay, not the recurrent agents and episode replay of the
-    paper (see the module docstring).
-
-    Parameters and exceptions as for :class:`IQL`.
-
-    Examples
-    --------
-    >>> from marl_algorithms import train
-    >>> algo, log = train("vdn", "LineMsg-v0", total_steps=50_000, num_envs=32)
-    """
-
-    name: ClassVar[str] = "vdn"
-
-    def _make_mixer(self) -> nn.Module:
-        return VDNMixer()
-
-
-class QMIX(_ValueBase):
-    """QMIX: monotonic value function factorisation (Rashid et al., 2018).
-
-    The team value mixes the agent utilities with a two-layer network whose
-    weights are generated from the global state ``s`` by hypernetworks and made
-    non-negative (absolute value), so ``dQ_tot / dQ_i >= 0``::
-
-        Q_tot(o, a; s) = w_2(s)^T elu(W_1(s)^T q + b_1(s)) + b_2(s),   W_1, w_2 >= 0
-        y              = c r + gamma (1 - terminated) Q_tot^-(q'^-; s')
-        L              = mean_batch  l(Q_tot(o, a; s) - y)
-
-    with ``q = (Q_1(o_1, a_1), ..., Q_n(o_n, a_n))``, ``q'^-`` the target
-    utilities of the (double-Q) greedy next actions and ``Q_tot^-`` the target
-    mixer. The state ``s`` is the concatenation of all agents' observations;
-    the mixer (:class:`~marl_algorithms.core.networks.QMixer`) is only used in
-    training, execution is decentralised. Agents are feed-forward networks
-    trained on single transitions from a transition replay, not the recurrent
-    agents and episode replay of the paper (see the module docstring).
-
-    Parameters and exceptions as for :class:`IQL`.
-
-    Examples
-    --------
-    >>> from marl_algorithms import train
-    >>> algo, log = train("qmix", "LineMsg-v0", total_steps=50_000, num_envs=32)
-    """
-
-    name: ClassVar[str] = "qmix"
-
-    def _make_mixer(self) -> nn.Module:
-        cfg = self.config
-        return QMixer(
-            self.spec.n_agents, self.spec.state_dim, cfg.mixer_embed_dim, cfg.hypernet_hidden
-        )
-
-
-# ----------------------------------------------------------------------
-# Presets
-# ----------------------------------------------------------------------
-#: LineMsg-v0 (10 agents): every method learns "always relay" (return 95, the
-#: optimum; random actions about 43) in about 10-20 s.
-_LINEMSG: dict[str, Any] = {
-    "num_envs": 16,
-    "total_steps": 25_000,
-    "config": {"batch_size": 128, "lr": 1e-3, "epsilon_decay_steps": 12_500},
-    "env_kwargs": {},
-}
-
-#: WirelessComm-v1 (4x4 grid, 16 agents): packets are delivered in the step
-#: they are sent, so a short horizon (gamma = 0.8) suffices and learns faster.
-#: The collision-free schedule of env_lib.baseline_policy returns about 340,
-#: random actions about 140. VDN and QMIX return 320-345 depending on the seed:
-#: they learn either a collision-free "owners only" schedule (about 319: every
-#: access point serves one fixed neighbouring agent) or, like the baseline,
-#: also let the border agents borrow idle access points.
-_WIRELESS_CONFIG: dict[str, Any] = {"batch_size": 128, "lr": 1e-3, "gamma": 0.8}
-
-#: Tuned demonstration settings ``PRESETS[algorithm][env_id]`` for ``algorithm``
-#: in ``"iql"``, ``"vdn"``, ``"qmix"``. A preset is a dictionary with the keys
-#: ``"total_steps"`` (environment steps summed over copies), ``"num_envs"``
-#: (batched copies), ``"config"`` (:class:`QLearningConfig` overrides) and
-#: ``"env_kwargs"`` (environment arguments); see :mod:`marl_algorithms.presets`.
-#: Every preset trains in at most about two minutes on one CPU core.
-#:
-#: IQL has no WirelessComm preset: with its per-agent rewards a collision costs
-#: the transmitting agent nothing, so independent learners keep transmitting
-#: and collide (hardly better than random actions), while VDN and QMIX, trained
-#: on the team reward, learn to leave contested access points to one agent.
-PRESETS: dict[str, dict[str, dict[str, Any]]] = {
-    "iql": {
-        "LineMsg-v0": copy.deepcopy(_LINEMSG),
-    },
-    "vdn": {
-        "LineMsg-v0": copy.deepcopy(_LINEMSG),
-        "WirelessComm-v1": {
-            "num_envs": 16,
-            "total_steps": 120_000,
-            "config": {**_WIRELESS_CONFIG, "epsilon_decay_steps": 30_000},
-            "env_kwargs": {},
-        },
-    },
-    "qmix": {
-        "LineMsg-v0": copy.deepcopy(_LINEMSG),
-        "WirelessComm-v1": {
-            "num_envs": 16,
-            "total_steps": 100_000,
-            "config": {**_WIRELESS_CONFIG, "epsilon_decay_steps": 45_000},
-            "env_kwargs": {},
-        },
-    },
-}

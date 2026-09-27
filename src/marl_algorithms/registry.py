@@ -46,7 +46,7 @@ _REGISTRY: dict[str, AlgorithmInfo] = {
     for info in (
         AlgorithmInfo(
             "ippo",
-            "marl_algorithms.algorithms.ppo:IPPO",
+            "marl_algorithms.algorithms.ppo.ippo:IPPO",
             "on-policy",
             _BOTH,
             "independent PPO: every agent learns from its own observation and reward",
@@ -54,7 +54,7 @@ _REGISTRY: dict[str, AlgorithmInfo] = {
         ),
         AlgorithmInfo(
             "mappo",
-            "marl_algorithms.algorithms.ppo:MAPPO",
+            "marl_algorithms.algorithms.ppo.mappo:MAPPO",
             "on-policy",
             _BOTH,
             "multi-agent PPO: decentralised actors, centralised critic on the global state",
@@ -62,7 +62,7 @@ _REGISTRY: dict[str, AlgorithmInfo] = {
         ),
         AlgorithmInfo(
             "maddpg",
-            "marl_algorithms.algorithms.ddpg:MADDPG",
+            "marl_algorithms.algorithms.ddpg.maddpg:MADDPG",
             "off-policy actor-critic",
             ("continuous",),
             "multi-agent DDPG: deterministic actors, centralised Q-critics on joint actions",
@@ -70,7 +70,7 @@ _REGISTRY: dict[str, AlgorithmInfo] = {
         ),
         AlgorithmInfo(
             "matd3",
-            "marl_algorithms.algorithms.ddpg:MATD3",
+            "marl_algorithms.algorithms.ddpg.matd3:MATD3",
             "off-policy actor-critic",
             ("continuous",),
             "MADDPG with twin critics, delayed actor updates and target smoothing",
@@ -78,7 +78,7 @@ _REGISTRY: dict[str, AlgorithmInfo] = {
         ),
         AlgorithmInfo(
             "iql",
-            "marl_algorithms.algorithms.value_decomposition:IQL",
+            "marl_algorithms.algorithms.q_learning.iql:IQL",
             "value-based",
             ("discrete",),
             "independent Q-learning: one DQN per agent (shared weights)",
@@ -86,7 +86,7 @@ _REGISTRY: dict[str, AlgorithmInfo] = {
         ),
         AlgorithmInfo(
             "vdn",
-            "marl_algorithms.algorithms.value_decomposition:VDN",
+            "marl_algorithms.algorithms.q_learning.vdn:VDN",
             "value-based",
             ("discrete",),
             "value decomposition networks: team value as the sum of agent utilities",
@@ -95,7 +95,7 @@ _REGISTRY: dict[str, AlgorithmInfo] = {
         ),
         AlgorithmInfo(
             "qmix",
-            "marl_algorithms.algorithms.value_decomposition:QMIX",
+            "marl_algorithms.algorithms.q_learning.qmix:QMIX",
             "value-based",
             ("discrete",),
             "QMIX: monotonic, state-conditioned mixing of agent utilities",
