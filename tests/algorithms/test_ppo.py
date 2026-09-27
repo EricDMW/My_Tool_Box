@@ -36,9 +36,7 @@ def _envs(env_id: str, kwargs: dict, num_envs: int = 4):
 
 def _small(cls, envs, **overrides):
     """Algorithm with a tiny, fast configuration."""
-    settings = dict(
-        seed=0, hidden_sizes=(16,), rollout_length=8, n_epochs=2, num_minibatches=2
-    )
+    settings = dict(seed=0, hidden_sizes=(16,), rollout_length=8, n_epochs=2, num_minibatches=2)
     settings.update(overrides)
     return cls(envs, **settings)
 
@@ -62,7 +60,9 @@ def test_act_shapes_and_bounds(cls, env_id, kwargs, n, action_shape):
         assert actions.shape == (4, n, *action_shape)
         if algo.spec.continuous:
             assert actions.dtype == np.float32
-            assert np.all(actions >= algo.spec.action_low) and np.all(actions <= algo.spec.action_high)
+            assert np.all(actions >= algo.spec.action_low) and np.all(
+                actions <= algo.spec.action_high
+            )
         else:
             assert actions.dtype == np.int64
             assert actions.min() >= 0 and actions.max() < algo.spec.n_actions
@@ -289,7 +289,7 @@ def test_train_entry_point_and_presets():
     )
     assert isinstance(algo, MAPPO) and log.env_id == "LineMsg-v0" and algo.env_steps == 32
     assert set(PRESETS) == {"ippo", "mappo"}
-    assert {"PowerGrid-v0", "Platoon-v0", "LineMsg-v0"} <= set(PRESETS["mappo"])
+    assert {"PowerGrid-v0", "Platoon-v0", "Consensus-v0", "LineMsg-v0"} <= set(PRESETS["mappo"])
     assert "PowerGrid-v0" in PRESETS["ippo"]
     registered = set(env_lib.list_envs())
     for presets in PRESETS.values():
@@ -315,15 +315,32 @@ def test_mappo_learns_to_relay_messages():
     assert trained > random_return + 0.8 * (baseline.mean_return - random_return)
 
 
-def test_rollout_buffer_fields():
-    """The algorithm stores the normalised observations and log-probabilities it acted with."""
+@pytest.mark.parametrize("cls", ALGORITHMS)
+@pytest.mark.parametrize("source", ["team", "agent"])
+def test_training_rewards_follow_reward_source(cls, source):
+    """The critics learn the team reward (broadcast to all agents) or each agent's own reward."""
     envs = _envs("PowerGrid-v0", GRID3)
-    algo = MAPPO(envs, seed=0)
-    fields = algo._rollout_fields()
-    assert fields["norm_obs"][0] == (3, 10) and fields["log_prob"][0] == (3,)
-    buffer = RolloutBuffer(2, 4, fields)
-    obs = algo.spec.agent_obs(envs.reset(seed=0)[0])
-    for _ in range(2):
-        _, extras = algo._rollout_step(obs)
-        buffer.add(**extras)
-    assert buffer.full and buffer["norm_obs"].dtype == np.float32
+    rng = np.random.default_rng(0)
+    fields = {
+        "reward": ((), np.float32),
+        "agent_rewards": ((3,), np.float32),
+        "terminated": ((), bool),
+        "truncated": ((), bool),
+    }
+    rollout = RolloutBuffer(5, 4, fields)
+    for _ in range(5):
+        agent_rewards = rng.normal(size=(4, 3))
+        rollout.add(
+            reward=agent_rewards.sum(axis=1),
+            agent_rewards=agent_rewards,
+            terminated=np.zeros(4, bool),
+            truncated=rng.random(4) < 0.3,
+        )
+    expected = rollout["reward"][..., None] if source == "team" else rollout["agent_rewards"]
+    raw = cls(envs, reward_source=source, normalize_rewards=False)._training_rewards(rollout)
+    assert raw.shape == (5, 4, 3)
+    np.testing.assert_allclose(raw, np.broadcast_to(expected, (5, 4, 3)), rtol=1e-6)
+    scaled = cls(envs, reward_source=source)._training_rewards(rollout)
+    factor = scaled / raw  # one positive scale per step, shared by copies and agents
+    assert np.all(factor > 0)
+    np.testing.assert_allclose(factor, factor[:, :1, :1] * np.ones_like(factor), rtol=1e-6)

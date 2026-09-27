@@ -404,7 +404,7 @@ class _PPOBase(OnPolicyAlgorithm):
         totals: dict[str, float] = {}
         count = epochs = 0
         for _ in range(cfg.n_epochs):
-            order = torch.randperm(size, generator=self.torch_rng).to(self.device)
+            order = torch.randperm(size, generator=self.torch_rng, device=self.device)
             epoch_kl, epoch_batches = 0.0, 0
             for index in torch.tensor_split(order, min(cfg.num_minibatches, size)):
                 stats = self._sgd_step({name: value[index] for name, value in batch.items()})
@@ -473,7 +473,7 @@ class _PPOBase(OnPolicyAlgorithm):
     def _value_loss(
         self, values: torch.Tensor, old_values: torch.Tensor, returns: torch.Tensor
     ) -> torch.Tensor:
-        """Critic loss ``mean(max(l(V - R), l(V_clip - R)))`` (without clipping: ``mean(l(V - R))``)."""
+        """Critic loss ``mean(max(l(V - R), l(V_clip - R)))``, or ``mean(l(V - R))`` unclipped."""
         cfg = self.config
         loss = self._error_loss(values - returns)
         if cfg.value_clip_range is not None:
@@ -677,4 +677,115 @@ def _explained_variance(predictions: np.ndarray, targets: np.ndarray) -> float:
 #: ``marl_algorithms.train(algorithm, env_id, preset["total_steps"],
 #: num_envs=preset["num_envs"], env_kwargs=preset["env_kwargs"], **preset["config"])``
 #: reproduces a demonstration run.
-PRESETS: dict[str, dict[str, dict[str, Any]]] = {"ippo": {}, "mappo": {}}
+#:
+#: Each preset trains in about one to two minutes on one CPU core. Lessons
+#: from tuning, reflected in the settings:
+#:
+#: * PowerGrid: a small initial exploration noise (``log_std_init=-1.5``) is
+#:   essential -- with more noise the mean policy learns to compensate its own
+#:   (observed) previous actions and performs poorly when executed without
+#:   noise; a shorter horizon (``gamma=0.95``) and ``lr=1e-3`` speed learning.
+#: * Platoon and Consensus: the critics learn each agent's own reward
+#:   (``reward_source="agent"``), which isolates the effect of a follower's or
+#:   agent's own command, and the observations are used unnormalised: they
+#:   are already scaled to order one (Platoon) or in arena units (Consensus),
+#:   and running statistics dominated by the large errors of early training
+#:   hide the small errors that matter once the task is nearly solved.
+#: * LineMsg: MAPPO learns the relay from the team reward in a few ten
+#:   thousand steps.
+PRESETS: dict[str, dict[str, dict[str, Any]]] = {
+    "ippo": {
+        "PowerGrid-v0": {
+            "num_envs": 32,
+            "total_steps": 200_000,
+            "config": {
+                "rollout_length": 64,
+                "n_epochs": 5,
+                "lr": 1e-3,
+                "gamma": 0.95,
+                "log_std_init": -1.5,
+            },
+            "env_kwargs": {},
+        },
+        "Platoon-v0": {
+            "num_envs": 32,
+            "total_steps": 450_000,
+            "config": {
+                "rollout_length": 64,
+                "n_epochs": 5,
+                "lr": 3e-4,
+                "gamma": 0.99,
+                "log_std_init": -1.0,
+                "normalize_observations": False,
+                "value_clip_range": None,
+            },
+            "env_kwargs": {},
+        },
+        "Consensus-v0": {
+            "num_envs": 32,
+            "total_steps": 400_000,
+            "config": {
+                "rollout_length": 64,
+                "n_epochs": 5,
+                "lr": 1e-3,
+                "gamma": 0.95,
+                "normalize_observations": False,
+            },
+            "env_kwargs": {},
+        },
+        "LineMsg-v0": {
+            "num_envs": 32,
+            "total_steps": 100_000,
+            "config": {"rollout_length": 50, "n_epochs": 5, "lr": 1e-3, "ent_coef": 0.01},
+            "env_kwargs": {},
+        },
+    },
+    "mappo": {
+        "PowerGrid-v0": {
+            "num_envs": 32,
+            "total_steps": 250_000,
+            "config": {
+                "rollout_length": 64,
+                "n_epochs": 5,
+                "lr": 1e-3,
+                "gamma": 0.95,
+                "log_std_init": -1.5,
+            },
+            "env_kwargs": {},
+        },
+        "Platoon-v0": {
+            "num_envs": 32,
+            "total_steps": 450_000,
+            "config": {
+                "rollout_length": 64,
+                "n_epochs": 5,
+                "lr": 3e-4,
+                "gamma": 0.99,
+                "log_std_init": -1.0,
+                "reward_source": "agent",
+                "normalize_observations": False,
+                "value_clip_range": None,
+            },
+            "env_kwargs": {},
+        },
+        "Consensus-v0": {
+            "num_envs": 32,
+            "total_steps": 400_000,
+            "config": {
+                "rollout_length": 64,
+                "n_epochs": 5,
+                "lr": 1e-3,
+                "gamma": 0.9,
+                "reward_source": "agent",
+                "normalize_observations": False,
+            },
+            "env_kwargs": {},
+        },
+        "LineMsg-v0": {
+            "num_envs": 32,
+            "total_steps": 100_000,
+            "config": {"rollout_length": 50, "n_epochs": 5, "lr": 1e-3, "ent_coef": 0.01},
+            "env_kwargs": {},
+        },
+    },
+}
