@@ -34,11 +34,11 @@ from typing import Any
 import numpy as np
 from gymnasium import Env
 from gymnasium.spaces import Box, Discrete, MultiBinary
-from gymnasium.utils import EzPickle, seeding
+from gymnasium.utils import seeding
 from numpy.lib.stride_tricks import sliding_window_view
 
 from env_lib.errors import ResetNeededError
-from env_lib.utils.rendering import validate_render_mode
+from env_lib.utils.rendering import state_without_renderer, validate_render_mode
 
 __all__ = ["LineMsgEnv"]
 
@@ -63,7 +63,7 @@ def _check_int(name: str, value: Any, minimum: int) -> int:
     return int(value)
 
 
-class LineMsgEnv(Env, EzPickle):
+class LineMsgEnv(Env):
     """Cooperative message relay along a line of agents.
 
     Parameters
@@ -117,6 +117,10 @@ class LineMsgEnv(Env, EzPickle):
         "render_fps": 10,
     }
 
+    def __getstate__(self) -> dict[str, Any]:
+        # Pickle and deep-copy without the renderer (rebuilt on the next render()).
+        return state_without_renderer(self)
+
     def __init__(
         self,
         num_agents: int = 10,
@@ -125,14 +129,6 @@ class LineMsgEnv(Env, EzPickle):
         render_mode: str | None = None,
         action_space_type: str = "discrete",
     ):
-        EzPickle.__init__(
-            self,
-            num_agents=num_agents,
-            n_obs_neighbors=n_obs_neighbors,
-            max_iter=max_iter,
-            render_mode=render_mode,
-            action_space_type=action_space_type,
-        )
         self.num_agents = _check_int("num_agents", num_agents, 2)
         n_obs_neighbors = _check_int("n_obs_neighbors", n_obs_neighbors, 0)
         if n_obs_neighbors == 0:

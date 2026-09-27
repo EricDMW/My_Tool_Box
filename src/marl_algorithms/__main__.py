@@ -73,6 +73,20 @@ def _action_kind(env_id: str, env_kwargs: dict[str, Any]) -> str:
         envs.close()
 
 
+def _check_output(path: str | None, *, directory: bool = False) -> None:
+    """Fail before training if ``path`` cannot be written (a parent is a file)."""
+    if not path:
+        return
+    target = os.path.abspath(path)
+    if not directory and os.path.isdir(target):
+        raise _UsageError(f"cannot write {path!r}: it is a directory")
+    parent = target if directory else os.path.dirname(target)
+    while parent and not os.path.exists(parent):
+        parent = os.path.dirname(parent)
+    if parent and not os.path.isdir(parent):
+        raise _UsageError(f"cannot write {path!r}: {parent!r} is not a directory")
+
+
 def _algorithm_class(name: str) -> Any:
     from marl_algorithms.registry import get_algorithm, list_algorithms
 
@@ -129,6 +143,11 @@ def _evaluation_table(
     from marl_algorithms.core.runner import make_vector_env
 
     envs = make_vector_env(env_id, min(episodes, 64), **env_kwargs)
+    try:
+        algo.check_env(envs)
+    except ValueError as exc:
+        envs.close()
+        raise _UsageError(str(exc)) from None
     rows = [("random", evaluate(envs, None, n_episodes=episodes, seed=seed))]
     rows.append((algo.name, algo.evaluate(envs, episodes, seed=seed)))
     try:
@@ -153,7 +172,6 @@ def _error(message: str) -> int:
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
-    import torch
 
     from marl_algorithms.presets import get_preset
     from marl_algorithms.registry import train
@@ -169,8 +187,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
             f"{args.algorithm} does not support the {action_kind} actions of {args.env_id}"
         )
     _check_config(algo_class, config)
-    if args.threads:
-        torch.set_num_threads(args.threads)
+    _check_output(args.save)
+    _check_output(args.csv)
     total_steps = args.steps or int(preset.get("total_steps", 100_000))
     num_envs = args.num_envs or int(preset.get("num_envs", 16))
     source = "preset" if preset else "defaults"
@@ -198,6 +216,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         seed=args.seed,
         env_kwargs=env_kwargs,
         callback=progress,
+        threads=args.threads or None,
         **config,
     )
     print(log.summary())
@@ -211,15 +230,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
 
 def _cmd_compare(args: argparse.Namespace) -> int:
-    import torch
 
     from marl_algorithms.baselines import compare
 
     env_kwargs = _parse_pairs(args.env_kwarg)
     config = _parse_pairs(args.set)
     _action_kind(args.env_id, env_kwargs)  # the id and the arguments
-    if args.threads:
-        torch.set_num_threads(args.threads)
+    _check_output(args.csv)
+    _check_output(args.save_dir, directory=True)
     try:  # compare() checks everything else before training
         report = compare(
             args.env_id,
@@ -230,6 +248,7 @@ def _cmd_compare(args: argparse.Namespace) -> int:
             total_steps=args.steps,
             num_envs=args.num_envs,
             env_kwargs=env_kwargs,
+            threads=args.threads or None,
             verbose=True,
             **config,
         )
@@ -252,7 +271,18 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
     _action_kind(args.env_id, env_kwargs)
     if not os.path.isfile(args.checkpoint):
         raise _UsageError(f"no checkpoint at {args.checkpoint!r}")
-    algo = Algorithm.load(args.checkpoint)
+    try:
+        algo = Algorithm.load(args.checkpoint)
+    except (ValueError, KeyError) as exc:
+        raise _UsageError(str(exc.args[0]) if exc.args else str(exc)) from None
+    trained_on = algo.metadata.get("env_id")
+    trained_kwargs = algo.metadata.get("env_kwargs", {})
+    if trained_on is not None and (trained_on, trained_kwargs) != (args.env_id, env_kwargs):
+        extra = f" with {trained_kwargs}" if trained_kwargs else ""
+        print(
+            f"marl-train: note: the checkpoint was trained on {trained_on}{extra}",
+            file=sys.stderr,
+        )
     _evaluation_table(algo, args.env_id, env_kwargs, args.episodes, args.seed)
     return 0
 

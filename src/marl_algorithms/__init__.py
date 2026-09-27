@@ -61,6 +61,7 @@ _LAZY: dict[str, str] = {
     "VectorRunner": "marl_algorithms.core.runner",
     "Transition": "marl_algorithms.core.runner",
     "make_vector_env": "marl_algorithms.core.runner",
+    "torch_threads": "marl_algorithms.core.base",
     # Registry
     "AlgorithmInfo": "marl_algorithms.registry",
     "get_algorithm": "marl_algorithms.registry",

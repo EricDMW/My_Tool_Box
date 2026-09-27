@@ -26,6 +26,7 @@ implementation whenever the environment provides one.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -163,17 +164,22 @@ class BatchedVectorEnv(VectorEnv):
     def reset(
         self,
         *,
-        seed: int | None = None,
+        seed: int | Sequence[int] | None = None,
         options: dict[str, Any] | None = None,
     ) -> tuple[np.ndarray, dict[str, Any]]:
         """Reset all copies (or those in ``options["reset_mask"]``).
+
+        ``seed`` is an integer, or a list of ``num_envs`` integers as accepted
+        by Gymnasium's ``SyncVectorEnv``. The copies of a native batch share one
+        random generator, so a list seeds the whole batch deterministically
+        (from all its entries) rather than copy ``i`` with ``seed[i]``.
 
         Returns
         -------
         tuple
             ``(observations, infos)``.
         """
-        super().reset(seed=seed)
+        super().reset(seed=_batch_seed(seed, self.num_envs))
         mask = np.ones(self.num_envs, dtype=bool)
         if options is not None and "reset_mask" in options:
             mask = np.asarray(options["reset_mask"], dtype=bool)
@@ -316,3 +322,18 @@ class BatchedVectorEnv(VectorEnv):
             if f"_{key}" not in infos:
                 out[f"_{key}"] = np.ones(self.num_envs, dtype=bool)
         return out
+
+
+def _batch_seed(seed: Any, num_envs: int) -> int | None:
+    """One integer seed for the batch from ``None``, an integer or a list of seeds."""
+    if seed is None or isinstance(seed, (int, np.integer)):
+        return None if seed is None else int(seed)
+    seeds = list(seed)
+    if len(seeds) != num_envs:
+        raise ValueError(f"expected {num_envs} seeds (one per copy), got {len(seeds)}")
+    if all(value is None for value in seeds):
+        return None
+    if any(value is None for value in seeds):
+        raise ValueError("a list of seeds must contain only integers or only None")
+    entropy = [int(value) for value in seeds]
+    return int(np.random.SeedSequence(entropy).generate_state(1, dtype=np.uint64)[0] >> 1)

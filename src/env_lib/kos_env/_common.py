@@ -19,7 +19,7 @@ import numpy as np
 from gymnasium import spaces
 
 from env_lib.errors import ResetNeededError
-from env_lib.utils.rendering import validate_render_mode
+from env_lib.utils.rendering import state_without_renderer, validate_render_mode
 
 if TYPE_CHECKING:  # pragma: no cover
     from env_lib.kos_env.rendering import KuramotoFrame, KuramotoRenderer
@@ -257,6 +257,10 @@ class KuramotoEnvBase(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
 
     _backend_name = "numpy"
+
+    def __getstate__(self) -> dict[str, Any]:
+        # Pickle and deep-copy without the renderer (rebuilt on the next render()).
+        return state_without_renderer(self)
 
     def _init_common(
         self,

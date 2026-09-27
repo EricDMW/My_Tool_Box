@@ -44,6 +44,7 @@ __all__ = [
     "get_theme",
     "register_theme",
     "set_theme",
+    "state_without_renderer",
     "style_axes",
     "validate_render_mode",
     "with_alpha",
@@ -477,3 +478,17 @@ class MatplotlibRenderer(ABC):
     @abstractmethod
     def _update(self, *args: Any, **kwargs: Any) -> None:
         """Update artist data for the current frame."""
+
+
+def state_without_renderer(env: Any) -> dict[str, Any]:
+    """``env.__dict__`` without its renderer, for ``pickle`` and ``copy.deepcopy``.
+
+    Renderers hold matplotlib figures or pygame surfaces, which cannot be
+    pickled; environments rebuild them on the next ``render()``, so a pickled
+    or copied environment keeps its full simulation state and renders as
+    before.
+    """
+    state = env.__dict__.copy()
+    if state.get("_renderer") is not None:
+        state["_renderer"] = None
+    return state

@@ -40,7 +40,7 @@ from env_lib.consensus_env.consensus_env import (
     make_topology,
 )
 from env_lib.errors import ResetNeededError
-from env_lib.utils.rendering import validate_render_mode
+from env_lib.utils.rendering import state_without_renderer, validate_render_mode
 from env_lib.utils.vector import BatchedVectorEnv
 
 __all__ = ["ConsensusVectorEnv"]
@@ -129,6 +129,10 @@ class ConsensusVectorEnv(BatchedVectorEnv):
     SLOT_DIM: int = ConsensusEnv.SLOT_DIM
     #: Columns of one neighbour slot.
     neighbor_slot_layout: dict[str, slice] = ConsensusEnv.neighbor_slot_layout
+
+    def __getstate__(self) -> dict[str, Any]:
+        # Pickle and deep-copy without the renderer (rebuilt on the next render()).
+        return state_without_renderer(self)
 
     def __init__(
         self,
@@ -369,7 +373,7 @@ class ConsensusVectorEnv(BatchedVectorEnv):
 
     def close_extras(self, **kwargs: Any) -> None:
         """Release the rendering resources."""
-        if self._renderer is not None:
+        if getattr(self, "_renderer", None) is not None:  # absent if __init__ failed early
             self._renderer.close()
             self._renderer = None
 

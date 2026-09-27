@@ -75,7 +75,7 @@ def _make(env_id: str, kwargs: dict[str, Any], **extra: Any) -> gym.Env:
         return env_lib.make(env_id, **kwargs, **extra)
     except ImportError as exc:
         raise _CliError(f"cannot create {env_id}: {exc}") from exc
-    except TypeError as exc:
+    except (TypeError, ValueError) as exc:
         raise _CliError(f"invalid arguments for {env_id}: {exc}") from exc
 
 
@@ -278,7 +278,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
             extra["wrappers"] = [TeamReward]
         try:
             env = env_lib.make_vec(args.env_id, args.num_envs, **extra, **kwargs)
-        except (ImportError, TypeError) as exc:
+        except (ImportError, TypeError, ValueError) as exc:
             raise _CliError(
                 f"cannot create {args.num_envs} copies of {args.env_id}: {exc}"
             ) from exc

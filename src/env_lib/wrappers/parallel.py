@@ -304,9 +304,13 @@ class ParallelEnvAdapter(_ParallelBase):
         joint = self._codec.join([actions[agent] for agent in self.possible_agents])
         observation, reward, terminated, truncated, info = self.env.step(joint)
 
-        if isinstance(info, Mapping) and info.get("agent_rewards") is not None:
-            rewards = self._per_agent(info["agent_rewards"], np.float64)
+        agent_rewards = info.get("agent_rewards") if isinstance(info, Mapping) else None
+        if agent_rewards is not None and np.size(agent_rewards) in (1, self.n_agents):
+            rewards = self._per_agent(agent_rewards, np.float64)
         else:
+            # No per-agent rewards, or ones that do not match the agents of the
+            # observation (a Kuramoto network controlled as one agent reports
+            # one reward per oscillator group): use the team reward.
             rewards = self._per_agent(reward, np.float64)
         terminations = self._per_agent(terminated, bool)
         truncations = self._per_agent(truncated, bool)

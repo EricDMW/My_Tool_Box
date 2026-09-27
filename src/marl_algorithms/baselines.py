@@ -211,6 +211,7 @@ def compare(
     include_baseline: bool = True,
     keep_replay: bool = False,
     device: str = "cpu",
+    threads: int | None = 1,
     verbose: bool = False,
     **config: Any,
 ) -> Comparison:
@@ -261,6 +262,10 @@ def compare(
         hundreds of megabytes per run).
     device:
         Torch device for training.
+    threads:
+        PyTorch threads during training (restored afterwards); one thread is
+        the fastest for these small networks on a CPU. ``None`` keeps
+        PyTorch's setting.
     verbose:
         Print a line per trained algorithm and seed.
     **config:
@@ -302,6 +307,12 @@ def compare(
         raise ValueError(f"seeds must be distinct and not empty, got {seeds}")
     if algorithms is None:
         names = [name for name, preset_env in list_presets() if preset_env == env_id]
+        if not names:
+            raise ValueError(
+                f"no algorithm has a preset for {env_id}; name the algorithms to train "
+                "(with total_steps), or pass algorithms=[] to compare only your policies "
+                "with the references"
+            )
     else:
         names = [str(name).lower() for name in algorithms]
     if len(set(names)) != len(names):
@@ -362,7 +373,7 @@ def compare(
             for seed in seeds:
                 start = time.perf_counter()
                 algo, log = _train(
-                    name, env_id, seed, total_steps, num_envs, env_kwargs, device, config
+                    name, env_id, seed, total_steps, num_envs, env_kwargs, device, threads, config
                 )
                 seconds.append(time.perf_counter() - start)
                 if not keep_replay and hasattr(algo, "replay"):
@@ -412,6 +423,7 @@ def _train(
     num_envs: int | None,
     env_kwargs: dict[str, Any],
     device: str,
+    threads: int | None,
     config: dict[str, Any],
 ) -> tuple[Algorithm, TrainingLog]:
     preset = get_preset(name, env_id)
@@ -424,6 +436,7 @@ def _train(
             num_envs=num_envs,
             env_kwargs=env_kwargs,
             device=device,
+            threads=threads,
             **config,
         )
     return train(
@@ -434,6 +447,7 @@ def _train(
         seed=seed,
         env_kwargs=env_kwargs,
         device=device,
+        threads=threads,
         **config,
     )
 

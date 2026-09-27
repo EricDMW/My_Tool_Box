@@ -45,7 +45,7 @@ from env_lib.ajlatt_env.estimation import (
 )
 from env_lib.ajlatt_env.maps import DynamicMap, GridMap, load_grid_map
 from env_lib.errors import ResetNeededError
-from env_lib.utils.rendering import validate_render_mode
+from env_lib.utils.rendering import state_without_renderer, validate_render_mode
 
 __all__ = ["AJLATTEnv", "make"]
 
@@ -73,6 +73,10 @@ class AJLATTEnv(gym.Env):
     """
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 8}
+
+    def __getstate__(self) -> dict[str, Any]:
+        # Pickle and deep-copy without the renderer (rebuilt on the next render()).
+        return state_without_renderer(self)
 
     def __init__(
         self,

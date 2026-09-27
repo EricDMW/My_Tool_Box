@@ -270,7 +270,9 @@ class KuramotoOscillatorVectorEnv(BatchedVectorEnv):
 
     def close_extras(self, **kwargs: Any) -> None:
         """Release the rendering resources."""
-        self._single.close()
+        single = getattr(self, "_single", None)  # absent if __init__ failed early
+        if single is not None:
+            single.close()
 
     # ------------------------------------------------------------------
     # BatchedVectorEnv hooks

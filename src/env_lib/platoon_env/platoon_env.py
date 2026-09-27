@@ -34,7 +34,7 @@ import numpy as np
 from gymnasium import spaces
 
 from env_lib.errors import ResetNeededError
-from env_lib.utils.rendering import validate_render_mode
+from env_lib.utils.rendering import state_without_renderer, validate_render_mode
 from env_lib.utils.vector import BatchedVectorEnv
 
 __all__ = [
@@ -1178,6 +1178,10 @@ class PlatoonEnv(_PlatoonSpecMixin, gym.Env):
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 10}
 
+    def __getstate__(self) -> dict[str, Any]:
+        # Pickle and deep-copy without the renderer (rebuilt on the next render()).
+        return state_without_renderer(self)
+
     def __init__(
         self,
         *,
@@ -1467,6 +1471,10 @@ class PlatoonVectorEnv(_PlatoonSpecMixin, BatchedVectorEnv):
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 10}
 
+    def __getstate__(self) -> dict[str, Any]:
+        # Pickle and deep-copy without the renderer (rebuilt on the next render()).
+        return state_without_renderer(self)
+
     def __init__(
         self,
         num_envs: int = 1,
@@ -1531,6 +1539,6 @@ class PlatoonVectorEnv(_PlatoonSpecMixin, BatchedVectorEnv):
 
     def close_extras(self, **kwargs: Any) -> None:
         """Release the rendering resources (called by :meth:`close`)."""
-        if self._renderer is not None:
+        if getattr(self, "_renderer", None) is not None:  # absent if __init__ failed early
             self._renderer.close()
             self._renderer = None

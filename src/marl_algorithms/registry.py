@@ -6,7 +6,7 @@ import importlib
 from dataclasses import dataclass
 from typing import Any
 
-from marl_algorithms.core.base import Algorithm, Callback, TrainingLog
+from marl_algorithms.core.base import Algorithm, Callback, TrainingLog, torch_threads
 from marl_algorithms.core.runner import make_vector_env
 
 __all__ = ["AlgorithmInfo", "get_algorithm", "list_algorithms", "make_algorithm", "train"]
@@ -138,6 +138,7 @@ def train(
     env_kwargs: dict[str, Any] | None = None,
     device: str = "cpu",
     callback: Callback | None = None,
+    threads: int | None = 1,
     **config: Any,
 ) -> tuple[Algorithm, TrainingLog]:
     """Train ``algorithm`` on ``num_envs`` batched copies of an ``env_lib`` environment.
@@ -160,6 +161,11 @@ def train(
         Torch device.
     callback:
         See :meth:`Algorithm.learn`.
+    threads:
+        PyTorch threads during training (restored afterwards). One thread is
+        the fastest for these small networks on a CPU, often by an order of
+        magnitude; ``None`` keeps PyTorch's setting (for large networks or a
+        GPU).
     **config:
         Configuration overrides.
 
@@ -174,10 +180,14 @@ def train(
     >>> algo, log = train("mappo", "PowerGrid-v0", total_steps=200_000, num_envs=32)
     >>> print(algo.evaluate(env_lib.make_vec("PowerGrid-v0", 16), n_episodes=32))
     """
-    envs = make_vector_env(env_id, num_envs, **(env_kwargs or {}))
+    get_algorithm(algorithm)  # KeyError for an unknown name, before building anything
+    env_kwargs = dict(env_kwargs or {})
+    envs = make_vector_env(env_id, num_envs, **env_kwargs)
     try:
-        agent = make_algorithm(algorithm, envs, device=device, seed=seed, **config)
-        log = agent.learn(envs, total_steps, seed=seed, callback=callback)
+        with torch_threads(threads):
+            agent = make_algorithm(algorithm, envs, device=device, seed=seed, **config)
+            agent.metadata.update(env_id=env_id, env_kwargs=env_kwargs)
+            log = agent.learn(envs, total_steps, seed=seed, callback=callback)
     finally:
         envs.close()
     log.env_id = env_id
