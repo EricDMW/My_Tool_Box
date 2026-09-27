@@ -309,16 +309,22 @@ class PerAgent(nn.Module):
         """Call ``method`` of the underlying network(s) on per-agent inputs.
 
         Every tensor argument must have the agent axis at the same position as
-        ``x`` (``x.dim() - 2``); outputs (tensors or tuples of tensors) are
-        stacked on that axis.
+        ``x`` (``x.dim() - 2``); other arguments (such as a
+        ``torch.Generator``) are passed unchanged. Outputs (tensors or tuples of
+        tensors) are stacked on the agent axis.
         """
         if self.shared:
             return getattr(self.nets[0], method)(x, *args)
         axis = x.dim() - 2
         outputs = [
-            getattr(net, method)(x.select(axis, i), *(a.select(axis, i) for a in args))
+            getattr(net, method)(x.select(axis, i), *(_agent_slice(a, axis, i) for a in args))
             for i, net in enumerate(self.nets)
         ]
         if isinstance(outputs[0], tuple):
             return tuple(torch.stack(parts, dim=axis) for parts in zip(*outputs))
         return torch.stack(outputs, dim=axis)
+
+
+def _agent_slice(value, axis: int, index: int):
+    """Agent ``index`` of a per-agent tensor; non-tensors are returned unchanged."""
+    return value.select(axis, index) if isinstance(value, torch.Tensor) else value
