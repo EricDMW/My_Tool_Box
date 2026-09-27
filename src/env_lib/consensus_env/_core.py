@@ -29,6 +29,8 @@ INIT_MAX_BATCHES = 32
 INIT_SPREAD = 0.8
 #: Upper bound on the elements of one connectivity test array while sampling.
 _SAMPLE_CHUNK_ELEMENTS = 1 << 21
+#: Up to this many pairs (B * n * n), pairwise differences are formed in one array.
+_SMALL_PAIRWISE = 4096
 
 
 def batched_connected(adjacency: np.ndarray) -> np.ndarray:
@@ -127,7 +129,8 @@ class ConsensusKernel:
         self.obs_dim = 6 + self.SLOT_DIM * self.max_neighbors
         self.comm_radius_sq = float(comm_radius) * float(comm_radius)
         self.comm_radius = float(comm_radius)
-        self._diag = np.arange(n)
+        self._slot_index = np.arange(self.visible_slots)
+        self._bases: dict[int, tuple[np.ndarray, np.ndarray]] = {}
 
     # ------------------------------------------------------------------
     # Dynamics
@@ -185,6 +188,16 @@ class ConsensusKernel:
             (``y = x - d``, computed as ``(x_j - x_i) - (d_j - d_i)``), and the
             squared norms of ``x_j - x_i`` and ``y_j - y_i``; all ``(B, n, n)``.
         """
+        if pos.shape[0] * self.n_agents * self.n_agents <= _SMALL_PAIRWISE:
+            # Few elements: fewer (per-call dominated) array operations.
+            delta = pos[:, None, :, :] - pos[:, :, None, :]
+            sq_x = np.einsum("bijk,bijk->bij", delta, delta)
+            if not self.formation:
+                return (delta[..., 0], delta[..., 1]), sq_x, sq_x
+            delta = delta - self.offset_delta
+            sq_y = np.einsum("bijk,bijk->bij", delta, delta)
+            return (delta[..., 0], delta[..., 1]), sq_x, sq_y
+        # Many elements: component-wise arrays keep the inner loops long.
         px, py = pos[..., 0], pos[..., 1]
         dx = px[:, None, :] - px[:, :, None]
         dy = py[:, None, :] - py[:, :, None]
@@ -198,7 +211,8 @@ class ConsensusKernel:
     def proximity(self, sq_x: np.ndarray) -> np.ndarray:
         """Disk-graph adjacency ``(B, n, n)`` from squared distances (``False`` diagonal)."""
         adj = sq_x <= self.comm_radius_sq
-        adj[:, self._diag, self._diag] = False
+        n = self.n_agents
+        adj.reshape(-1, n * n)[:, :: n + 1] = False  # diagonal of every copy
         return adj
 
     @staticmethod
@@ -234,7 +248,8 @@ class ConsensusKernel:
     def task_error(self, pos: np.ndarray) -> np.ndarray:
         """Task error ``e = mean_i ||y_i - mean_j y_j||^2`` per copy, shape ``(B,)``."""
         shifted = pos - self.offsets
-        centred = shifted - shifted.mean(axis=1, keepdims=True)
+        # np.add.reduce(...) / n is exactly ndarray.mean, without its Python overhead.
+        centred = shifted - np.add.reduce(shifted, axis=1, keepdims=True) / self.n_agents
         return np.einsum("bij,bij->b", centred, centred) / self.n_agents
 
     def observe(
@@ -244,30 +259,48 @@ class ConsensusKernel:
         adj: np.ndarray,
         sq_x: np.ndarray,
         rel: tuple[np.ndarray, np.ndarray],
+        deg: np.ndarray,
     ) -> np.ndarray:
         """Joint observations ``(B, n, obs_dim)`` float32 (see the environment docstring).
 
-        ``rel`` and ``sq_x`` are the outputs of :meth:`pairwise` for ``pos``.
+        ``rel`` and ``sq_x`` are the outputs of :meth:`pairwise` for ``pos``;
+        ``deg`` are the node degrees of ``adj``, shape ``(B, n)``.
         """
         batch, n, slots = pos.shape[0], self.n_agents, self.visible_slots
         obs = np.zeros((batch, n, self.obs_dim), dtype=np.float32)
         obs[..., 0:2] = pos
         obs[..., 2:4] = vel
         obs[..., 4:6] = self.offsets
-        # Neighbours first (sorted by distance, ties by index), non-neighbours (inf) last.
-        keys = np.where(adj, sq_x, np.inf)
-        order = np.argsort(keys, axis=-1, kind="stable")[..., :slots]
-        # Gather through flat indices (much faster than broadcast fancy indexing).
-        pair = order + (np.arange(batch * n) * n).reshape(batch, n, 1)
-        mask = np.isfinite(np.take(keys.reshape(-1), pair))
+        # Neighbours first (sorted by distance, ties by index), non-neighbours (inf) last,
+        # so slot k holds a neighbour exactly when k < degree.
+        order = np.argsort(np.where(adj, sq_x, np.inf), axis=-1, kind="stable")[..., :slots]
+        mask = self._slot_index < deg[..., None]
+        pair_base, agent_base = self._index_bases(batch)
+        pair = order + pair_base  # flat index of (b, i, order) in (B, n, n)
+        features = np.empty((batch, n, slots, 4))
+        features[..., 0] = rel[0].take(pair)
+        features[..., 1] = rel[1].take(pair)
+        np.subtract(
+            vel.reshape(-1, 2).take(order + agent_base, axis=0),
+            vel[:, :, None, :],
+            out=features[..., 2:4],
+        )
         block = obs[..., 6:].reshape(batch, n, self.max_neighbors, self.SLOT_DIM)
-        for column, component in enumerate(rel):
-            block[:, :, :slots, column] = np.where(mask, np.take(component.reshape(-1), pair), 0.0)
-        agent = order + (np.arange(batch) * n).reshape(batch, 1, 1)
-        rel_vel = np.take(vel.reshape(-1, 2), agent, axis=0) - vel[:, :, None, :]
-        block[:, :, :slots, 2:4] = np.where(mask[..., None], rel_vel, 0.0)
+        block[:, :, :slots, 0:4] = np.where(mask[..., None], features, 0.0)
         block[:, :, :slots, 4] = mask
         return obs
+
+    def _index_bases(self, batch: int) -> tuple[np.ndarray, np.ndarray]:
+        """Offsets turning per-copy neighbour indices into flat indices (cached per batch)."""
+        bases = self._bases.get(batch)
+        if bases is None:
+            n = self.n_agents
+            bases = (
+                (np.arange(batch * n) * n).reshape(batch, n, 1),
+                (np.arange(batch) * n).reshape(batch, 1, 1),
+            )
+            self._bases[batch] = bases
+        return bases
 
     def feedback(
         self,

@@ -372,7 +372,7 @@ class AJLATTEnv(gym.Env):
         so both fans are cast in one batch and cached for these poses. The
         results equal per-robot :meth:`GridMap.get_closest_obstacle` calls.
         """
-        key = poses.tobytes()
+        key = (id(self.MAP), poses.tobytes())
         if self._obstacle_cache is not None and self._obstacle_cache[0] == key:
             return self._obstacle_cache[1]
         full, sensor = [None] * self.nR, [None] * self.nR

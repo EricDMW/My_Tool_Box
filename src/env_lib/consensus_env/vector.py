@@ -466,14 +466,16 @@ class ConsensusVectorEnv(BatchedVectorEnv):
 
         self._error = kernel.task_error(self._pos)
         solved = self._error < self.tolerance
-        rewards = agent_rewards.mean(axis=-1)
+        rewards = np.add.reduce(agent_rewards, axis=-1) / self.n_agents  # the mean
         rewards = np.where(solved & ~self._success, rewards + self.success_bonus, rewards)
         self._success |= solved
         truncated = self._step >= self.max_steps
         return rewards, solved, truncated, self._infos(agent_rewards)
 
     def _observe(self) -> np.ndarray:
-        return self._kernel.observe(self._pos, self._vel, self._adj, self._sq_x, self._rel)
+        return self._kernel.observe(
+            self._pos, self._vel, self._adj, self._sq_x, self._rel, self._deg
+        )
 
     def _reset_infos(self, mask: np.ndarray) -> dict[str, Any]:
         infos = self._infos(np.zeros((self.num_envs, self.n_agents), dtype=np.float64))

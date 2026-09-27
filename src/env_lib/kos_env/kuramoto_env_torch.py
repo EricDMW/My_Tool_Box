@@ -52,7 +52,10 @@ def _resolve_device(device: str | torch.device) -> torch.device:
 
 def _to_numpy(tensor: torch.Tensor) -> np.ndarray:
     """Copy a tensor to a NumPy array that does not share memory with the environment."""
-    return tensor.detach().to("cpu", copy=True).numpy()
+    tensor = tensor.detach()
+    if tensor.device.type == "cpu":
+        return tensor.numpy().copy()  # cheaper than .to("cpu", copy=True) on the host
+    return tensor.to("cpu").numpy()  # the device-to-host transfer already copies
 
 
 class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
@@ -168,6 +171,11 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
             (self._edge_rows * n + self._edge_cols, self._edge_cols * n + self._edge_rows)
         )
         self._edge_flat_t = torch.as_tensor(edge_flat, dtype=torch.long, device=self.device)
+        # scatter_ is markedly faster with a materialised (contiguous) index than
+        # with a stride-0 expanded one; keep it when it is small.
+        self._edge_index_batch: torch.Tensor | None = None
+        if self.n_agents * edge_flat.size <= 1 << 20:
+            self._edge_index_batch = self._edge_flat_t.expand(self.n_agents, -1).contiguous()
         self._action_low_t = torch.as_tensor(self._action_low, **tensor_kwargs)
         self._action_high_t = torch.as_tensor(self._action_high, **tensor_kwargs)
         if self._constant_np is not None:
@@ -181,6 +189,7 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
             self.coupling_matrix = None
 
         self._rng = torch.Generator(device=self.device)
+        self._coupling_buf: torch.Tensor | None = None
         self.phases: torch.Tensor | None = None
         self.natural_frequencies: torch.Tensor | None = None
         self.coupling_strengths: torch.Tensor | None = None
@@ -188,6 +197,20 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
         self._current_coupling: torch.Tensor | None = None
         self._last_dphases_dt: torch.Tensor | None = None
         self._last_agent_rewards: np.ndarray | None = None
+
+    def _coupling_buffer(self) -> torch.Tensor:
+        """Persistent ``(n_agents, N * N)`` buffer for the dynamic coupling matrices.
+
+        Only the edge entries change from step to step, so the buffer is zeroed
+        once and reused (``self._current_coupling`` is its only holder; info
+        arrays are copies).
+        """
+        if self._coupling_buf is None:
+            n = self.n_oscillators
+            self._coupling_buf = torch.zeros(
+                self.n_agents, n * n, dtype=self._dtype, device=self.device
+            )
+        return self._coupling_buf
 
     def _check_render_agent(self, render_agent: int) -> int:
         return check_int("render_agent", render_agent, minimum=0, maximum=self.n_agents - 1)
@@ -200,11 +223,21 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
         )
 
     # ------------------------------------------------------------------ model
-    def _coupling_matrix_from_actions(self, actions: torch.Tensor) -> torch.Tensor:
-        """Scatter ``(B, M)`` edge strengths into symmetric ``(B, N, N)`` matrices."""
+    def _coupling_matrix_from_actions(
+        self, actions: torch.Tensor, out: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        """Scatter ``(B, M)`` edge strengths into symmetric ``(B, N, N)`` matrices.
+
+        ``out`` is an optional ``(B, N * N)`` buffer whose non-edge entries are
+        zero; every edge entry is overwritten.
+        """
         n, batch = self.n_oscillators, actions.shape[0]
-        matrix = torch.zeros(batch, n * n, dtype=actions.dtype, device=actions.device)
-        index = self._edge_flat_t.expand(batch, -1)
+        if out is None:
+            out = torch.zeros(batch, n * n, dtype=actions.dtype, device=actions.device)
+        matrix = out
+        index = self._edge_index_batch
+        if index is None or index.shape[0] != batch:
+            index = self._edge_flat_t.expand(batch, -1)
         matrix.scatter_(1, index, torch.cat((actions, actions), dim=1))
         return matrix.view(batch, n, n)
 
@@ -272,9 +305,10 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
     def _apply_bonus(self, rewards: torch.Tensor, r: torch.Tensor) -> torch.Tensor:
         if self.reward_type == "frequency_synchronization":
             return rewards
-        return rewards + self.sync_bonus * (r > self.sync_threshold).to(rewards.dtype)
+        return torch.where(r > self.sync_threshold, rewards + self.sync_bonus, rewards)
 
     # ------------------------------------------------------------------ gym API
+    @torch.no_grad()
     def reset(
         self,
         *,
@@ -334,7 +368,9 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
         self.coupling_strengths = coupling_strengths
         self.control_inputs = torch.zeros(batch, n, dtype=self._dtype, device=self.device)
         if coupling_strengths is not None:
-            self._current_coupling = self._coupling_matrix_from_actions(coupling_strengths)
+            self._current_coupling = self._coupling_matrix_from_actions(
+                coupling_strengths, self._coupling_buffer()
+            )
         else:
             self._current_coupling = self._constant_t
         self.step_count = 0
@@ -357,6 +393,7 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
             self.render()
         return self._create_observation(0), info
 
+    @torch.no_grad()
     def step(self, action: ArrayLike) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         """Advance every system by one time step ``dt``.
 
@@ -381,7 +418,9 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
         control_inputs = action_t[:, :n]
         if self.coupling_mode == "dynamic":
             self.coupling_strengths = action_t[:, n:]
-            coupling_matrix = self._coupling_matrix_from_actions(self.coupling_strengths)
+            coupling_matrix = self._coupling_matrix_from_actions(
+                self.coupling_strengths, self._coupling_buffer()
+            )
         else:
             coupling_matrix = self._constant_t
 
@@ -406,30 +445,43 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
         self.step_count += 1
 
         base, r, coherence = self._base_rewards(self.phases, dphases_dt)
-        agent_rewards = _to_numpy(self._apply_bonus(base, r)).astype(np.float64)
-        r_np = _to_numpy(r)
+        # Two device-to-host transfers for all per-system and per-oscillator info.
+        r_np, coherence_np, rewards_np = _to_numpy(
+            torch.stack((r, coherence, self._apply_bonus(base, r)))
+        )
+        phases_np, frequencies_np, dphases_np = _to_numpy(
+            torch.stack((self.phases, self.natural_frequencies, dphases_dt))
+        )
+        agent_rewards = rewards_np.astype(np.float64)
         reward = float(agent_rewards[0])
         terminated = bool(r_np[0] > self.sync_threshold)
         truncated = bool(self.step_count >= self.max_steps)
         self._last_agent_rewards = agent_rewards
 
-        phases_np = _to_numpy(self.phases)
-        self._append_history(phases_np)
+        self._append_history(phases_np.copy())
         info = {
             "order_parameter": r_np,
-            "phase_coherence": _to_numpy(coherence),
+            "phase_coherence": coherence_np,
             "step_count": self.step_count,
-            "natural_frequencies": _to_numpy(self.natural_frequencies),
-            "phases": phases_np.copy(),
+            "natural_frequencies": frequencies_np,
+            "phases": phases_np,
             "coupling_matrix": self._batched_coupling_numpy(),
             "device": str(self.device),
             "n_agents": self.n_agents,
-            "dphases_dt": _to_numpy(dphases_dt),
+            "dphases_dt": dphases_np,
             "agent_rewards": agent_rewards.copy(),
         }
         if self.render_mode == "human":
             self.render()
-        return self._create_observation(0), reward, terminated, truncated, info
+        # Observation of system 0 from the host copies (no extra device transfer
+        # for phases and frequencies).
+        n = self.n_oscillators
+        action_0 = _to_numpy(action_t[0])
+        parts = [phases_np[0], frequencies_np[0]]
+        if self.coupling_mode == "dynamic":
+            parts.append(action_0[n:])
+        parts.append(action_0[:n])
+        return np.concatenate(parts), reward, terminated, truncated, info
 
     # ------------------------------------------------------------------ batch API
     def get_batch_observations(self) -> torch.Tensor:
@@ -468,10 +520,16 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
 
     # ------------------------------------------------------------------ internals
     def _action_to_tensor(self, action: ArrayLike) -> torch.Tensor:
+        action_dim = self.action_space.shape[0]
         if isinstance(action, torch.Tensor):
             action = action.detach()  # never carry a caller's autograd graph into the state
+            host = None
+        else:
+            # Convert on the host first: checking finiteness with NumPy is much
+            # cheaper than torch.isfinite on CPU and needs no device sync.
+            host = np.asarray(action, dtype=np.float32)
+            action = host
         action_t = torch.as_tensor(action, dtype=self._dtype, device=self.device)
-        action_dim = self.action_space.shape[0]
         if action_t.ndim == 1:
             action_t = action_t.unsqueeze(0).expand(self.n_agents, -1)
         if action_t.shape != (self.n_agents, action_dim):
@@ -479,7 +537,8 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
                 f"action must have shape ({action_dim},) or ({self.n_agents}, {action_dim}), "
                 f"got {tuple(torch.as_tensor(action).shape)}"
             )
-        if not bool(torch.isfinite(action_t).all()):
+        finite = np.isfinite(host).all() if host is not None else torch.isfinite(action_t).all()
+        if not bool(finite):
             raise ValueError("action contains non-finite values")
         return torch.clamp(action_t, self._action_low_t, self._action_high_t)
 

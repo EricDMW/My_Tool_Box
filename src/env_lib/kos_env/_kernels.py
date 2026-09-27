@@ -1,14 +1,15 @@
 """Batch-first NumPy kernels of the Kuramoto model (private).
 
-All functions of :class:`KuramotoKernel` work on arrays with a leading batch
-dimension ``B``: phases, natural frequencies and control inputs ``(B, N)``,
-coupling strengths ``(B, M)`` and coupling matrices ``(B, N, N)`` (or one
-shared ``(N, N)`` matrix). :class:`~env_lib.kos_env.KuramotoOscillatorEnv`
-calls them with ``B = 1`` and
-:class:`~env_lib.kos_env.vector.KuramotoOscillatorVectorEnv` with
-``B = num_envs``. Every copy is computed with the same operations whatever
-``B`` is (one matrix-vector product per copy), so a copy of the vector
-environment reproduces the single environment bit for bit.
+All functions of :class:`KuramotoKernel` work on arrays with any leading
+batch shape ``(...)``: phases, natural frequencies and control inputs
+``(..., N)``, coupling strengths ``(..., M)`` and coupling matrices
+``(..., N, N)`` (or one shared ``(N, N)`` matrix).
+:class:`~env_lib.kos_env.KuramotoOscillatorEnv` calls them with unbatched
+arrays (no leading dimension, as cheap as dedicated scalar code) and
+:class:`~env_lib.kos_env.vector.KuramotoOscillatorVectorEnv` with a leading
+``num_envs`` dimension. Every system is computed with the same operations
+whatever the batch shape is (one matrix-vector product per system), so a copy
+of the vector environment reproduces the single environment bit for bit.
 """
 
 from __future__ import annotations
@@ -79,14 +80,14 @@ class KuramotoKernel:
         return phases, natural_frequencies, strengths
 
     def coupling_from_strengths(self, strengths: np.ndarray) -> np.ndarray:
-        """Scatter ``(B, M)`` edge strengths into symmetric ``(B, N, N)`` matrices."""
-        matrix = np.zeros((strengths.shape[0], self.n, self.n))
-        matrix[:, self._edge_rows, self._edge_cols] = strengths
-        matrix[:, self._edge_cols, self._edge_rows] = strengths
+        """Scatter ``(..., M)`` edge strengths into symmetric ``(..., N, N)`` matrices."""
+        matrix = np.zeros(strengths.shape[:-1] + (self.n, self.n))
+        matrix[..., self._edge_rows, self._edge_cols] = strengths
+        matrix[..., self._edge_cols, self._edge_rows] = strengths
         return matrix
 
     def clip_actions(self, actions: np.ndarray) -> np.ndarray:
-        """Clip float64 actions ``(B, action_dim)`` to the action bounds."""
+        """Clip float64 actions ``(..., action_dim)`` to the action bounds."""
         return np.clip(actions, self.action_low, self.action_high)
 
     # ------------------------------------------------------------------ dynamics
@@ -97,14 +98,17 @@ class KuramotoKernel:
         coupling: np.ndarray,
         control: np.ndarray,
     ) -> np.ndarray:
-        """Phase velocities ``omega_i + a_i + c * sum_j K_ij sin(theta_j - theta_i)``, ``(B, N)``.
+        """Phase velocities ``omega_i + a_i + c * sum_j K_ij sin(theta_j - theta_i)``, ``(..., N)``.
 
         Uses ``sin(theta_j - theta_i) = sin(theta_j) cos(theta_i) - cos(theta_j) sin(theta_i)``,
         i.e. two matrix-vector products per copy instead of ``N^2`` sine evaluations.
         """
         sin, cos = np.sin(phases), np.cos(phases)
-        k_sin = np.matmul(coupling, sin[..., None])[..., 0]
-        k_cos = np.matmul(coupling, cos[..., None])[..., 0]
+        if sin.ndim == 1:  # one system: plain matrix-vector products
+            k_sin, k_cos = coupling @ sin, coupling @ cos
+        else:  # the same matrix-vector product for every system
+            k_sin = np.matmul(coupling, sin[..., None])[..., 0]
+            k_cos = np.matmul(coupling, cos[..., None])[..., 0]
         interaction = cos * k_sin - sin * k_cos
         if self.normalize:
             interaction *= self.coupling_factor
@@ -150,7 +154,8 @@ class KuramotoKernel:
         Returns
         -------
         tuple
-            ``(rewards, order_parameter, coherence, terminated)``, each ``(B,)``;
+            ``(rewards, order_parameter, coherence, terminated)``, each of the
+            leading shape;
             rewards include ``sync_bonus`` where the copy synchronised (not for
             ``"frequency_synchronization"``).
         """
@@ -160,10 +165,13 @@ class KuramotoKernel:
             frequency_error = np.mean(np.abs(dphases_dt - self.target_frequency), axis=-1)
         else:
             frequency_error = 0.0
-        rewards = np.asarray(combine_reward(self.reward_type, r, coherence, frequency_error))
+        rewards = combine_reward(self.reward_type, r, coherence, frequency_error)
         terminated = r > self.sync_threshold
         if not self.frequency_reward:
-            rewards = np.where(terminated, rewards + self.sync_bonus, rewards)
+            if np.ndim(rewards) == 0:  # one system
+                rewards = rewards + self.sync_bonus if terminated else rewards
+            else:
+                rewards = np.where(terminated, rewards + self.sync_bonus, rewards)
         return rewards, r, coherence, terminated
 
     # ------------------------------------------------------------------ observation
@@ -174,7 +182,7 @@ class KuramotoKernel:
         strengths: np.ndarray | None,
         control: np.ndarray,
     ) -> np.ndarray:
-        """Observations ``(B, obs_dim)`` float32: phases, frequencies, strengths, controls."""
+        """Observations ``(..., obs_dim)`` float32: phases, frequencies, strengths, controls."""
         parts = [phases, natural_frequencies]
         if strengths is not None:
             parts.append(strengths)

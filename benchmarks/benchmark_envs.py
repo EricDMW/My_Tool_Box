@@ -3,13 +3,16 @@
 Measures the mean wall-clock time of ``env.step`` (random actions, no
 rendering) and of ``env.render`` in ``"rgb_array"`` mode for every
 environment, then prints a table. Optional dependencies (torch, pygame,
-pymunk) are skipped when missing.
+pymunk) are skipped when missing, as are environments that fail to build.
 
 Run::
 
     python benchmarks/benchmark_envs.py
     python benchmarks/benchmark_envs.py --steps 500 --only kuramoto ajlatt
     python benchmarks/benchmark_envs.py --markdown > renders/benchmarks.md
+    OMP_NUM_THREADS=1 python benchmarks/benchmark_envs.py --torch-threads 1
+
+Batched (vector) throughput is measured by ``benchmarks/benchmark_vector.py``.
 """
 
 from __future__ import annotations
@@ -30,6 +33,11 @@ import numpy as np
 import env_lib
 
 Factory = Callable[..., object]
+
+
+def _registered(env_id: str) -> Factory:
+    """Factory of a registered environment (unwrapped, so that step() is timed alone)."""
+    return lambda **kwargs: env_lib.make(env_id, **kwargs).unwrapped
 
 
 def _cases() -> dict[str, list[tuple]]:
@@ -74,6 +82,8 @@ def _cases() -> dict[str, list[tuple]]:
             ("AJLATT obstacles04, 4 robots", env_lib.AJLATTEnv, {"map_name": "obstacles04"}),
             ("AJLATT obstacles05, 4 robots", env_lib.AJLATTEnv, {"map_name": "obstacles05"}),
         ],
+        "power_grid": [("PowerGrid-v0", _registered("PowerGrid-v0"), {})],
+        "platoon": [("Platoon-v0", _registered("Platoon-v0"), {})],
     }
 
 
@@ -106,6 +116,10 @@ def benchmark(only: list[str] | None, steps: int, render_steps: int, seed: int) 
                     {"case": label, "step": None, "render": None, "note": f"skipped ({exc.name})"}
                 )
                 continue
+            except Exception as exc:  # e.g. an environment still under development
+                note = f"skipped ({type(exc).__name__})"
+                rows.append({"case": label, "step": None, "render": None, "note": note})
+                continue
             step_ms = _time_steps(env, steps, seed, render=False)
             env.close()
             render_ms = None
@@ -130,8 +144,23 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--only", nargs="*", help="subset of: " + ", ".join(_cases()))
     parser.add_argument("--markdown", action="store_true", help="print a Markdown table")
+    parser.add_argument(
+        "--torch-threads",
+        type=int,
+        default=None,
+        help="torch intra-op threads (default: torch's choice)",
+    )
     args = parser.parse_args()
     warnings.simplefilter("ignore")
+    torch_note = ""
+    try:
+        import torch
+
+        if args.torch_threads:
+            torch.set_num_threads(args.torch_threads)
+        torch_note = f" | torch {torch.__version__} threads={torch.get_num_threads()}"
+    except ImportError:
+        pass
 
     rows = benchmark(args.only, args.steps, args.render_steps, args.seed)
 
@@ -139,7 +168,9 @@ def main() -> None:
         return "-" if value is None else f"{value:.3f}"
 
     print(
-        f"env_lib {env_lib.__version__} | Python {platform.python_version()} | {platform.machine()}"
+        f"env_lib {env_lib.__version__} | Python {platform.python_version()} | "
+        f"NumPy {np.__version__}{torch_note} | {platform.machine()} | "
+        f"OMP_NUM_THREADS={os.environ.get('OMP_NUM_THREADS', 'unset')}"
     )
     if args.markdown:
         print("\n| Environment | step [ms] | rgb_array frame [ms] |\n|---|---:|---:|")

@@ -8,11 +8,17 @@ import pytest
 from env_lib.utils import graphs
 
 
-@pytest.mark.parametrize("topology", graphs.TOPOLOGIES)
-@pytest.mark.parametrize("n", [2, 7, 12])
+@pytest.mark.parametrize(
+    ("topology", "n"),
+    [
+        (topology, n)
+        for topology in graphs.TOPOLOGIES
+        for n in (2, 7, 12)
+        # Small-world graphs need more nodes than the default 4 neighbours.
+        if not (topology == "small_world" and n <= 4)
+    ],
+)
 def test_make_graph_is_symmetric_connected_and_loop_free(topology, n):
-    if topology == "small_world" and n <= 4:
-        pytest.skip("small-world graphs need more nodes than neighbours")
     adj = graphs.make_graph(topology, n, rng=np.random.default_rng(0), edge_probability=0.6)
     assert adj.shape == (n, n) and adj.dtype == bool
     assert np.array_equal(adj, adj.T)

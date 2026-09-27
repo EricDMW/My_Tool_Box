@@ -856,7 +856,7 @@ class ConsensusEnv(gym.Env):
 
         self._error = float(kernel.task_error(pos)[0])
         solved = self._error < self.tolerance
-        reward = float(agent_rewards.mean())
+        reward = float(np.add.reduce(agent_rewards) / self.n_agents)  # the mean
         if solved and not self._success:
             reward += self.success_bonus
         self._success = self._success or solved
@@ -1006,7 +1006,9 @@ class ConsensusEnv(gym.Env):
             self._lambda2 = self._static_lambda2
 
     def _observation(self, rel: tuple[np.ndarray, np.ndarray], sq_x: np.ndarray) -> np.ndarray:
-        return self._kernel.observe(self._pos[None], self._vel[None], self._adj[None], sq_x, rel)[0]
+        return self._kernel.observe(
+            self._pos[None], self._vel[None], self._adj[None], sq_x, rel, self._deg[None]
+        )[0]
 
     def _info(self, agent_rewards: np.ndarray) -> dict[str, Any]:
         return {

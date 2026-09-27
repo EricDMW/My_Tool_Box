@@ -192,7 +192,7 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
     # ------------------------------------------------------------------ model
     def _coupling_matrix_from_actions(self, actions: np.ndarray) -> np.ndarray:
         """Scatter per-edge coupling strengths into a symmetric ``(N, N)`` matrix."""
-        return self._kernel.coupling_from_strengths(np.asarray(actions, dtype=np.float64)[None])[0]
+        return self._kernel.coupling_from_strengths(np.asarray(actions, dtype=np.float64))
 
     def _kuramoto_dynamics(
         self,
@@ -207,11 +207,11 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
         i.e. two matrix-vector products instead of ``N^2`` sine evaluations.
         """
         return self._kernel.dynamics(
-            np.asarray(phases)[None],
-            np.asarray(natural_frequencies)[None],
+            np.asarray(phases),
+            np.asarray(natural_frequencies),
             coupling_matrix,
-            np.asarray(control_inputs)[None],
-        )[0]
+            np.asarray(control_inputs),
+        )
 
     def _integrate_rk4(
         self,
@@ -221,10 +221,7 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
         control_inputs: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Classical fourth-order Runge-Kutta step. Returns ``(new_phases, k1)``."""
-        new_phases, k1 = self._kernel.integrate(
-            phases[None], natural_frequencies[None], coupling_matrix, control_inputs[None]
-        )
-        return new_phases[0], k1[0]
+        return self._kernel.integrate(phases, natural_frequencies, coupling_matrix, control_inputs)
 
     def _compute_order_parameter(self, phases: np.ndarray) -> float:
         """Kuramoto order parameter ``r`` in ``[0, 1]``."""
@@ -335,27 +332,22 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
         self.control_inputs = action[:n]
         if self.coupling_mode == "dynamic":
             self.coupling_strengths = action[n:]
-            coupling_matrix = kernel.coupling_from_strengths(self.coupling_strengths[None])
+            coupling_matrix = kernel.coupling_from_strengths(self.coupling_strengths)
         else:
             coupling_matrix = self.coupling_matrix
 
+        # The kernels accept unbatched arrays: the single system has no batch axis.
         phases, dphases_dt = kernel.integrate(
-            self.phases[None],
-            self.natural_frequencies[None],
-            coupling_matrix,
-            self.control_inputs[None],
+            self.phases, self.natural_frequencies, coupling_matrix, self.control_inputs
         )
-        self.phases = kernel.add_noise(phases, self.np_random)[0]
-        dphases_dt = dphases_dt[0]
-        if coupling_matrix.ndim == 3:
-            coupling_matrix = coupling_matrix[0]
+        self.phases = kernel.add_noise(phases, self.np_random)
         self._current_coupling = coupling_matrix
         self._append_history(self.phases.copy())
         self.step_count += 1
 
-        rewards, r, coherence, terminated = kernel.rewards(self.phases[None], dphases_dt[None])
-        reward = float(rewards[0])
-        r, coherence, terminated = float(r[0]), float(coherence[0]), bool(terminated[0])
+        rewards, r, coherence, terminated = kernel.rewards(self.phases, dphases_dt)
+        reward = float(rewards)
+        r, coherence, terminated = float(r), float(coherence), bool(terminated)
         truncated = bool(self.step_count >= self.max_steps)
         self._last_reward = reward
 
@@ -377,10 +369,9 @@ class KuramotoOscillatorEnv(KuramotoEnvBase):
 
     # ------------------------------------------------------------------ internals
     def _get_obs(self) -> np.ndarray:
-        strengths = None if self.coupling_strengths is None else self.coupling_strengths[None]
         return self._kernel.observe(
-            self.phases[None], self.natural_frequencies[None], strengths, self.control_inputs[None]
-        )[0]
+            self.phases, self.natural_frequencies, self.coupling_strengths, self.control_inputs
+        )
 
     def _frame(self):
         from env_lib.kos_env.rendering import KuramotoFrame

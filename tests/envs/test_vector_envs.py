@@ -173,6 +173,27 @@ def test_consensus_copies_match_single_env(kwargs):
     np.testing.assert_array_equal(envs.positions[0], singles[0][1].positions)
 
 
+@pytest.mark.parametrize("task", ["consensus", "formation"])
+def test_consensus_large_batch_matches_single_env(task):
+    """Large batches use a different (component-wise) layout; results must not change."""
+    kwargs = {"task": task, "topology": "proximity", "dynamics": "double", "max_steps": 20}
+    envs = ConsensusVectorEnv(80, **kwargs)  # 80 * 8 * 8 pairs: component-wise path
+    rng = np.random.default_rng(3)
+    state = consensus_state(envs, rng)
+    envs.reset(seed=0, options=state)
+    singles = [ConsensusEnv(**kwargs) for _ in range(3)]
+    for b, single in enumerate(singles):
+        single.reset(options={key: value[b] for key, value in state.items()})
+    for _ in range(15):
+        actions = random_actions(envs.action_space, rng)
+        obs, rewards, *_, infos = envs.step(actions)
+        for b, single in enumerate(singles):
+            s_obs, s_reward, *_, s_info = single.step(actions[b])
+            np.testing.assert_array_equal(obs[b], s_obs)
+            assert rewards[b] == s_reward
+            np.testing.assert_array_equal(infos["adjacency"][b], s_info["adjacency"])
+
+
 @pytest.mark.parametrize("kwargs", KURAMOTO_CONFIGS)
 def test_kuramoto_copies_match_single_env(kwargs):
     envs, _ = kuramoto_pair(3, max_steps=40, **kwargs)
@@ -299,9 +320,7 @@ def test_next_step_autoreset_mixes_step_and_reset_infos():
     envs.reset(seed=0)
     zero = np.zeros(envs.action_space.shape, dtype=np.float32)
     envs.step(zero)
-    # Only copy 1 is reset (partial reset with the "disabled"-style mask is not
-    # available in next_step mode, so shorten copy 1's episode instead).
-    envs._step[1] = envs.max_steps - 1
+    envs._step[1] = envs.max_steps - 1  # shorten copy 1's episode: only it is truncated
     *_, truncated, _ = envs.step(zero)
     assert truncated.tolist() == [False, True]
     *_, infos = envs.step(zero)
