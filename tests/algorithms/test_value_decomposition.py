@@ -95,6 +95,18 @@ def test_construction_on_discrete_envs(cls, make_env, n_agents, n_actions):
     assert set(algo._modules()) == expected
 
 
+def test_discrete_pistonball():
+    pytest.importorskip("pymunk")
+    envs = make_vector_env("Pistonball-v0", 2, n_pistons=5, continuous=False)
+    algo = QMIX(envs, seed=0, **FAST)
+    obs = algo.spec.agent_obs(envs.reset(seed=0)[0])
+    actions = algo.act(obs)
+    envs.step(algo.spec.env_action(actions))
+    envs.close()
+    assert algo.spec.n_agents == 5 and algo.spec.n_actions == 3
+    assert actions.shape == (2, 5) and algo.mixer.hyper_b1.in_features == 5 * 7
+
+
 @pytest.mark.parametrize("cls", ALGORITHMS)
 def test_continuous_env_raises_type_error(cls):
     env = env_lib.make("Consensus-v0")

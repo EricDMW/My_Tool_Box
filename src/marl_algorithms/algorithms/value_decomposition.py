@@ -200,6 +200,10 @@ class _ValueBase(OffPolicyAlgorithm):
     ``^-`` marks target networks. Truncated episodes bootstrap: the replay
     stores the final observation as ``o'`` and only ``terminated`` masks the
     bootstrap term.
+
+    Every update records ``td_loss``, ``q_mean`` (mean of the trained value,
+    ``Q_tot`` or ``Q_i``, in units of the scaled reward), ``target_mean``,
+    ``grad_norm`` (before clipping) and ``epsilon``.
     """
 
     action_kinds: ClassVar[tuple[str, ...]] = ("discrete",)
@@ -391,8 +395,11 @@ class IQL(_ValueBase):
         L   = mean_batch mean_i  l(Q_i(o_i, a_i) - y_i)
 
     No mixing and no centralised information: the other agents are part of
-    the environment. See :class:`_ValueBase` (module docstring) for the
-    shared machinery and the feed-forward/transition-replay simplification.
+    the environment. Environments that report no per-agent rewards give every
+    agent the team reward; with a single agent IQL is (double) DQN.
+
+    Agents are feed-forward networks trained on single transitions from a
+    transition replay (see the module docstring for this simplification).
 
     Parameters
     ----------
@@ -433,6 +440,10 @@ class VDN(_ValueBase):
         y           = c r + gamma (1 - terminated) sum_i Q_i^-(o'_i, argmax_a Q_i(o'_i, a))
         L           = mean_batch  l(Q_tot(o, a) - y)
 
+    Agents are feed-forward networks trained on single transitions from a
+    transition replay, not the recurrent agents and episode replay of the
+    paper (see the module docstring).
+
     Parameters and exceptions as for :class:`IQL`.
 
     Examples
@@ -458,10 +469,13 @@ class QMIX(_ValueBase):
         y              = c r + gamma (1 - terminated) Q_tot^-(q'^-; s')
         L              = mean_batch  l(Q_tot(o, a; s) - y)
 
-    with ``q = (Q_1(o_1, a_1), ..., Q_n(o_n, a_n))`` and ``q'^-`` the target
-    utilities of the (double-Q) greedy next actions. The state ``s`` is the
-    concatenation of all agents' observations; the mixer
-    (:class:`~marl_algorithms.core.networks.QMixer`) is only used in training.
+    with ``q = (Q_1(o_1, a_1), ..., Q_n(o_n, a_n))``, ``q'^-`` the target
+    utilities of the (double-Q) greedy next actions and ``Q_tot^-`` the target
+    mixer. The state ``s`` is the concatenation of all agents' observations;
+    the mixer (:class:`~marl_algorithms.core.networks.QMixer`) is only used in
+    training, execution is decentralised. Agents are feed-forward networks
+    trained on single transitions from a transition replay, not the recurrent
+    agents and episode replay of the paper (see the module docstring).
 
     Parameters and exceptions as for :class:`IQL`.
 
@@ -483,12 +497,23 @@ class QMIX(_ValueBase):
 # ----------------------------------------------------------------------
 # Presets
 # ----------------------------------------------------------------------
+#: LineMsg-v0 (10 agents): every method learns "always relay" (return 95, the
+#: optimum; random actions about 43) in about 10-20 s.
 _LINEMSG: dict[str, Any] = {
     "num_envs": 16,
     "total_steps": 25_000,
     "config": {"batch_size": 128, "lr": 1e-3, "epsilon_decay_steps": 12_500},
     "env_kwargs": {},
 }
+
+#: WirelessComm-v1 (4x4 grid, 16 agents): packets are delivered in the step
+#: they are sent, so a short horizon (gamma = 0.8) suffices and learns faster.
+#: The collision-free schedule of env_lib.baseline_policy returns about 340,
+#: random actions about 140. VDN and QMIX return 320-345 depending on the seed:
+#: they learn either the "owners only" schedule (about 319: agent (i, j) sends
+#: to access point (i, j)) or, like the baseline, also let the border agents
+#: borrow idle access points.
+_WIRELESS_CONFIG: dict[str, Any] = {"batch_size": 128, "lr": 1e-3, "gamma": 0.8}
 
 #: Tuned demonstration settings ``PRESETS[algorithm][env_id]`` for ``algorithm``
 #: in ``"iql"``, ``"vdn"``, ``"qmix"``. A preset is a dictionary with the keys
@@ -498,9 +523,9 @@ _LINEMSG: dict[str, Any] = {
 #: Every preset trains in at most about two minutes on one CPU core.
 #:
 #: IQL has no WirelessComm preset: with its per-agent rewards a collision costs
-#: the transmitting agent nothing, so independent learners converge to
-#: transmitting all the time and collide (no better than random actions), while
-#: VDN and QMIX, trained on the team reward, learn a collision-free schedule.
+#: the transmitting agent nothing, so independent learners keep transmitting
+#: and collide (hardly better than random actions), while VDN and QMIX, trained
+#: on the team reward, learn to leave contested access points to one agent.
 PRESETS: dict[str, dict[str, dict[str, Any]]] = {
     "iql": {
         "LineMsg-v0": copy.deepcopy(_LINEMSG),
@@ -510,12 +535,7 @@ PRESETS: dict[str, dict[str, dict[str, Any]]] = {
         "WirelessComm-v1": {
             "num_envs": 16,
             "total_steps": 120_000,
-            "config": {
-                "batch_size": 128,
-                "lr": 1e-3,
-                "gamma": 0.8,
-                "epsilon_decay_steps": 30_000,
-            },
+            "config": {**_WIRELESS_CONFIG, "epsilon_decay_steps": 30_000},
             "env_kwargs": {},
         },
     },
@@ -523,13 +543,8 @@ PRESETS: dict[str, dict[str, dict[str, Any]]] = {
         "LineMsg-v0": copy.deepcopy(_LINEMSG),
         "WirelessComm-v1": {
             "num_envs": 16,
-            "total_steps": 120_000,
-            "config": {
-                "batch_size": 128,
-                "lr": 1e-3,
-                "gamma": 0.8,
-                "epsilon_decay_steps": 50_000,
-            },
+            "total_steps": 100_000,
+            "config": {**_WIRELESS_CONFIG, "epsilon_decay_steps": 45_000},
             "env_kwargs": {},
         },
     },
