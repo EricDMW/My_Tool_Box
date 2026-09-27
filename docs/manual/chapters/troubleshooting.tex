@@ -457,7 +457,8 @@ reproduce its behaviour before version 1.0 closely with
 \section{Training with marl\_algorithms}\label{sec:trouble-marl}
 
 \paragraph{\code{ImportError}: ``requires PyTorch''.} The algorithms need
-PyTorch, which the base installation does not include. Install the extra,
+PyTorch, which the base installation does not include (\code{marl-train}
+reports ``PyTorch is not installed'' and exits with status 1). Install the extra,
 \code{pip install "my-tool-box[torch]"}, or a PyTorch build of your choice
 (Section~\ref{sec:install-torch}).
 

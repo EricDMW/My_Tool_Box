@@ -101,7 +101,9 @@ extras they need (\code{pip install ".[all]"} covers all of them).
 \end{table}
 
 The environment examples share a set of options: \code{-{}-seed}, \code{-{}-steps}
-(the episode length), \code{-{}-episodes} (evaluation episodes per policy),
+(the episode length), \code{-{}-episodes} (evaluation episodes per policy;
+\code{kuramoto\_demo.py} and \code{consensus\_demo.py} run a single episode
+and have no such option),
 \code{-{}-save PATH} (record an episode; the suffix \code{.gif} or \code{.mp4}
 selects the format; \code{power\_grid\_demo.py} and \code{platoon\_demo.py} call
 it \code{-{}-render PATH}, and the former also accepts \code{-{}-save}),

@@ -307,6 +307,14 @@ def main(argv: list[str] | None = None) -> int:
     except BrokenPipeError:  # output piped into a command that exited (e.g. `| head`)
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         return 0
+    except ModuleNotFoundError as exc:
+        if exc.name != "torch":
+            raise
+        print(
+            'marl-train: error: PyTorch is not installed; install it with pip install "my-tool-box[torch]"',
+            file=sys.stderr,
+        )
+        return 1
 
 
 if __name__ == "__main__":

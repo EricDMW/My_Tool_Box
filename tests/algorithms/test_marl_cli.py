@@ -130,3 +130,17 @@ def test_preset_helpers_are_exported():
     assert marl_algorithms.train_preset is train_preset
     assert marl_algorithms.get_preset is get_preset
     assert marl_algorithms.list_presets is list_presets
+
+
+def test_command_without_torch_prints_an_install_hint():
+    import subprocess
+    import sys
+
+    code = (
+        "import sys; sys.modules['torch'] = None\n"
+        "from marl_algorithms.__main__ import main\n"
+        "sys.exit(main(['list']))\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 1
+    assert "PyTorch is not installed" in result.stderr and "Traceback" not in result.stderr

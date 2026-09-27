@@ -87,7 +87,7 @@ marl-train compare PowerGrid-v0 --seeds 0 1 2    # every preset algorithm as a b
 | Script | Shows | Typical invocation |
 |---|---|---|
 | `plotkit_gallery.py` | Publication-style figure: learning curves with confidence bands, grouped bars, sweep heatmap | `python examples/toolkit/plotkit_gallery.py --formats pdf png` |
-| `parakit_demo.py` | Saving, loading and applying `argparse` parameters; optional Tk editor | `python examples/toolkit/parakit_demo.py --set lr=3e-4` |
+| `parakit_demo.py` | Saving, loading and applying `argparse` parameters; optional Tk editor | `python examples/toolkit/parakit_demo.py --set learning_rate=3e-4` |
 | `simple_transformer_example.py` | Transformer policy trained with REINFORCE on a sequential toy task | `python examples/toolkit/simple_transformer_example.py --quick` |
 | `transformer_rl_example.py` | Transformer actor-critic with batched environments | `python examples/toolkit/transformer_rl_example.py --quick` |
 
