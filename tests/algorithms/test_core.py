@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+
 import numpy as np
 import pytest
 
@@ -313,3 +316,64 @@ def test_registry_lists_the_classical_algorithms():
     assert names == ["ippo", "mappo", "maddpg", "matd3", "iql", "vdn", "qmix"]
     with pytest.raises(KeyError):
         get_algorithm("reinforce")
+
+
+def test_missing_torch_gives_an_install_hint():
+    code = (
+        "import sys; sys.modules['torch'] = None\n"
+        "import marl_algorithms\n"
+        "try:\n"
+        "    marl_algorithms.MAPPO\n"
+        "except ImportError as exc:\n"
+        "    print(exc)\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    ).stdout
+    assert "requires PyTorch" in out and 'pip install "my-tool-box[torch]"' in out
+
+
+# ---------------------------------------------------------------------------
+# Training loop and log
+# ---------------------------------------------------------------------------
+def test_spec_describe_uses_singular_for_one_agent():
+    single = MultiAgentSpec.from_env(env_lib.make("KuramotoOscillator-v0"))
+    assert single.describe().startswith("1 agent,")
+    team = MultiAgentSpec.from_env(env_lib.make("LineMsg-v0", action_space_type="multibinary"))
+    assert team.describe().startswith("10 agents,")
+
+
+@pytest.mark.parametrize("name", ["mappo", "vdn"])
+def test_learn_is_cumulative_and_summary_reports_steps(name):
+    envs = make_vector_env("LineMsg-v0", 4, max_iter=10)
+    algo = get_algorithm(name)(envs, seed=0, hidden_sizes=(8,), **_SMALL[name])
+    log = algo.learn(envs, 256, seed=0)
+    first = algo.env_steps
+    assert first >= 256
+    algo.learn(envs, 2 * first, seed=1, log=log)
+    assert 2 * first <= algo.env_steps < 2 * first + 256
+    assert f"{algo.env_steps} env steps" in log.summary()
+    envs.close()
+
+
+def test_off_policy_callback_sees_the_episodes_of_its_step():
+    envs = make_vector_env("LineMsg-v0", 4, max_iter=10)
+    algo = get_algorithm("iql")(envs, seed=0, hidden_sizes=(8,), **_SMALL["vdn"])
+    seen = []
+
+    def callback(algorithm, log):
+        seen.append((algorithm.env_steps, log.episodes[-1][0] if log.episodes else None))
+        return False
+
+    # LineMsg episodes last 10 steps: warm-up and batch size let the first
+    # update happen exactly when the first episodes end.
+    log = algo.learn(envs, 10_000, seed=0, callback=callback)
+    assert len(seen) == 1 and seen[0][0] == seen[0][1] == 40
+    assert len(log.episodes) == 4
+    envs.close()
+
+
+_SMALL = {
+    "mappo": {"rollout_length": 16, "n_epochs": 1},
+    "vdn": {"warmup_steps": 40, "batch_size": 16, "update_every": 1},
+}

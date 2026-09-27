@@ -844,17 +844,19 @@ may be repeated.
 \section{\texorpdfstring{\pkg{marl\_algorithms}}{marl\_algorithms}}\label{sec:api-marl}
 
 Chapter~\ref{chap:marl}. The package requires PyTorch. The top-level package
-exports lazily the training entry points, the registry, the core classes
-\code{Algorithm}, \code{OnPolicyAlgorithm}, \code{OffPolicyAlgorithm},
-\code{TrainingLog}, \code{MultiAgentSpec}, \code{VectorRunner},
-\code{Transition} and \code{make\_vector\_env}, the seven algorithm classes and
-the three configuration classes; the presets, buffers, normalisers, networks
-and base configurations live in their modules.
+exports lazily the training entry points, the registry, the preset functions,
+the core classes \code{Algorithm}, \code{OnPolicyAlgorithm},
+\code{OffPolicyAlgorithm}, \code{TrainingLog}, \code{MultiAgentSpec},
+\code{VectorRunner}, \code{Transition} and \code{make\_vector\_env}, the seven
+algorithm classes and the three configuration classes; the preset tables,
+buffers, normalisers, networks and base configurations live in their modules.
+Without PyTorch, accessing any of these names raises an \code{ImportError}
+that names the \code{torch} extra.
 
 \subsection{Training, registry and presets}
 
-Modules \pkg{marl\_algorithms.registry} (exported by the package) and
-\pkg{marl\_algorithms.presets} (not exported by the package);
+Modules \pkg{marl\_algorithms.registry} and \pkg{marl\_algorithms.presets}
+(both exported by the package);
 Sections~\ref{sec:marl-quickstart} and~\ref{sec:marl-results}.
 
 % norun

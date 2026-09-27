@@ -454,6 +454,59 @@ reproduce its behaviour before version 1.0 closely with
     your own code.
 \end{itemize}
 
+\section{Training with marl\_algorithms}\label{sec:trouble-marl}
+
+\paragraph{\code{ImportError}: ``requires PyTorch''.} The algorithms need
+PyTorch, which the base installation does not include. Install the extra,
+\code{pip install "my-tool-box[torch]"}, or a PyTorch build of your choice
+(Section~\ref{sec:install-torch}).
+
+\paragraph{\code{TypeError} when creating an algorithm.} Every method supports
+one kind of action (Table~\ref{tab:marl-algorithms}): MADDPG and MATD3 need
+continuous actions, IQL, VDN and QMIX discrete ones, while IPPO and MAPPO
+accept both. A joint \code{Discrete} action over several agents, such as
+LineMsg with its default \code{action\_space\_type}, is not a per-agent action
+and is rejected; \code{make\_vector\_env} therefore creates LineMsg with
+\code{action\_space\_type="multibinary"}. Pass the same argument when you build
+a LineMsg environment yourself.
+
+\paragraph{\code{ValueError}: \code{VectorRunner} needs same-step autoreset.}
+The training loops bootstrap from the true last observation of an episode,
+which a vector environment only provides in same-step mode. Create the
+environment with \code{marl\_algorithms.make\_vector\_env} or pass
+\code{autoreset\_mode="same\_step"} to \code{env\_lib.make\_vec}.
+
+\paragraph{\code{marl-train} reports an unknown algorithm, environment or
+field.} \code{marl-train} checks its arguments before training and exits with
+status 2 and a message on standard error. Algorithm names are those of
+\code{marl-train list}, environment ids those of \code{env-lib list}, and the
+keys of \code{-{}-set} the fields of the algorithm's configuration class
+(Section~\ref{sec:marl-cli}).
+
+\paragraph{Results differ from the published ones.} A run is determined by its
+seed, its configuration and the software it runs on: with the same seed and
+PyTorch thread count, the same library versions and the same machine,
+training repeats exactly. Other PyTorch or BLAS builds, another number of
+threads or another processor change the rounding of floating-point sums, and
+reinforcement learning amplifies such differences, so the returns in
+Section~\ref{sec:marl-results} are reproduced to within the variation between
+seeds rather than digit for digit. Compare several seeds before concluding
+that a change helps.
+
+\paragraph{Training is slower than the reported times.} The published times
+use one PyTorch thread (\code{torch.set\_num\_threads(1)}, the default of
+\code{marl-train} and of the demonstration script). With PyTorch's default
+thread count, the small networks of these methods often train more slowly,
+especially when several runs share a machine.
+
+\paragraph{The return does not improve.} Start from a preset
+(\code{marl-train presets}), which fixes the learning rates, reward scale and
+exploration schedule for its environment; the defaults of the configuration
+classes are generic. Without a preset, normalise the observations, scale the
+rewards so that the team return per step is of order one, and check the
+learning curve of \code{TrainingLog.curve} before increasing
+\code{total\_steps}.
+
 \section{Other common errors}\label{sec:trouble-other}
 
 \begin{description}[leftmargin=0.6cm,style=nextline]

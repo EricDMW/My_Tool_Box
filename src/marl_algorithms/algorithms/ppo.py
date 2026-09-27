@@ -682,22 +682,22 @@ def _explained_variance(predictions: np.ndarray, targets: np.ndarray) -> float:
 #: reproduces a demonstration run.
 #:
 #: Mean team return of the deterministic policy after training with seed 0
-#: (``env_lib.evaluate`` on 16 copies, 64 episodes, seed 1), measured on one
-#: CPU core (``torch.set_num_threads(1)``); "baseline" is
-#: ``env_lib.baseline_policy``:
+#: (``env_lib.evaluate`` on 64 copies, 64 episodes, seed 1;
+#: ``benchmarks/benchmark_marl.py``); training time is CPU time on one core
+#: (``torch.set_num_threads(1)``) and "baseline" is ``env_lib.baseline_policy``:
 #:
-#: ============  =====  ==========  =========  ========  =======  ========
-#: environment   algo   env steps   wall time  random    trained  baseline
-#: ============  =====  ==========  =========  ========  =======  ========
-#: PowerGrid-v0  IPPO   200,704     72 s       -589.9    -1.59    -0.668
-#: PowerGrid-v0  MAPPO  251,904     111 s      -589.9    -0.83    -0.668
-#: Platoon-v0    IPPO   450,560     90 s       -4086     -88.9    -49.5
-#: Platoon-v0    MAPPO  450,560     102 s      -4086     -68.6    -49.5
-#: Consensus-v0  IPPO   401,408     80 s       -17930    -1550    -1518
-#: Consensus-v0  MAPPO  401,408     93 s       -17930    -1586    -1518
-#: LineMsg-v0    IPPO   100,800     26 s       43.5      95.0     95.0
-#: LineMsg-v0    MAPPO  100,800     26 s       43.5      95.0     95.0
-#: ============  =====  ==========  =========  ========  =======  ========
+#: ============  =====  ==========  ========  ========  =======  ========
+#: environment   algo   env steps   CPU time  random    trained  baseline
+#: ============  =====  ==========  ========  ========  =======  ========
+#: PowerGrid-v0  IPPO   200,704     69 s      -629.3    -2.37    -0.79
+#: PowerGrid-v0  MAPPO  251,904     106 s     -629.3    -0.89    -0.79
+#: Platoon-v0    IPPO   450,560     88 s      -5,350    -84.8    -46.4
+#: Platoon-v0    MAPPO  450,560     102 s     -5,350    -65.0    -46.4
+#: Consensus-v0  IPPO   401,408     83 s      -18,041   -1,550   -1,518
+#: Consensus-v0  MAPPO  401,408     96 s      -18,041   -1,586   -1,518
+#: LineMsg-v0    IPPO   100,800     26 s      43.2      95.0     95.0
+#: LineMsg-v0    MAPPO  100,800     26 s      43.2      95.0     95.0
+#: ============  =====  ==========  ========  ========  =======  ========
 #:
 #: Lessons from tuning, reflected in the settings:
 #:

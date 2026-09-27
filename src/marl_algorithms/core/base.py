@@ -97,7 +97,10 @@ class TrainingLog:
 
     def summary(self) -> str:
         """One-line summary."""
-        steps = self.episodes[-1][0] if self.episodes else 0
+        steps = max(
+            self.episodes[-1][0] if self.episodes else 0,
+            self.updates[-1][0] if self.updates else 0,
+        )
         return (
             f"{self.algorithm} on {self.env_id or 'environment'}: {len(self.episodes)} episodes, "
             f"{steps} env steps, mean return (last 100) {self.mean_return():.4g}, "
@@ -217,7 +220,7 @@ class Algorithm(abc.ABC):
         log: TrainingLog | None = None,
         callback: Callback | None = None,
     ) -> TrainingLog:
-        """Train on a vector environment for ``total_steps`` environment steps."""
+        """Train on a vector environment until ``env_steps`` reaches ``total_steps``."""
 
     @abc.abstractmethod
     def _modules(self) -> dict[str, nn.Module | torch.optim.Optimizer]:
@@ -383,7 +386,7 @@ class OnPolicyAlgorithm(Algorithm):
         log: TrainingLog | None = None,
         callback: Callback | None = None,
     ) -> TrainingLog:
-        """Train for ``total_steps`` environment steps (summed over copies).
+        """Train until :attr:`env_steps` (summed over copies) reaches ``total_steps``.
 
         Parameters
         ----------
@@ -391,7 +394,10 @@ class OnPolicyAlgorithm(Algorithm):
             Vector environment with ``"same_step"`` autoreset
             (:func:`~marl_algorithms.core.runner.make_vector_env`).
         total_steps:
-            Environment steps to collect.
+            Cumulative target for :attr:`env_steps`: a second call continues
+            from the steps already taken, so ``learn(envs, 2 * n)`` after
+            ``learn(envs, n)`` collects ``n`` more steps. Every call resets the
+            environment copies first.
         seed:
             Seed of the environment reset.
         log:
@@ -471,7 +477,7 @@ class OffPolicyAlgorithm(Algorithm):
         log: TrainingLog | None = None,
         callback: Callback | None = None,
     ) -> TrainingLog:
-        """Train for ``total_steps`` environment steps (summed over copies).
+        """Train until :attr:`env_steps` (summed over copies) reaches ``total_steps``.
 
         See :meth:`OnPolicyAlgorithm.learn` for the parameters; ``callback`` is
         called after every round of gradient steps.
@@ -494,6 +500,7 @@ class OffPolicyAlgorithm(Algorithm):
             obs = runner.obs
             self.env_steps += n_envs
             vector_steps += 1
+            log.record_episodes(self.env_steps, runner.pop_episodes())
             ready = self.env_steps >= cfg.warmup_steps and len(self.replay) >= cfg.batch_size
             if ready and vector_steps % cfg.update_every == 0:
                 stats: dict[str, float] = {}
@@ -502,9 +509,7 @@ class OffPolicyAlgorithm(Algorithm):
                     self.num_updates += 1
                 log.record_update(self.env_steps, stats)
                 if callback is not None and callback(self, log) is False:
-                    log.record_episodes(self.env_steps, runner.pop_episodes())
                     break
-            log.record_episodes(self.env_steps, runner.pop_episodes())
         return log
 
 

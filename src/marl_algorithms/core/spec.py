@@ -190,4 +190,5 @@ class MultiAgentSpec:
             action = f"continuous {self.action_dim}-d"
         else:
             action = f"{self.n_actions} discrete choices"
-        return f"{self.n_agents} agents, {self.obs_dim}-d observations, {action} per agent"
+        agents = "1 agent" if self.n_agents == 1 else f"{self.n_agents} agents"
+        return f"{agents}, {self.obs_dim}-d observations, {action} per agent"

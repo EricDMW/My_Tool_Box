@@ -510,9 +510,9 @@ _LINEMSG: dict[str, Any] = {
 #: they are sent, so a short horizon (gamma = 0.8) suffices and learns faster.
 #: The collision-free schedule of env_lib.baseline_policy returns about 340,
 #: random actions about 140. VDN and QMIX return 320-345 depending on the seed:
-#: they learn either the "owners only" schedule (about 319: agent (i, j) sends
-#: to access point (i, j)) or, like the baseline, also let the border agents
-#: borrow idle access points.
+#: they learn either a collision-free "owners only" schedule (about 319: every
+#: access point serves one fixed neighbouring agent) or, like the baseline,
+#: also let the border agents borrow idle access points.
 _WIRELESS_CONFIG: dict[str, Any] = {"batch_size": 128, "lr": 1e-3, "gamma": 0.8}
 
 #: Tuned demonstration settings ``PRESETS[algorithm][env_id]`` for ``algorithm``

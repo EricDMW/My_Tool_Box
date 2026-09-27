@@ -50,6 +50,10 @@ _LAZY: dict[str, str] = {
     "list_algorithms": "marl_algorithms.registry",
     "make_algorithm": "marl_algorithms.registry",
     "train": "marl_algorithms.registry",
+    # Presets
+    "get_preset": "marl_algorithms.presets",
+    "list_presets": "marl_algorithms.presets",
+    "train_preset": "marl_algorithms.presets",
     # Algorithms
     "IPPO": "marl_algorithms.algorithms.ppo",
     "MAPPO": "marl_algorithms.algorithms.ppo",
@@ -68,7 +72,16 @@ __all__ = ["__version__", *sorted(_LAZY)]
 
 def __getattr__(name: str) -> Any:
     if name in _LAZY:
-        value = getattr(importlib.import_module(_LAZY[name]), name)
+        try:
+            module = importlib.import_module(_LAZY[name])
+        except ModuleNotFoundError as exc:
+            if exc.name != "torch":
+                raise
+            raise ImportError(
+                f"marl_algorithms.{name} requires PyTorch; install it with "
+                'pip install "my-tool-box[torch]"'
+            ) from exc
+        value = getattr(module, name)
         globals()[name] = value
         return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

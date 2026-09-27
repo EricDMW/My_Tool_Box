@@ -84,18 +84,38 @@ def _evaluation_table(
         )
 
 
+def _error(message: str) -> int:
+    """Print a command-line error to stderr; returns the exit status 2."""
+    print(f"marl-train: error: {message}", file=sys.stderr)
+    return 2
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     import torch
 
+    import env_lib
     from marl_algorithms.presets import get_preset
-    from marl_algorithms.registry import train
+    from marl_algorithms.registry import get_algorithm, list_algorithms, train
 
-    if args.threads:
-        torch.set_num_threads(args.threads)
+    try:
+        algo_class = get_algorithm(args.algorithm)
+    except KeyError:
+        names = ", ".join(info.name for info in list_algorithms())
+        return _error(f"unknown algorithm {args.algorithm!r}; choose from {names}")
+    if args.env_id not in env_lib.list_envs():
+        return _error(f"unknown environment {args.env_id!r}; see `env-lib list`")
     preset = None if args.no_preset else get_preset(args.algorithm, args.env_id)
     preset = preset or {}
     env_kwargs = {**preset.get("env_kwargs", {}), **_parse_pairs(args.env_kwarg)}
     config = {**preset.get("config", {}), **_parse_pairs(args.set)}
+    unknown = sorted(set(config) - set(algo_class.config_class.field_names()))
+    if unknown:
+        return _error(
+            f"unknown {algo_class.config_class.__name__} field(s) {', '.join(unknown)}; "
+            f"valid fields: {', '.join(algo_class.config_class.field_names())}"
+        )
+    if args.threads:
+        torch.set_num_threads(args.threads)
     total_steps = args.steps or int(preset.get("total_steps", 100_000))
     num_envs = args.num_envs or int(preset.get("num_envs", 16))
     source = "preset" if preset else "defaults"
@@ -136,8 +156,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
 
 def _cmd_evaluate(args: argparse.Namespace) -> int:
+    import env_lib
     from marl_algorithms.core.base import Algorithm
 
+    if args.env_id not in env_lib.list_envs():
+        return _error(f"unknown environment {args.env_id!r}; see `env-lib list`")
+    if not os.path.isfile(args.checkpoint):
+        return _error(f"no checkpoint at {args.checkpoint!r}")
     algo = Algorithm.load(args.checkpoint)
     _evaluation_table(algo, args.env_id, _parse_pairs(args.env_kwarg), args.episodes, args.seed)
     return 0

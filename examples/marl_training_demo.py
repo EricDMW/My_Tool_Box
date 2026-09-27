@@ -9,8 +9,10 @@ to two minutes on one CPU core):
 * QMIX   on ``LineMsg-v0``       -- discrete actions, 10 agents, value-based;
 * VDN    on ``WirelessComm-v1``  -- discrete actions, 16 agents, value-based.
 
-Each run simulates its training copies as one native batch
-(``marl_algorithms.make_vector_env``), then evaluates random actions, the
+Each run trains on a vector environment of parallel copies
+(``marl_algorithms.make_vector_env``: one native batch for the continuous
+environments, ``gymnasium.vector.SyncVectorEnv`` for LineMsg and
+WirelessComm), then evaluates random actions, the
 trained policy and the environment's classical controller
 (``env_lib.baseline_policy``) on the same seeded episodes. The script prints a
 results table and saves the learning curves.

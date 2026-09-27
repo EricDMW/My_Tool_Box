@@ -72,7 +72,8 @@ docs/manual/
   appendices/
     api_reference.tex       signatures of the public API and the env-lib and
                             marl-train commands
-    migration.tex           migrating from 1.0 to 1.1 and from versions before 1.0
+    migration.tex           migrating from 1.1 to 1.2, from 1.0 to 1.1 and from
+                            versions before 1.0
   figures/                  images included by the chapters
   output/                   build products (not tracked)
 ```

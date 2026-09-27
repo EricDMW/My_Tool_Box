@@ -101,3 +101,28 @@ def test_run_and_evaluate_commands(tmp_path, capsys):
 def test_bad_key_value_pair_exits():
     with pytest.raises(SystemExit):
         main(["run", "vdn", "LineMsg-v0", "--set", "lr"])
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["run", "reinforce", "LineMsg-v0"], "unknown algorithm 'reinforce'"),
+        (["run", "vdn", "NoSuchEnv-v0"], "unknown environment 'NoSuchEnv-v0'"),
+        (["run", "vdn", "LineMsg-v0", "--set", "learning_rate=0.1"], "learning_rate"),
+        (["evaluate", "missing.pt", "NoSuchEnv-v0"], "unknown environment"),
+        (["evaluate", "missing.pt", "LineMsg-v0"], "no checkpoint"),
+    ],
+)
+def test_invalid_arguments_give_a_clean_error(argv, message, capsys):
+    assert main(argv) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("marl-train: error:") and message in captured.err
+
+
+def test_preset_helpers_are_exported():
+    import marl_algorithms
+
+    assert marl_algorithms.train_preset is train_preset
+    assert marl_algorithms.get_preset is get_preset
+    assert marl_algorithms.list_presets is list_presets

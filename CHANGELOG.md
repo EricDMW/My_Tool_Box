@@ -35,11 +35,15 @@ multi-agent reinforcement learning algorithms, trained directly on the
     without global side effects, `save`/`load`, evaluation through
     `env_lib.evaluate`, and `TrainingLog`.
 - `marl_algorithms.train(algorithm, env_id, total_steps)` and tuned presets
-  (`train_preset`, `list_presets`) that learn in one to two minutes on one CPU
-  core; results against random actions and the classical controllers are in
-  the README and the handbook.
+  (`train_preset`, `get_preset`, `list_presets`) that learn in one to two
+  minutes on one CPU core; results against random actions and the classical
+  controllers are in the README and the handbook.
 - `marl-train` command line: `list`, `presets`, `run` (train, then compare
-  random, trained and baseline returns) and `evaluate`.
+  random, trained and baseline returns) and `evaluate`. Unknown algorithms,
+  environments and configuration fields are reported before training, with
+  exit status 2.
+- PyTorch stays optional: `import marl_algorithms` works without it, and using
+  an algorithm raises an `ImportError` that names the `torch` extra.
 - `examples/marl_training_demo.py` trains MAPPO on PowerGrid, MADDPG on
   Consensus, QMIX on LineMsg and VDN on WirelessComm and plots the learning
   curves; `benchmarks/benchmark_marl.py` trains and evaluates every preset.

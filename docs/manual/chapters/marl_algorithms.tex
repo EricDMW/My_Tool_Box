@@ -192,11 +192,11 @@ deterministic policy (the mean action), which \code{algo.policy()} returns by
 default.
 
 The presets of Section~\ref{sec:marl-results} are looked up and trained with the
-functions of \pkg{marl\_algorithms.presets}, which are not exported by the
-top-level package:
+functions of \pkg{marl\_algorithms.presets}, which the top-level package also
+exports:
 
 \begin{pycode}
-from marl_algorithms.presets import get_preset, list_presets, train_preset
+from marl_algorithms import get_preset, list_presets, train_preset
 
 print(len(list_presets()), list_presets()[:2])
 print(get_preset("qmix", "LineMsg-v0"))
@@ -377,7 +377,8 @@ Evaluation on LineMsg-v0, 64 episodes (seed 1):
 
 The progress lines report the mean return of the last 20 exploratory training
 episodes; the summary line is \code{TrainingLog.summary()}, whose step count
-and time refer to the last finished training episode. The evaluation columns
+and time refer to the last record of the log (an update or a finished
+episode). The evaluation columns
 are the mean team return of the deterministic policy, the half-width of its
 95\,\% confidence interval and the mean episode length
 (Table~\ref{tab:workflow-result}).
@@ -742,9 +743,10 @@ The buffer always holds the fields \code{obs}, \code{actions}, \code{reward},
 copies and then, at every vector step, takes uniformly random actions within
 the bounds while \code{env\_steps < warmup\_steps} and \code{\_explore(obs)}
 afterwards, steps the runner and adds the transition to the replay buffer
-(created on the first call). Once the warm-up is over and the buffer holds at
-least \code{batch\_size} transitions, every \code{update\_every} vector steps
-it performs \code{gradient\_steps} calls of \code{\_update(batch)} on batches
+(created on the first call), and records the episodes finished in this step
+in the log. Once the warm-up is over and the buffer holds at least
+\code{batch\_size} transitions, every \code{update\_every} vector steps it
+performs \code{gradient\_steps} calls of \code{\_update(batch)} on batches
 sampled from the replay buffer, records the statistics of the last one and
 calls the callback. With $B$ copies the loop therefore performs
 \code{gradient\_steps} / (\code{update\_every} $\cdot B$) gradient steps per
