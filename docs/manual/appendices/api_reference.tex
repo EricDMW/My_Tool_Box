@@ -28,7 +28,7 @@ env_lib.make_vec(env_id, num_envs=1, vectorization_mode=None, *,
 env_lib.get_spec(env_id) -> EnvSpec
 env_lib.list_envs() -> list[str]
 env_lib.register_envs()
-env_lib.__version__                       # "1.2.0"
+env_lib.__version__                       # "1.2.1"
 env_lib.ResetNeededError                  # exception class
 \end{pycode}
 
@@ -870,7 +870,7 @@ get_algorithm(name) -> type[Algorithm]      # case-insensitive
 list_algorithms() -> list[AlgorithmInfo]    # registry order
 AlgorithmInfo(name, entry_point, family, action_kinds, summary,
               reference)                    # frozen dataclass
-marl_algorithms.__version__                 # "1.2.0"
+marl_algorithms.__version__                 # "1.2.1"
 
 # marl_algorithms.presets
 get_preset(algorithm, env_id) -> dict | None     # a copy

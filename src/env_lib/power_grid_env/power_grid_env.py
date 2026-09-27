@@ -36,7 +36,7 @@ from gymnasium import spaces
 
 from env_lib.errors import ResetNeededError
 from env_lib.utils import graphs
-from env_lib.utils.rendering import state_without_renderer, validate_render_mode
+from env_lib.utils.render_modes import state_without_renderer, validate_render_mode
 from env_lib.utils.vector import BatchedVectorEnv
 
 __all__ = [

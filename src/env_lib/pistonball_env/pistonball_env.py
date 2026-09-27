@@ -29,7 +29,7 @@ from gymnasium.spaces import Box, MultiDiscrete
 from gymnasium.utils import seeding
 
 from env_lib.errors import ResetNeededError
-from env_lib.utils.rendering import state_without_renderer, validate_render_mode
+from env_lib.utils.render_modes import state_without_renderer, validate_render_mode
 
 try:
     import pymunk

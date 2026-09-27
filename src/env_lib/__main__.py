@@ -203,10 +203,29 @@ def _cmd_baselines(args: argparse.Namespace) -> int:
     return 0
 
 
+def _check_animation_path(path: str) -> None:
+    """Reject an unsupported format, or a video without the ``video`` extra, before the rollout."""
+    suffix = os.path.splitext(path)[1].lower()
+    if suffix == ".gif":
+        return
+    if suffix not in {".mp4", ".webm", ".avi", ".mov", ".mkv"}:
+        raise _CliError(f"--gif: unsupported animation format {suffix or path!r}; use .gif or .mp4")
+    try:
+        import imageio  # noqa: F401
+        import imageio_ffmpeg  # noqa: F401
+    except ImportError:
+        raise _CliError(
+            f"--gif: writing {suffix} files requires imageio and imageio-ffmpeg: "
+            'pip install "my-tool-box[video]" (or record to a .gif file)'
+        ) from None
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     kwargs = _parse_kwargs(args.kwarg)
     if args.gif:
         from env_lib.utils.rendering import set_theme
+
+        _check_animation_path(args.gif)
 
         set_theme(args.theme)
     env = _make(args.env_id, kwargs, render_mode="rgb_array" if args.gif else None)

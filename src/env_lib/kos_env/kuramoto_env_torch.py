@@ -17,7 +17,14 @@ import math
 from typing import Any, Union
 
 import numpy as np
-import torch
+
+try:
+    import torch
+except ImportError as exc:  # pragma: no cover - depends on the installation
+    raise ImportError(
+        "KuramotoOscillatorEnvTorch requires PyTorch: "
+        'pip install "my-tool-box[torch]" (or use the NumPy KuramotoOscillator ids)'
+    ) from exc
 
 from env_lib.errors import ResetNeededError
 from env_lib.kos_env._common import KuramotoEnvBase, check_int, combine_reward, wrap_phases

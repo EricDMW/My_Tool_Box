@@ -41,7 +41,7 @@ from gymnasium.utils import seeding
 from numpy.lib.stride_tricks import sliding_window_view
 
 from env_lib.errors import ResetNeededError
-from env_lib.utils.rendering import state_without_renderer, validate_render_mode
+from env_lib.utils.render_modes import state_without_renderer, validate_render_mode
 
 __all__ = [
     "OUTCOME_COLLISION",

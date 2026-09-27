@@ -19,7 +19,7 @@ import numpy as np
 from gymnasium import spaces
 
 from env_lib.errors import ResetNeededError
-from env_lib.utils.rendering import state_without_renderer, validate_render_mode
+from env_lib.utils.render_modes import state_without_renderer, validate_render_mode
 
 if TYPE_CHECKING:  # pragma: no cover
     from env_lib.kos_env.rendering import KuramotoFrame, KuramotoRenderer

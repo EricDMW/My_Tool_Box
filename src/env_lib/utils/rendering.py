@@ -22,7 +22,6 @@ from __future__ import annotations
 import time
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Union
 
@@ -32,6 +31,8 @@ from matplotlib.artist import Artist
 from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
+
+from env_lib.utils.render_modes import RENDER_MODES, state_without_renderer, validate_render_mode
 
 __all__ = [
     "DARK",
@@ -49,8 +50,6 @@ __all__ = [
     "validate_render_mode",
     "with_alpha",
 ]
-
-RENDER_MODES: tuple[str, ...] = ("human", "rgb_array")
 
 ColorLike = Union[str, tuple[float, ...]]
 
@@ -241,14 +240,6 @@ def _rgba_to_rgb(rgba: np.ndarray) -> np.ndarray:
     for channel in range(3):
         target[:, channel] = source[:, channel]
     return rgb
-
-
-def validate_render_mode(render_mode: str | None, allowed: Sequence[str] = RENDER_MODES) -> None:
-    """Raise ``ValueError`` if ``render_mode`` is not ``None`` or one of ``allowed``."""
-    if render_mode is not None and render_mode not in allowed:
-        raise ValueError(
-            f"render_mode must be one of {tuple(allowed)} or None, got {render_mode!r}"
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -478,17 +469,3 @@ class MatplotlibRenderer(ABC):
     @abstractmethod
     def _update(self, *args: Any, **kwargs: Any) -> None:
         """Update artist data for the current frame."""
-
-
-def state_without_renderer(env: Any) -> dict[str, Any]:
-    """``env.__dict__`` without its renderer, for ``pickle`` and ``copy.deepcopy``.
-
-    Renderers hold matplotlib figures or pygame surfaces, which cannot be
-    pickled; environments rebuild them on the next ``render()``, so a pickled
-    or copied environment keeps its full simulation state and renders as
-    before.
-    """
-    state = env.__dict__.copy()
-    if state.get("_renderer") is not None:
-        state["_renderer"] = None
-    return state

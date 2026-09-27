@@ -440,16 +440,8 @@ def make_vec(
 
 def _gymnasium_autoreset_mode(value: Any) -> Any:
     """Convert an autoreset mode to ``gymnasium.vector.AutoresetMode``."""
-    try:
-        from gymnasium.vector import AutoresetMode
-    except ImportError:  # Gymnasium 1.0: only next-step autoreset
-        raw = str(getattr(value, "value", value)).replace("_", "").lower()
-        if raw != "nextstep":
-            raise ValueError(
-                "Gymnasium 1.0 vector environments only support next-step autoreset; "
-                "upgrade Gymnasium or use a native vector environment"
-            ) from None
-        return None
+    from gymnasium.vector import AutoresetMode
+
     if isinstance(value, AutoresetMode):
         return value
     raw = str(value).replace("_", "").lower()

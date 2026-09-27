@@ -40,7 +40,7 @@ from env_lib.consensus_env.consensus_env import (
     make_topology,
 )
 from env_lib.errors import ResetNeededError
-from env_lib.utils.rendering import state_without_renderer, validate_render_mode
+from env_lib.utils.render_modes import state_without_renderer, validate_render_mode
 from env_lib.utils.vector import BatchedVectorEnv
 
 __all__ = ["ConsensusVectorEnv"]

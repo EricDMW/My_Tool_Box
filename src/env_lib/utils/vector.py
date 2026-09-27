@@ -31,15 +31,10 @@ from typing import Any
 
 import numpy as np
 from gymnasium import spaces
-from gymnasium.vector import VectorEnv
+from gymnasium.vector import AutoresetMode, VectorEnv
 from gymnasium.vector.utils import batch_space
 
 from env_lib.errors import ResetNeededError
-
-try:  # Gymnasium >= 1.1
-    from gymnasium.vector import AutoresetMode
-except ImportError:  # pragma: no cover - Gymnasium 1.0
-    AutoresetMode = None
 
 __all__ = ["AUTORESET_MODES", "BatchedVectorEnv"]
 
@@ -106,8 +101,7 @@ class BatchedVectorEnv(VectorEnv):
         self.render_mode = render_mode
         self.autoreset_mode = mode
         self.metadata = dict(type(self).metadata)
-        if AutoresetMode is not None:
-            self.metadata["autoreset_mode"] = AutoresetMode[mode.upper()]
+        self.metadata["autoreset_mode"] = AutoresetMode[mode.upper()]
         self._pending_reset = np.zeros(self.num_envs, dtype=bool)
         self._needs_reset = True
 

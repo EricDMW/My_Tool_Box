@@ -27,7 +27,7 @@ from gymnasium import spaces
 from env_lib.consensus_env._core import ConsensusKernel
 from env_lib.consensus_env._core import batched_connected as _batched_connected
 from env_lib.errors import ResetNeededError
-from env_lib.utils.rendering import state_without_renderer, validate_render_mode
+from env_lib.utils.render_modes import state_without_renderer, validate_render_mode
 
 __all__ = [
     "DYNAMICS",
