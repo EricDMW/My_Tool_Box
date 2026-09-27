@@ -6,7 +6,7 @@
 % extra inter-word stretch in this chapter (the group keeps it local).
 \begingroup\setlength{\emergencystretch}{3em}% chapter-local
 
-This appendix lists the public classes and functions of version 1.1 with their
+This appendix lists the public classes and functions of version 1.2 with their
 signatures, grouped by module. Signatures omit type annotations; defaults are
 shown as in the source code. The chapters give the semantics, and the
 docstrings (\code{help(obj)} in Python) give full details. Names that start
@@ -28,7 +28,7 @@ env_lib.make_vec(env_id, num_envs=1, vectorization_mode=None, *,
 env_lib.get_spec(env_id) -> EnvSpec
 env_lib.list_envs() -> list[str]
 env_lib.register_envs()
-env_lib.__version__                       # "1.1.0"
+env_lib.__version__                       # "1.2.0"
 env_lib.ResetNeededError                  # exception class
 \end{pycode}
 
@@ -839,6 +839,286 @@ with \code{-{}-policy baseline}, \code{-{}-seed 0} and \code{-{}-theme dark};
 \code{-{}-num-envs 32}, \code{-{}-steps 200} and \code{-{}-seed 0}.
 \code{-{}-kwarg} values are parsed as Python literals (plain text otherwise) and
 may be repeated.
+
+% ---------------------------------------------------------------------------
+\section{\texorpdfstring{\pkg{marl\_algorithms}}{marl\_algorithms}}\label{sec:api-marl}
+
+Chapter~\ref{chap:marl}. The package requires PyTorch. The top-level package
+exports lazily the training entry points, the registry, the core classes
+\code{Algorithm}, \code{OnPolicyAlgorithm}, \code{OffPolicyAlgorithm},
+\code{TrainingLog}, \code{MultiAgentSpec}, \code{VectorRunner},
+\code{Transition} and \code{make\_vector\_env}, the seven algorithm classes and
+the three configuration classes; the presets, buffers, normalisers, networks
+and base configurations live in their modules.
+
+\subsection{Training, registry and presets}
+
+Modules \pkg{marl\_algorithms.registry} (exported by the package) and
+\pkg{marl\_algorithms.presets} (not exported by the package);
+Sections~\ref{sec:marl-quickstart} and~\ref{sec:marl-results}.
+
+% norun
+\begin{pycode}
+train(algorithm, env_id, total_steps, *, num_envs=16, seed=0,
+      env_kwargs=None, device='cpu', callback=None,
+      **config) -> tuple[Algorithm, TrainingLog]
+make_algorithm(name, env_or_spec, **kwargs) -> Algorithm
+get_algorithm(name) -> type[Algorithm]      # case-insensitive
+list_algorithms() -> list[AlgorithmInfo]    # registry order
+AlgorithmInfo(name, entry_point, family, action_kinds, summary,
+              reference)                    # frozen dataclass
+marl_algorithms.__version__                 # "1.2.0"
+
+# marl_algorithms.presets
+get_preset(algorithm, env_id) -> dict | None     # a copy
+list_presets() -> list[tuple[str, str]]          # (algorithm, env_id) pairs
+train_preset(algorithm, env_id, *, seed=0, total_steps=None, num_envs=None,
+             device='cpu', callback=None,
+             **config) -> tuple[Algorithm, TrainingLog]
+\end{pycode}
+
+\code{train} creates the copies with \code{make\_vector\_env}, builds the
+algorithm with \code{make\_algorithm} and trains it with \code{learn}, passing
+the seed to both; it closes the copies and sets \code{log.env\_id}.
+\code{make\_algorithm} passes its keyword arguments (\code{config},
+\code{device}, \code{seed} and configuration overrides) to the class. \code{get\_algorithm},
+\code{get\_preset} and \code{train\_preset} raise \code{KeyError} for an unknown
+algorithm, and \code{train\_preset} also when the pair has no preset. A preset
+is a dictionary with the keys \code{"total\_steps"}, \code{"num\_envs"},
+\code{"config"} and \code{"env\_kwargs"}; the tables are the module-level
+\code{PRESETS} dictionaries \code{\{algorithm: \{env\_id: preset\}\}} of the
+algorithm modules.
+
+\subsection{Agent spec and experience collection}
+
+Modules \pkg{marl\_algorithms.core.spec} and \pkg{marl\_algorithms.core.runner};
+Sections~\ref{sec:marl-spec} and~\ref{sec:marl-runner}.
+
+% norun
+\begin{pycode}
+MultiAgentSpec(n_agents, obs_dim, action_kind, action_dim, n_actions,
+               action_low, action_high, obs_shape, action_shape,
+               action_dtype)                          # frozen dataclass
+MultiAgentSpec.from_env(env) -> MultiAgentSpec        # class method
+MultiAgentSpec.from_spaces(obs_space, act_space) -> MultiAgentSpec
+spec.continuous                                       # property, bool
+spec.state_dim                                        # property, n * obs_dim
+spec.agent_obs(obs) -> np.ndarray                     # (*batch, n, obs_dim)
+spec.env_action(actions) -> np.ndarray                # joint action, clipped
+spec.describe() -> str
+
+make_vector_env(env_id, num_envs=16, **env_kwargs) -> gym.vector.VectorEnv
+
+VectorRunner(envs, spec=None)
+runner.reset(seed=None) -> np.ndarray                 # (B, n, obs_dim)
+runner.step(actions) -> Transition
+runner.pop_episodes() -> list[tuple[float, int]]      # (return, length)
+runner.obs, runner.envs, runner.spec, runner.num_envs
+
+Transition(obs, actions, reward, agent_rewards, next_obs, terminated,
+           truncated)                                 # dataclass
+transition.done                                       # terminated | truncated
+\end{pycode}
+
+\code{MultiAgentSpec.from\_spaces} raises \code{TypeError} for unsupported
+spaces (a non-\code{Box} observation, a joint \code{Discrete} action over
+several agents, unequal or shifted \code{MultiDiscrete} choices, infinite
+continuous bounds, observations not stacked per agent), and
+\code{agent\_obs} raises \code{ValueError} for observations of the wrong shape.
+\code{VectorRunner} raises \code{ValueError} unless the vector environment uses
+\code{"same\_step"} autoreset, and \code{step} raises \code{RuntimeError} before
+\code{reset}.
+
+\subsection{Buffers, normalisation, networks and configurations}
+
+Modules of \pkg{marl\_algorithms.core}, which also exports the buffers,
+normalisers and configuration classes; Sections~\ref{sec:marl-buffers}
+to~\ref{sec:marl-networks}.
+
+% norun
+\begin{pycode}
+RolloutBuffer(length, num_envs, fields)     # fields: {name: (shape, dtype)}
+buffer.add(**values); buffer.reset(); buffer[name]; name in buffer
+buffer.full                                  # property
+compute_gae(rewards, values, next_values, terminated, truncated, gamma,
+            gae_lambda) -> tuple[np.ndarray, np.ndarray]   # (adv., returns)
+ReplayBuffer(capacity, spec)
+replay.add(transition); len(replay)
+replay.sample(batch_size, rng) -> dict[str, np.ndarray]
+
+RunningMeanStd(shape=())                     # update(x), mean, var, count, std
+ObservationNormalizer(obs_dim, clip=10.0, enabled=True) # update(obs), norm(obs)
+RewardScaler(num_envs, gamma, enabled=True)  # scaler(reward, done) -> reward
+# all three: state_dict(), load_state_dict(state)
+
+# marl_algorithms.core.networks
+mlp(in_dim, out_dim, hidden_sizes=(64, 64), activation='tanh', *,
+    output_gain=1.0, layer_norm=False) -> nn.Sequential
+agent_one_hot(batch_shape, n_agents, device) -> torch.Tensor
+soft_update(target, source, tau)
+GaussianPolicy(in_dim, action_dim, low, high, hidden_sizes=(64, 64),
+               activation='tanh', log_std_init=-0.5)
+CategoricalPolicy(in_dim, n_actions, hidden_sizes=(64, 64), activation='tanh')
+    # both: sample(x, generator=None) -> (action, log_prob)
+    #       log_prob(x, action) -> (log_prob, entropy)
+DeterministicPolicy(in_dim, action_dim, low, high, hidden_sizes=(64, 64),
+                    activation='relu')
+QMixer(n_agents, state_dim, embed_dim=32, hypernet_hidden=64)  # (q, state)
+PerAgent(factory, n_agents, shared=True)     # forward(x, *args)
+per_agent.call(method, x, *args)
+
+# marl_algorithms.core.config (dataclasses)
+AlgorithmConfig(hidden_sizes=(64, 64), activation='tanh', gamma=0.99,
+                share_parameters=True, agent_ids=True, max_grad_norm=10.0)
+OnPolicyConfig(..., max_grad_norm=0.5, rollout_length=64, lr=0.0003,
+               gae_lambda=0.95, normalize_observations=True,
+               normalize_rewards=True)
+OffPolicyConfig(..., activation='relu', buffer_size=200000, batch_size=256,
+                warmup_steps=2000, update_every=1, gradient_steps=1,
+                tau=0.01, reward_scale=1.0)
+Config.field_names() -> list[str]            # class method
+config.to_dict() -> dict[str, Any]
+\end{pycode}
+
+\code{RolloutBuffer.add} raises \code{RuntimeError} when the buffer is full and
+\code{KeyError} when a field is missing; \code{ReplayBuffer} raises
+\code{ValueError} for a non-positive capacity and \code{sample}
+\code{RuntimeError} when empty; \code{mlp} raises \code{ValueError} for an
+unknown activation. The configuration classes validate their fields in
+\code{\_\_post\_init\_\_} and raise \code{ValueError} for invalid values.
+
+\subsection{Base classes and the training log}
+
+Module \pkg{marl\_algorithms.core.base}; Section~\ref{sec:marl-base}.
+
+% norun
+\begin{pycode}
+Algorithm(spec, config=None, *, device='cpu', seed=None, **overrides)
+Algorithm.name, Algorithm.action_kinds, Algorithm.config_class  # class attr.
+algo.act(obs, deterministic=False) -> np.ndarray
+algo.learn(envs, total_steps, *, seed=None, log=None,
+           callback=None) -> TrainingLog
+algo.policy(deterministic=True) -> Callable[[Any], np.ndarray]
+algo.evaluate(env, n_episodes=10, *, seed=None,
+              deterministic=True) -> EvaluationResult
+algo.state_dict() -> dict[str, Any]
+algo.load_state_dict(state)
+algo.save(path) -> Path
+Algorithm.load(path, device='cpu') -> Algorithm        # class method
+algo.spec, algo.config, algo.device, algo.seed, algo.np_rng, algo.torch_rng
+algo.env_steps, algo.num_updates
+# helpers for subclasses
+algo.uses_agent_ids, algo.agent_input_dim              # properties
+algo.agent_inputs(obs) -> torch.Tensor
+algo.tensor(array, dtype=torch.float32) -> torch.Tensor
+algo.random_actions(batch) -> np.ndarray
+# hooks: _build(), _modules(), _extra_state(), _load_extra_state(state)
+
+OnPolicyAlgorithm(Algorithm)     # config_class OnPolicyConfig
+# hooks: _rollout_step(obs) -> (actions, extras), _update(rollout) -> stats,
+#        _rollout_fields() -> fields, _observe_transition(transition)
+OffPolicyAlgorithm(Algorithm)    # config_class OffPolicyConfig; algo.replay
+# hooks: _explore(obs) -> actions, _update(batch) -> stats
+
+TrainingLog(algorithm, env_id=None)
+log.episodes              # list of (env_steps, team_return, length)
+log.updates               # list of (env_steps, statistics)
+log.wall_time, log.algorithm, log.env_id
+log.episode_steps, log.episode_returns                 # properties, arrays
+log.mean_return(last=100) -> float
+log.curve(points=50) -> tuple[np.ndarray, np.ndarray]  # (steps, mean returns)
+log.summary() -> str
+log.to_csv(path) -> Path
+log.record_episodes(env_steps, episodes); log.record_update(env_steps, stats)
+\end{pycode}
+
+The constructor raises \code{TypeError} for an unsupported action kind, a
+configuration of the wrong class or unknown override fields.
+\code{callback(algorithm, log)} is called after every update (on-policy) or
+every round of gradient steps (off-policy) and stops training by returning
+\code{False}. \code{Algorithm.load} selects the class through the registry
+unless it is called on the class that saved the file.
+
+\subsection{Algorithms and their configurations}
+
+Modules \pkg{marl\_algorithms.algorithms.ppo}, \pkg{.ddpg} and
+\pkg{.value\_decomposition}; Sections~\ref{sec:marl-ppo}
+to~\ref{sec:marl-value}. All seven classes take the constructor arguments of
+\code{Algorithm}.
+
+% norun
+\begin{pycode}
+IPPO, MAPPO            # OnPolicyAlgorithm; PPOConfig; continuous and discrete
+MADDPG, MATD3          # OffPolicyAlgorithm; DDPGConfig; continuous
+IQL, VDN, QMIX         # OffPolicyAlgorithm; QLearningConfig; discrete
+
+# IPPO, MAPPO
+algo.values(obs) -> torch.Tensor     # critic values (..., n) of normalised obs
+algo.critic_lr, algo.critic_input_dim                  # properties
+algo.reward_source                   # "agent" or "team", resolved
+algo.obs_normalizer, algo.reward_scaler
+# MADDPG, MATD3
+algo.exploration_scale               # property, current noise scale
+MADDPG.n_critics, .smooth_targets, .delayed_policy     # 1, False, False
+MATD3.n_critics, .smooth_targets, .delayed_policy      # 2, True, True
+# IQL, VDN, QMIX
+algo.epsilon_at(env_steps) -> float; algo.epsilon      # property
+algo.q_values(obs, *, target=False) -> torch.Tensor    # (..., n, n_actions)
+algo.mix(agent_q, obs, *, target=False) -> torch.Tensor
+algo.td_target(batch) -> torch.Tensor
+algo.td_loss(batch) -> tuple[torch.Tensor, dict[str, float]]
+VDNMixer()                           # value_decomposition module
+
+PPOConfig(<OnPolicyConfig fields>, n_epochs=10, num_minibatches=4,
+          clip_range=0.2, value_clip_range=0.2, huber_delta=None,
+          ent_coef=0.0, normalize_advantages=True, critic_lr=None,
+          critic_hidden_sizes=None, anneal_lr=False, target_kl=None,
+          log_std_init=-0.5, reward_source=None)
+DDPGConfig(<OffPolicyConfig fields>, actor_lr=0.001, critic_lr=0.001,
+           critic_hidden_sizes=None, exploration_noise=0.1,
+           final_exploration_noise=None, noise_decay_steps=0,
+           reward_source='agent', normalize_observations=False,
+           critic_local_inputs=True, critic_loss='mse', policy_delay=2,
+           target_noise=0.2, target_noise_clip=0.5)
+QLearningConfig(<OffPolicyConfig fields>, lr=0.0005, epsilon_start=1.0,
+                epsilon_end=0.05, epsilon_decay_steps=50000, double_q=True,
+                target_update_interval=0, loss='huber', mixer_embed_dim=32,
+                hypernet_hidden=64)
+PRESETS              # in each algorithm module: {algorithm: {env_id: preset}}
+\end{pycode}
+
+Tables~\ref{tab:marl-config-common}, \ref{tab:marl-ppo-config},
+\ref{tab:marl-ddpg-config} and~\ref{tab:marl-value-config} describe the
+fields. The PPO \code{act} raises \code{ValueError} for observations whose
+trailing shape is not \code{(n\_agents, obs\_dim)}.
+
+\subsection{The \texorpdfstring{\code{marl-train}}{marl-train} command line}\label{sec:api-marl-cli}
+
+Module \pkg{marl\_algorithms.\_\_main\_\_}; Section~\ref{sec:marl-cli}. The
+console script \code{marl-train} and \code{python -m marl\_algorithms} call
+\code{main(argv=None) -> int}; \code{build\_parser()} returns the
+\code{argparse} parser.
+
+\begin{shellcode}
+marl-train list
+marl-train presets
+marl-train run ALGORITHM ENV_ID [--steps N] [--num-envs N] [--seed S]
+               [--no-preset] [--set KEY=VALUE [KEY=VALUE ...]]
+               [--env-kwarg KEY=VALUE [KEY=VALUE ...]] [--eval-episodes N]
+               [--reports N] [--save PATH] [--csv PATH] [--threads N]
+marl-train evaluate CHECKPOINT ENV_ID [--episodes N] [--seed S]
+                    [--env-kwarg KEY=VALUE [KEY=VALUE ...]]
+\end{shellcode}
+
+Defaults: \code{run} uses the preset's steps and copies (100\,000 and 16
+without a preset), \code{-{}-seed 0}, \code{-{}-eval-episodes 64},
+\code{-{}-reports 10} and \code{-{}-threads 1}; \code{evaluate} uses
+\code{-{}-episodes 64} and \code{-{}-seed 1}. \code{KEY=VALUE} values are
+parsed as Python literals (plain text otherwise); a malformed pair ends the
+command with the message \code{expected KEY=VALUE} and exit status 1, and
+command-line usage errors exit with status 2. An unknown algorithm or
+configuration field raises the library's \code{KeyError} or
+\code{TypeError}.
 
 \section{\texorpdfstring{\pkg{toolkit.plotkit}}{toolkit.plotkit}}\label{sec:api-plotkit}
 
