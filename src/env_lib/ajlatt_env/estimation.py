@@ -200,7 +200,8 @@ def psd_inverse(matrix: np.ndarray) -> np.ndarray:
         if (matrix.diagonal() > 0).all():
             with np.errstate(**_QUIET_FP):
                 inverse = _raw_inv(matrix)
-            if not np.isnan(inverse).any():
+            # A finite sum rules out NaN entries; check them only otherwise.
+            if math.isfinite(inverse.sum()) or not np.isnan(inverse).any():
                 return inverse
         return np.linalg.pinv(matrix)
     if np.all(np.diag(matrix) > 0):
@@ -295,6 +296,7 @@ def _newton_loop(S: np.ndarray, flat: np.ndarray, n: int, d: int, max_iter: int)
     f = float(f)
     free = np.ones(n, dtype=bool)
     all_free = True
+    free_idx = None  # np.flatnonzero(free), recomputed when `free` changes
     # KKT matrix and right-hand side of the all-free case, reused across iterations.
     kkt_full = np.ones((n + 1, n + 1))
     kkt_full[n, n] = 0.0
@@ -313,7 +315,9 @@ def _newton_loop(S: np.ndarray, flat: np.ndarray, n: int, d: int, max_iter: int)
             kkt[:n, :n] = hess
             rhs[:n] = trace_a  # -grad
         else:
-            idx = np.flatnonzero(free)
+            if free_idx is None:
+                free_idx = np.flatnonzero(free)
+            idx = free_idx
             m = idx.size
             kkt = np.empty((m + 1, m + 1))
             kkt[:m, :m] = hess[idx][:, idx]
@@ -358,6 +362,7 @@ def _newton_loop(S: np.ndarray, flat: np.ndarray, n: int, d: int, max_iter: int)
                 if alpha == alpha_max and alpha_max < 1.0:
                     blocked = (step < 0) & (c + alpha * step <= 1e-14)
                     free &= ~blocked
+                    free_idx = None
                     trial[blocked] = 0.0
                     trial /= trial.sum()
                     f_blocked, p_blocked = _flat_objective(flat, trial, d)
@@ -366,6 +371,7 @@ def _newton_loop(S: np.ndarray, flat: np.ndarray, n: int, d: int, max_iter: int)
                     else:
                         free |= blocked
                     all_free = bool(free.all())
+                    free_idx = None
                 c, f, p = trial, f_trial, p_trial
                 continue
 
@@ -379,6 +385,7 @@ def _newton_loop(S: np.ndarray, flat: np.ndarray, n: int, d: int, max_iter: int)
             if multipliers[fixed].min() < -tolerance:
                 free[fixed[np.argmin(multipliers[fixed])]] = True
                 all_free = bool(free.all())
+                free_idx = None
                 continue
         break
     return c

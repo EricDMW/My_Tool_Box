@@ -379,22 +379,36 @@ class GridMap:
         removes the per-call overhead. Returns distances ``(P, R)`` and hit
         points ``(P, R, 2)``.
         """
-        odoms = np.asarray(odoms, dtype=float)
-        n_poses, n_rays = len(odoms), len(angles)
+        ((dist, points),) = self._cast_fans(np.asarray(odoms, dtype=float), [angles], r_max)
+        return dist, points
+
+    def _cast_fans(self, odoms: np.ndarray, fans: list, r_max: float) -> list:
+        """Cast several fans of rays (body-frame angle arrays) from every pose in one batch.
+
+        Returns one ``(distances (P, R_f), points (P, R_f, 2))`` pair per fan.
+        """
+        n_poses = len(odoms)
         start = round_half_away((odoms[:, :2] - self.mapmin) / self.mapres - 0.5)
-        body = r_max * np.array([np.cos(angles), np.sin(angles)])
         cos, sin = np.cos(odoms[:, -1]), np.sin(odoms[:, -1])
         rotation = np.empty((n_poses, 2, 2))
         rotation[:, 0, 0] = cos
         rotation[:, 0, 1] = -sin
         rotation[:, 1, 0] = sin
         rotation[:, 1, 1] = cos
-        end = (rotation @ body + odoms[:, :2, np.newaxis]).transpose(0, 2, 1).reshape(-1, 2)
+        ends, counts = [], []
+        for angles in fans:
+            body = r_max * np.array([np.cos(angles), np.sin(angles)])
+            end = rotation @ body + odoms[:, :2, np.newaxis]  # (P, 2, R_f)
+            ends.append(end.transpose(0, 2, 1).reshape(-1, 2))
+            counts.append(len(angles))
+        end = np.concatenate(ends) if len(ends) > 1 else ends[0]
         ex, ey = se2_to_cell_batch(end, self.mapmin, self.mapres)
+        rays_per_pose = [np.repeat(start[:, axis], count) for axis in (0, 1) for count in counts]
+        n_fans = len(fans)
+        sx = np.concatenate(rays_per_pose[:n_fans])
+        sy = np.concatenate(rays_per_pose[n_fans:])
         # Start and end cells are already integers: skip the rounding of bresenham_batch.
-        xs, ys, valid = _bresenham_cells(
-            np.repeat(start[:, 0], n_rays), np.repeat(start[:, 1], n_rays), ex, ey
-        )  # step-major: (max_len, n_rays)
+        xs, ys, valid = _bresenham_cells(sx, sy, ex, ey)  # step-major: (max_len, n_rays)
 
         if self.map is None:
             cx = (xs + 0.5) * self.mapres[0] + self.mapmin[0]
@@ -414,34 +428,51 @@ class GridMap:
         rays = np.arange(len(first))
         hit_cells = np.stack([xs[first, rays], ys[first, rays]], axis=1)
         points = (hit_cells + 0.5) * self.mapres + self.mapmin
-        origin = np.repeat(odoms[:, :2], n_rays, axis=0)
+        origin = np.concatenate([np.repeat(odoms[:, :2], count, axis=0) for count in counts])
         dist = np.sqrt(np.sum(np.square(points - origin), axis=1))
         dist[~has_hit] = np.inf
-        return dist.reshape(n_poses, n_rays), points.reshape(n_poses, n_rays, 2)
+        out, offset = [], 0
+        for count in counts:
+            size = n_poses * count
+            out.append(
+                (
+                    dist[offset : offset + size].reshape(n_poses, count),
+                    points[offset : offset + size].reshape(n_poses, count, 2),
+                )
+            )
+            offset += size
+        return out
 
     def closest_obstacles(
         self,
         odoms,
         ang_res: float = 0.05,
-        fov: float = DEFAULT_FOV,
+        fov: float | Sequence[float] = DEFAULT_FOV,
         r_max: float = DEFAULT_SENSOR_RANGE,
     ) -> list:
         """:meth:`get_closest_obstacle` (``(range, bearing)`` or ``None``) for poses ``(P, 3)``.
 
         The rays of all poses are cast in one batch; the results are identical
-        to calling :meth:`get_closest_obstacle` pose by pose.
+        to calling :meth:`get_closest_obstacle` pose by pose. ``fov`` may also
+        be a sequence of fields of view; the result is then one list per field
+        of view (all fans are still cast in a single batch).
         """
         odoms = np.asarray(odoms, dtype=float).reshape(-1, 3)
-        angles = np.arange(-0.5 * fov, 0.5 * fov, ang_res)
-        if angles.size == 0 or len(odoms) == 0:
-            return [None] * len(odoms)
-        dist, _ = self._cast_batch(odoms, angles, r_max)
-        best = dist.argmin(axis=1)
-        nearest = dist[np.arange(len(best)), best]
-        return [
-            (float(nearest[i]), float(angles[best[i]])) if nearest[i] < r_max else None
-            for i in range(len(best))
-        ]
+        several = not np.isscalar(fov)
+        fovs = list(fov) if several else [fov]
+        fans = [np.arange(-0.5 * value, 0.5 * value, ang_res) for value in fovs]
+        results: list = [[None] * len(odoms) for _ in fans]
+        active = [i for i, angles in enumerate(fans) if angles.size]
+        if len(odoms) and active:
+            cast = self._cast_fans(odoms, [fans[i] for i in active], r_max)
+            for i, (dist, _) in zip(active, cast):
+                best = dist.argmin(axis=1)
+                nearest = dist[np.arange(len(best)), best]
+                results[i] = [
+                    (float(nearest[k]), float(fans[i][best[k]])) if nearest[k] < r_max else None
+                    for k in range(len(best))
+                ]
+        return results if several else results[0]
 
     def get_closest_obstacle(
         self,

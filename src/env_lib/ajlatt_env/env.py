@@ -152,6 +152,8 @@ class AJLATTEnv(gym.Env):
         self._warned_extra_rows = False
         self._history: dict[str, list[np.ndarray]] = {}
         self._fov_rad = np.deg2rad(config.fov)
+        self._obstacle_cache: tuple | None = None
+        self._prior_information: dict[int, tuple[np.ndarray, np.ndarray]] = {}
         # Indices of the other robots, row i = [j for j != i] (observation layout order).
         self._others = np.array(
             [[j for j in range(self.nR) if j != i] for i in range(self.nR)], dtype=np.intp
@@ -171,6 +173,7 @@ class AJLATTEnv(gym.Env):
         super().reset(seed=seed)
         rng = self.np_random
 
+        self._obstacle_cache = None
         if isinstance(self.MAP, DynamicMap):
             self.MAP.generate_map(rng=rng)
         self._target_policy.reset(rng)
@@ -361,6 +364,28 @@ class AJLATTEnv(gym.Env):
             "step": self.step_count,
         }
 
+    def _obstacle_fans(self, poses: np.ndarray) -> tuple[list, list]:
+        """Closest obstacle of every robot in the 360-degree fan and in the sensor fan.
+
+        ``get_reward`` (collision check, full circle) and ``_observation``
+        (sensor field of view) query the same estimated poses within a step,
+        so both fans are cast in one batch and cached for these poses. The
+        results equal per-robot :meth:`GridMap.get_closest_obstacle` calls.
+        """
+        key = poses.tobytes()
+        if self._obstacle_cache is not None and self._obstacle_cache[0] == key:
+            return self._obstacle_cache[1]
+        full, sensor = [None] * self.nR, [None] * self.nR
+        finite = np.flatnonzero(np.isfinite(poses).all(axis=1))
+        if finite.size:
+            fans = self.MAP.closest_obstacles(
+                poses[finite], fov=[2 * np.pi, self._fov_rad], r_max=self.config.sensor_r_max
+            )
+            for k, i in enumerate(finite):
+                full[i], sensor[i] = fans[0][k], fans[1][k]
+        self._obstacle_cache = (key, (full, sensor))
+        return full, sensor
+
     def _cov_traces(self) -> tuple[np.ndarray, np.ndarray]:
         """Traces of the robots' self covariances and of their target-0 covariances."""
         robot = np.array([est.cov for est in self.robot_est])
@@ -414,11 +439,9 @@ class AJLATTEnv(gym.Env):
         hi = self.MAP.mapmax - cfg.obstacle_sensing_margin
         sensing = np.flatnonzero(np.all((lo <= poses[:, :2]) & (poses[:, :2] <= hi), axis=1))
         if sensing.size:
-            closest = self.MAP.closest_obstacles(
-                poses[sensing], fov=self._fov_rad, r_max=cfg.sensor_r_max
-            )
-            for i, value in zip(sensing, closest):
-                obs[i, -6:-4] = (cfg.sensor_r_max, np.pi) if value is None else value
+            _, closest = self._obstacle_fans(poses)
+            for i in sensing:
+                obs[i, -6:-4] = (cfg.sensor_r_max, np.pi) if closest[i] is None else closest[i]
         obs[:, -4:-1] = poses
         obs[:, -1] = cov_traces
         return obs.astype(np.float32)
@@ -489,9 +512,16 @@ class AJLATTEnv(gym.Env):
         robots use the already updated beliefs of earlier ones (as in the
         original implementation).
         """
-        for det_id in range(self.nR):
-            self._localise(det_id, zr, R)
-            self._track_targets(det_id, zr, R, com_obs, rt_obs)
+        # Inverses of target priors, shared by the robots of a neighbourhood. Keyed
+        # by the covariance array itself: estimates are replaced (never modified
+        # in place) when updated, and the cache keeps the arrays alive.
+        self._prior_information = {}
+        try:
+            for det_id in range(self.nR):
+                self._localise(det_id, zr, R)
+                self._track_targets(det_id, zr, R, com_obs, rt_obs)
+        finally:
+            self._prior_information = {}
 
     def _localise(self, det_id: int, zr, R) -> None:
         """Self-localisation of robot ``det_id`` from its relative measurements."""
@@ -522,7 +552,7 @@ class AJLATTEnv(gym.Env):
         s_list.append(omega)
         y_list.append(omega @ me.state)
         me.cov, me.state = covariance_intersection(
-            np.stack(s_list), np.stack(y_list, axis=1), solver=self.config.ci_solver
+            np.array(s_list), np.stack(y_list, axis=1), solver=self.config.ci_solver
         )
 
     def _track_targets(self, det_id: int, zr, R, com_obs, rt_obs) -> None:
@@ -532,13 +562,17 @@ class AJLATTEnv(gym.Env):
         neighbours = np.flatnonzero(com_obs[det_id] == 1)
         for t in range(self.nT):
             dim = 3 if t == 0 else 2
-            detectors = [int(r) for r in neighbours if rt_obs[r, nR + t] == 1]
+            detectors = neighbours[rt_obs[neighbours, nR + t] == 1].tolist()
 
             omega = np.zeros((len(neighbours), dim, dim))
             q = np.zeros((dim, len(neighbours)))
             for k, r in enumerate(neighbours):
                 prior = self.target_est[r][t]
-                omega[k] = psd_inverse(prior.cov)
+                cached = self._prior_information.get(id(prior.cov))
+                if cached is None or cached[0] is not prior.cov:
+                    cached = (prior.cov, psd_inverse(prior.cov))
+                    self._prior_information[id(prior.cov)] = cached
+                omega[k] = cached[1]
                 q[:, k] = omega[k] @ prior.state
 
             if detectors:
@@ -582,16 +616,13 @@ class AJLATTEnv(gym.Env):
         poses = np.array([est.state for est in self.robot_est])
         lo, hi = self.MAP.mapmin + 0.1, self.MAP.mapmax - 0.1
         outside = np.any(poses[:, :2] < lo, axis=1) | np.any(poses[:, :2] > hi, axis=1)
-        # One batched ray cast for all robots inside the map.
-        closest = iter(
-            self.MAP.closest_obstacles(poses[~outside], fov=2 * np.pi, r_max=cfg.sensor_r_max)
-        )
+        closest, _ = self._obstacle_fans(poses)
         for i in range(nR):
             if outside[i]:
                 reward[i] -= cfg.boundary_penalty
                 self._episode_collisions[i] += 1
                 continue
-            nearest = next(closest)
+            nearest = closest[i]
             if nearest is not None and nearest[0] < cfg.obstacle_collision_distance:
                 reward[i] -= cfg.obstacle_penalty
                 self._episode_collisions[i] += 1

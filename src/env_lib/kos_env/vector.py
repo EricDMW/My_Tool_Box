@@ -348,11 +348,18 @@ class KuramotoOscillatorVectorEnv(BatchedVectorEnv):
         return self._kernel.observe(self._phases, self._freqs, self._strengths, self._control)
 
     def _reset_infos(self, mask: np.ndarray) -> dict[str, Any]:
-        infos = self._infos(
-            order_parameter(self._phases),
-            phase_coherence(self._phases),
-            self._coupling_matrices(slice(None)),
-        )
+        # Only the rows of reset copies are reported (masks); compute just those.
+        index = np.flatnonzero(mask)
+        r = np.zeros(self.num_envs)
+        coherence = np.zeros(self.num_envs)
+        r[index] = order_parameter(self._phases[index])
+        coherence[index] = phase_coherence(self._phases[index])
+        if self._dynamic:
+            coupling = np.zeros(self._matrix_shape)
+            coupling[index] = self._kernel.coupling_from_strengths(self._strengths[index])
+        else:
+            coupling = self._coupling_matrices(slice(None))
+        infos = self._infos(r, coherence, coupling)
         if not mask.all():
             for key in list(infos):
                 infos[f"_{key}"] = mask.copy()

@@ -281,8 +281,33 @@ def test_next_step_autoreset(factory):
     assert not truncated.any()
     np.testing.assert_array_equal(envs.step_count, 0)
     assert envs.observation_space.contains(obs)
+    # As in SyncVectorEnv, reset copies report their reset info.
+    key = "step" if factory is ConsensusVectorEnv else "step_count"
+    np.testing.assert_array_equal(infos[key], 0)
+    assert infos[f"_{key}"].all()
+    if factory is KuramotoOscillatorVectorEnv:
+        assert not infos["_dphases_dt"].any()  # step-only key, masked out
+        np.testing.assert_allclose(
+            infos["order_parameter"], np.abs(np.exp(1j * envs.phases).mean(axis=1))
+        )
     envs.step(zero)
     np.testing.assert_array_equal(envs.step_count, 1)
+
+
+def test_next_step_autoreset_mixes_step_and_reset_infos():
+    envs = KuramotoOscillatorVectorEnv(2, n_oscillators=4, max_steps=5, sync_threshold=2.0)
+    envs.reset(seed=0)
+    zero = np.zeros(envs.action_space.shape, dtype=np.float32)
+    envs.step(zero)
+    # Only copy 1 is reset (partial reset with the "disabled"-style mask is not
+    # available in next_step mode, so shorten copy 1's episode instead).
+    envs._step[1] = envs.max_steps - 1
+    *_, truncated, _ = envs.step(zero)
+    assert truncated.tolist() == [False, True]
+    *_, infos = envs.step(zero)
+    assert infos["_dphases_dt"].tolist() == [True, False]
+    np.testing.assert_array_equal(infos["step_count"], [3, 0])
+    assert infos["_step_count"].all()
 
 
 @pytest.mark.parametrize("factory", [ConsensusVectorEnv, KuramotoOscillatorVectorEnv])
