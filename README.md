@@ -1,27 +1,58 @@
 # My Tool Box
 
-Multi-agent reinforcement learning environments and research utilities for
-Python.
+**Networked multi-agent control environments and research utilities for Python.**
 
-- **`env_lib`**: seven families of Gymnasium environments for networked and
-  multi-agent control, from Kuramoto oscillator synchronisation to multi-robot
-  target tracking. They share one API, have vectorised NumPy/PyTorch
-  implementations, render headless and are seeded reproducibly.
-- **`toolkit`**: research utilities:
-  - `plotkit` for publication-quality plots;
-  - `neural_toolkit` for PyTorch policy, value and Q networks, encoders and
-    decoders;
-  - `parakit` for managing `argparse` experiment parameters.
+[![CI](https://github.com/EricDMW/My_Tool_Box/actions/workflows/ci.yml/badge.svg)](https://github.com/EricDMW/My_Tool_Box/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-2563EB)
+![Gymnasium](https://img.shields.io/badge/gymnasium-%E2%89%A5%201.0-059669)
+![License](https://img.shields.io/badge/license-MIT-6B7280)
 
-| Multi-robot target tracking (`AJLATT-v0`) | Kuramoto synchronisation (`KuramotoOscillator-v0`) |
-|---|---|
-| ![AJLATT](docs/manual/figures/ajlatt.png) | ![Kuramoto](docs/manual/figures/kuramoto.png) |
-| **Formation control (`Formation-v0`)** | **Wireless access grid (`WirelessComm-v0`)** |
-| ![Formation](docs/manual/figures/formation.png) | ![WirelessComm](docs/manual/figures/wireless.png) |
+My Tool Box simulates systems in which many agents act on continuous physical
+quantities and interact through a network: generators holding the grid
+frequency, vehicles keeping a safe gap, oscillators synchronising, robots
+tracking targets as a team. Every environment speaks the Gymnasium API,
+simulates thousands of copies as one batch, and comes with a classical
+controller to compare against. The `toolkit` package covers the rest of a
+study: publication-quality plots, neural-network building blocks and
+reproducible experiment parameters.
+
+<p align="center">
+  <img src="docs/images/hero.gif" width="820" alt="Platoon-v0 under cooperative adaptive cruise control">
+</p>
+
+**Introduction slides:** [`docs/slides/my_tool_box_slides.pdf`](docs/slides/my_tool_box_slides.pdf)
+&nbsp;&middot;&nbsp; **Handbook:** [`docs/manual/main.pdf`](docs/manual/main.pdf)
+&nbsp;&middot;&nbsp; **Changes:** [`CHANGELOG.md`](CHANGELOG.md)
+
+## Highlights
+
+- **Networked by construction.** Agents interact through an explicit graph
+  that every networked environment exposes (`env.adjacency`). Shared
+  topologies, Laplacians and `k`-hop neighbourhoods live in
+  `env_lib.utils.graphs`, and observations are local to each agent.
+- **Continuous control in physical units.** Power-grid swing dynamics,
+  vehicle platoons with actuator lag, oscillator networks, single and double
+  integrators, and range-bearing target tracking, each with documented
+  observation layouts, units and bounds.
+- **Fast.** Environments are written batch-first: `env_lib.make_vec(id, 1024)`
+  advances 1024 copies with a few array operations, TBD agent-steps per second
+  on one CPU core. Single environments are vectorised over agents
+  (Kuramoto with 50 oscillators: TBD per step).
+- **Convenient.** One catalogue (`env_lib.catalog()`, `env-lib list`), one
+  command to run, record, evaluate or benchmark any environment, adapters for
+  single-agent libraries and the PettingZoo parallel API, and
+  `env_lib.baseline_policy(env)`, a decentralised classical controller for
+  every environment.
+- **Reproducible.** Randomness comes only from seeded generators, rendering
+  works headless in dark and light themes, and episodes export to GIF, MP4 or
+  `.npz` trajectories.
+- **One install for the whole study.** `toolkit.plotkit` for figures with
+  confidence bands, `toolkit.neural_toolkit` for PyTorch policies and critics,
+  `toolkit.parakit` for experiment parameters.
 
 ## Installation
 
-The package requires Python 3.9 or newer. Install it from a clone of the repository:
+Python 3.9 or newer. From a clone of the repository:
 
 ```bash
 git clone https://github.com/EricDMW/My_Tool_Box.git
@@ -30,146 +61,149 @@ pip install -e ".[all]"
 ```
 
 The core install needs only NumPy, SciPy, matplotlib, Gymnasium and PyYAML.
-Heavier dependencies come as extras:
+Heavier dependencies are extras:
 
 | Extra | Adds | Needed for |
 |---|---|---|
-| `pistonball` | pygame, pymunk | `PistonballEnv` |
-| `torch` | PyTorch | `KuramotoOscillatorEnvTorch`, `toolkit.neural_toolkit` |
+| `torch` | PyTorch | `KuramotoOscillatorTorch-*`, `toolkit.neural_toolkit` |
+| `pistonball` | pygame, pymunk | `Pistonball-v0` |
 | `video` | imageio, imageio-ffmpeg | MP4 export (GIF export works without it) |
-| `dev` | pytest, pytest-cov, ruff | running the tests and linters |
+| `dev` | pytest, pytest-cov, ruff | tests and linters |
 | `all` | all of the above except `dev` | |
 
-For example, `pip install -e ".[pistonball,dev]"`. For a CPU-only PyTorch,
-install `torch` from the PyTorch index before the package.
-
 ## Quick start
-
-Every environment follows the Gymnasium API and is registered when `env_lib`
-is imported:
 
 ```python
 import env_lib
 
-print(env_lib.list_envs())                      # all registered ids
+env = env_lib.make("PowerGrid-v0", render_mode="rgb_array")
+obs, info = env.reset(seed=0)              # (n_agents, obs_dim) float32
+policy = env_lib.baseline_policy(env)      # droop control, from the observation
+obs, reward, terminated, truncated, info = env.step(policy(obs))
+info["agent_rewards"]                      # per-agent rewards, shape (n_agents,)
+frame = env.render()                       # (H, W, 3) uint8 dashboard
 
-env = env_lib.make("KuramotoOscillator-v0", render_mode="rgb_array")
-obs, info = env.reset(seed=0)
-for _ in range(100):
-    obs, reward, terminated, truncated, info = env.step(env.action_space.sample())
-    if terminated or truncated:
-        obs, info = env.reset()
-frame = env.render()                            # (H, W, 3) uint8 array
-env.close()
+# 1024 copies simulated as one batch, evaluated in parallel
+envs = env_lib.make_vec("PowerGrid-v0", num_envs=1024)
+print(env_lib.evaluate(envs, policy, n_episodes=1024, seed=0))
 ```
 
-Classes can also be used directly, and episodes recorded as GIF or MP4:
+Plug the same environments into existing learners:
 
 ```python
-from env_lib import AJLATTEnv
-from env_lib.utils import record_episode, set_theme
+from env_lib.wrappers import FlattenJointSpaces, to_parallel
 
-set_theme("light")                              # or "dark" (default)
-env = AJLATTEnv(map_name="obstacles05", num_robots=4, render_mode="rgb_array")
-frames = record_episode(env, path="renders/ajlatt.gif", seed=0, max_steps=120)
+flat = FlattenJointSpaces(env_lib.make("Platoon-v0"))  # 1-D spaces for single-agent libraries
+par = to_parallel("Platoon-v0")                        # PettingZoo parallel API, per-agent dicts
 ```
 
-The multi-agent environments use joint spaces:
+Or stay in the shell:
 
-- Observations are stacked per agent as `(n_agents, obs_dim)`.
-- Actions are joint arrays.
-- `info["agent_rewards"]` always holds the per-agent rewards.
-
-Publication-quality learning curves take a few lines:
-
-```python
-import numpy as np
-from toolkit.plotkit import plot_learning_curves, save_figure
-
-runs = {"PPO": np.random.randn(5, 200).cumsum(1), "SAC": np.random.randn(5, 200).cumsum(1)}
-ax = plot_learning_curves(runs, band="ci95", smoothing=0.9, xlabel="Episode", ylabel="Return")
-save_figure(ax, "renders/learning_curves", formats=("pdf", "png"))
+```bash
+env-lib list --continuous                          # catalogue of continuous environments
+env-lib describe Platoon-v0                        # spaces, observation layout, parameters
+env-lib run Formation-v0 --gif renders/run.gif     # roll out the baseline and record it
+env-lib evaluate PowerGrid-v0 --num-envs 64        # random versus baseline, in parallel
+env-lib bench Platoon-v0 --num-envs 1024           # single, native batch and Sync throughput
 ```
 
 ## Environments
 
-| Id | Description | Agents | Actions |
-|---|---|---|---|
-| `KuramotoOscillator-v0` (and variants) | Synchronise a network of coupled oscillators by control inputs and coupling strengths; NumPy backend | oscillator network | continuous |
-| `KuramotoOscillatorTorch-v0` (and variants) | Batched PyTorch backend of the Kuramoto environment (CPU or GPU) | batch of networks | continuous |
-| `LineMsg-v0` | Relay a message along a line of agents with lossy links | 10 | binary per agent |
-| `WirelessComm-v0`, `-v1` | Deliver packets through shared access points without collisions | 6x6 / 4x4 grid | 5 choices per agent |
-| `Pistonball-v0` | Cooperatively move a ball to the goal with pistons (pymunk physics) | 20 | continuous or 3 choices |
-| `Consensus-v0`, `Formation-v0` | Rendezvous or formation control over a communication graph | 8 | continuous 2-D |
-| `AJLATT-v0` | Active joint localisation and target tracking by a robot team with range-bearing sensing and covariance-intersection fusion | 4 | continuous (v, omega) |
+Eighteen registered configurations in eight families. Observations are stacked
+per agent as `(n_agents, obs_dim)`; the table lists the default configuration.
 
-The handbook describes every environment in detail: dynamics, observation
-layout, reward, parameters and rendering.
+**Continuous states and actions**
+
+| Id | System | State and dynamics | Action per agent | Agents | Native batch |
+|---|---|---|---|---:|:---:|
+| `PowerGrid-v0` | frequency control of a transmission network | bus angles and frequencies, swing equations | bounded power injection | 16 | yes |
+| `Platoon-v0` | cooperative adaptive cruise control | gaps, speeds, accelerations with actuator lag | commanded acceleration | 8 | yes |
+| `Consensus-v0`, `Formation-v0` | rendezvous and formation over a communication graph | planar positions (and velocities), single or double integrator | velocity or acceleration | 8 | yes |
+| `KuramotoOscillator-*` | synchronisation of coupled oscillators | phases, phase-coupled dynamics | control inputs and coupling gains | network | yes |
+| `KuramotoOscillatorTorch-*` | the same on PyTorch, batched on CPU or GPU | | | network | tensors |
+| `AJLATT-v0` | joint localisation and target tracking by a robot team | poses, EKF beliefs fused by covariance intersection | linear and angular velocity | 4 | |
+| `Pistonball-v0` | cooperative rigid-body physics | ball and piston states (pymunk) | piston velocity (or discrete) | 20 | |
+
+**Discrete networked benchmarks**
+
+| Id | System | Action per agent | Agents |
+|---|---|---|---:|
+| `LineMsg-v0` | relay a message along a line of lossy links | relay or not | 10 |
+| `WirelessComm-v0`, `-v1` | deliver packets through shared access points | idle or one of four access points | 36 / 16 |
+
+| Power grid (`PowerGrid-v0`) | Vehicle platoon (`Platoon-v0`) |
+|---|---|
+| ![PowerGrid](docs/manual/figures/power_grid.png) | ![Platoon](docs/manual/figures/platoon.png) |
+| **Formation control (`Formation-v0`)** | **Multi-robot target tracking (`AJLATT-v0`)** |
+| ![Formation](docs/manual/figures/formation.png) | ![AJLATT](docs/manual/figures/ajlatt.png) |
+| **Kuramoto synchronisation** | **Wireless access grid** |
+| ![Kuramoto](docs/manual/figures/kuramoto.png) | ![WirelessComm](docs/manual/figures/wireless.png) |
+
+Every environment ships a decentralised baseline, returned by
+`env_lib.baseline_policy(env)`:
+
+| Environment | Baseline controller | Random | Baseline |
+|---|---|---:|---:|
+| TBD | | | |
+
+Mean return over seeded episodes, higher is better (`env-lib evaluate`).
+
+## Design
+
+<p align="center">
+  <img src="docs/images/design.png" width="820" alt="Architecture: access layer, Gymnasium contract, environments, shared services">
+</p>
+
+1. **One contract.** Every environment follows the Gymnasium API with joint
+   spaces `(n_agents, dim)`, per-agent rewards in `info["agent_rewards"]`,
+   `terminated` for task outcomes and `truncated` for its own step limit, and
+   randomness from `self.np_random` only.
+2. **Batch-first kernels.** Continuous environments implement their dynamics
+   once for arrays with a leading batch axis. The single environment is the
+   batch of one; `BatchedVectorEnv` runs the same kernels for `B` copies with
+   Gymnasium's autoreset modes, and copy 0 reproduces the single environment.
+3. **The graph is data.** Interaction topologies are adjacency matrices built
+   by `env_lib.utils.graphs` and exposed by the environments, so analysis,
+   neighbourhood truncation and rendering use the same object.
+4. **Baselines from observations.** Reference controllers are pure functions
+   of the observation, which keeps them decentralised and lets one call drive
+   a single environment or a batch of thousands.
+5. **Light core, lazy extras.** `import env_lib` loads no optional
+   dependency; renderers, PyTorch and pymunk are imported on first use.
 
 ## Performance
 
-These are mean step times without rendering, measured with
-`benchmarks/benchmark_envs.py` on the development machine, before and after
-the 1.0 rewrite.
+Measured with `benchmarks/benchmark_envs.py` and `benchmarks/benchmark_vector.py`
+on one CPU core (`OMP_NUM_THREADS=1`).
 
-| Environment | Before | After |
-|---|---:|---:|
-| Kuramoto, NumPy, 50 oscillators | 2.36 ms | 0.07 ms |
-| Kuramoto, NumPy RK4, 50 oscillators | 7.1 ms | 0.1 ms |
-| Kuramoto, PyTorch, 50 oscillators x 8 systems | 10.3 ms | 0.4 ms |
-| WirelessComm, 12x12 | 0.56 ms | 0.05 ms |
-| Pistonball, 20 pistons | 1.11 ms | 0.06 ms |
-| AJLATT, `obstacles04`, 4 robots | 90 ms | 5 to 9 ms |
-
-Rendering an `rgb_array` frame takes about 15 to 35 ms. For comparison, the
-old AJLATT took about 110 ms per frame, and the old Kuramoto `rgb_array` path
-crashed on matplotlib 3.10 and later. Refactors that were not meant to change
-results were checked against the previous implementation: seeded trajectories
-are bit-identical or agree to numerical precision.
-
-## Project layout
-
-```text
-src/env_lib/          environments
-  kos_env/            Kuramoto oscillators (NumPy and PyTorch backends)
-  linemsg_env/        line message passing
-  wireless_comm_env/  wireless access grid
-  pistonball_env/     Pistonball (pygame, pymunk)
-  consensus_env/      consensus and formation control
-  ajlatt_env/         multi-robot localisation and target tracking, maps, map builder
-  utils/              rendering themes, figure management, episode recording
-src/toolkit/          research utilities
-  plotkit/            plotting
-  neural_toolkit/     PyTorch network building blocks and tabular RL tools
-  parakit/            argparse parameter management (optional Tk editor)
-examples/             runnable example scripts (see examples/README.md)
-benchmarks/           performance benchmarks
-tests/                pytest suite
-docs/manual/          LaTeX user manual (handbook)
-```
+TBD
 
 ## Documentation
 
-The user manual is in `docs/manual/`. Build it with `docs/manual/build.sh`,
-which needs a TeX distribution with `latexmk`; the pre-built PDF is
-`docs/manual/main.pdf`. It covers installation, every environment, the
-toolkit, examples, troubleshooting, an API reference and a migration guide
-from pre-1.0 versions. `CHANGELOG.md` lists every change, including
-behavioural fixes.
+- **Handbook** (`docs/manual/main.pdf`, built by `docs/manual/build.sh`): model
+  equations, observation layouts, parameters and rendering of every
+  environment, the workflow chapter (vectorised simulation, adapters,
+  baselines, evaluation), the toolkit, examples, troubleshooting, an API
+  reference and a migration guide.
+- **Slides** (`docs/slides/my_tool_box_slides.pdf`, built by
+  `docs/slides/build.sh`): a short introduction to the package.
+- **Examples** (`examples/`, see `examples/README.md`): one script per
+  environment and an end-to-end workflow.
 
 ## Development
 
 ```bash
 pip install -e ".[all,dev]"
-pytest -q                                              # test suite
-ruff check src tests examples benchmarks               # lint
-ruff format src tests examples benchmarks              # format
-python benchmarks/benchmark_envs.py                    # performance
+pytest -q                                          # test suite
+ruff check src tests examples benchmarks           # lint
+ruff format src tests examples benchmarks          # format
+python benchmarks/benchmark_envs.py                # single-environment timings
+python benchmarks/benchmark_vector.py              # batched throughput
 ```
 
-Tests run headless: `tests/conftest.py` selects the Agg backend for
-matplotlib and SDL's dummy video driver for pygame. Continuous integration
-runs the lint and test jobs on Python 3.9 to 3.12.
+Tests run headless (`tests/conftest.py` selects matplotlib's Agg backend and
+SDL's dummy video driver). Continuous integration runs lint, tests and example
+smoke tests on Python 3.9 to 3.12.
 
 ## License
 

@@ -46,4 +46,9 @@ jobs:
         run: |
           python examples/quickstart.py --steps 5
           python examples/simple_transformer_example.py --quick --no-plot
+          python examples/workflow_demo.py --no-save
+          python examples/power_grid_demo.py --episodes 2 --steps 50
+          python examples/platoon_demo.py --episodes 2 --steps 100
+          env-lib list
+          env-lib evaluate Formation-v0 --episodes 8 --num-envs 8
           python benchmarks/benchmark_envs.py --steps 20 --render-steps 2

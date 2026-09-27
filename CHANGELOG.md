@@ -4,6 +4,97 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 uses [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-09-27
+
+Release 1.1 extends the package for networked multi-agent control with
+continuous states and actions: two new environments, native batched
+simulation, and a convenience layer for running, adapting, evaluating and
+benchmarking every environment.
+
+### New environments
+
+- `PowerGrid-v0`: frequency control of a networked power system. Swing
+  equations on a Kron-reduced transmission network starting from an exact
+  synchronous equilibrium, random step load changes and optional
+  Ornstein-Uhlenbeck load noise, bounded fast frequency response as the
+  continuous action of every bus, heterogeneous inertia, damping and line
+  susceptances, and a droop-control baseline (`droop_policy`).
+- `Platoon-v0`: cooperative adaptive cruise control of a vehicle platoon.
+  First-order actuator lag with an exact discretisation, constant
+  time-headway spacing, V2V topologies (predecessor following,
+  predecessor-leader following, bidirectional, sensors only), leader
+  scenarios (cruise, stop-and-go, random, mixed), and a CACC baseline
+  (`cacc_policy`) that is string stable at the default headway, together
+  with `string_stability_gain` for the analytic check.
+- Both come with a dashboard renderer, a handbook chapter, an example script
+  and a native vector environment.
+
+### Vectorised simulation
+
+- `env_lib.make_vec(id, num_envs)` creates a native batched implementation
+  when the environment has one and a Gymnasium `SyncVectorEnv` otherwise.
+  Native implementations: `PowerGridVectorEnv`, `PlatoonVectorEnv`,
+  `ConsensusVectorEnv` (Consensus and Formation), and
+  `KuramotoOscillatorVectorEnv` (NumPy Kuramoto ids).
+- `env_lib.utils.BatchedVectorEnv`: base class implementing the Gymnasium
+  vector API (seeding, action validation, next-step, same-step and disabled
+  autoreset, info masks, `final_obs`/`final_info` in Gymnasium's layout) on
+  top of three array hooks. The single environments share the same
+  batch-first kernels, and copy 0 of a vector environment reproduces the
+  single environment.
+
+### Convenience layer
+
+- `env_lib.catalog()` and `env_lib.describe(id)`: a searchable table of every
+  environment with state and action types, shapes, agent counts, native
+  batch support and required extras.
+- `env-lib` command line (also `python -m env_lib`): `list`, `describe`,
+  `baselines`, `run` (with GIF export), `evaluate` and `bench`.
+- `env_lib.baseline_policy(env)`: a decentralised classical controller for
+  every environment, computed from the observation so that it drives single
+  and batched environments alike (`list_baselines()` lists them).
+- `env_lib.evaluate()` and `env_lib.rollout()`: parallel evaluation on vector
+  environments with confidence intervals, and trajectory datasets saved as
+  `.npz`.
+- `env_lib.wrappers`: `FlattenJointSpaces` for single-agent libraries,
+  `TeamReward`, and `ParallelEnvAdapter` / `to_parallel` for the PettingZoo
+  parallel API (it subclasses `pettingzoo.ParallelEnv` when PettingZoo is
+  installed; `parallel_api_test` passes for every environment).
+- `env_lib.utils.graphs`: shared topologies (ring, line, star, complete, grid,
+  Erdos-Renyi, small-world, random geometric), Laplacian, algebraic
+  connectivity, `k`-hop neighbourhoods and plotting layouts.
+- Registry records (`env_lib.get_spec(id)`, `EnvSpec`) carry the family,
+  observation and action types, required extra, native vector entry point
+  and the name of the episode-limit argument.
+
+### Performance
+
+PERF_PLACEHOLDER
+
+### Changed
+
+- `gymnasium>=1.0` is required (vector API).
+- `env_lib.make(id, max_episode_steps=N)` and `make_vec` set the
+  environment's own episode limit (`max_steps`, `max_iter`, `max_cycles` or
+  `max_episode_steps`) instead of adding a `TimeLimit` wrapper on top of it;
+  for AJLATT the value previously never reached the configuration.
+- Unknown keys in `reset(options=...)` now issue a `UserWarning` and are
+  ignored (Consensus, Kuramoto; values of known keys are still validated), so
+  generic tools that pass their own options work.
+- The AJLATT example's encircling heuristic moved into the package as
+  `env_lib.baselines.ajlatt_encircle` (used by `baseline_policy`).
+- `env_lib.catalog` is a callable module: `env_lib.catalog(...)` returns the
+  catalogue and `env_lib.catalog.describe` remains accessible.
+
+### Documentation
+
+- Introduction slides in `docs/slides` (Beamer, built by `build.sh`, PDF
+  committed), README rewritten around the design, continuous-control
+  environments, performance and the convenience layer.
+- Handbook: new chapters on PowerGrid, Platoon and the workflow (vectorised
+  simulation, adapters, baselines, evaluation); overview, examples,
+  troubleshooting, API reference and migration guide updated.
+
 ## [1.0.0] - 2026-09-27
 
 First release as a single, standard Python package. The two former projects
