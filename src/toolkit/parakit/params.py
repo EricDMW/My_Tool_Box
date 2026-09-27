@@ -13,7 +13,13 @@ Value conversion (:func:`parse_value`) follows the parser's own declarations:
   (case-insensitive), so the string ``"False"`` becomes ``False``.
 * ``nargs='+'``, ``'*'``, ``N`` and ``append``/``extend`` actions take a JSON list
   (``[1.0, 2.0]``) or comma- or whitespace-separated tokens (``1.0, 2.0``); every
-  element is converted and the count is checked.
+  element is converted and the ``nargs`` count is checked (``append``/``extend``
+  accumulate any number of values). ``append`` with ``nargs`` (``'+'``, ``'*'`` or
+  ``N``) holds a list of lists such as ``[[1, 2], [3, 4]]``; for ``nargs=N`` a flat
+  list is split into groups of ``N``.
+* Non-text values (e.g. from a JSON file) are passed to a custom ``type=`` callable
+  as they are and, if it fails, as text, so converters written for command-line
+  strings (``str2bool``, ``lambda s: int(s, 0)``) survive a save/load round trip.
 * ``None``, ``null`` or an empty string give ``None`` when the default is
   ``None`` (or ``nargs='?'``).
 * ``choices`` are enforced on the converted value(s).
@@ -37,7 +43,7 @@ import json
 import logging
 import os
 import re
-import tempfile
+import secrets
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
@@ -76,9 +82,13 @@ _SKIPPED_ACTIONS = (argparse._HelpAction, argparse._VersionAction, argparse._Sub
 _BOOL_ACTIONS: tuple[type, ...] = (argparse._StoreTrueAction, argparse._StoreFalseAction)
 if hasattr(argparse, "BooleanOptionalAction"):
     _BOOL_ACTIONS += (argparse.BooleanOptionalAction,)
-_LIST_ACTIONS: tuple[type, ...] = (argparse._AppendAction,)
-if hasattr(argparse, "_ExtendAction"):
-    _LIST_ACTIONS += (argparse._ExtendAction,)
+_EXTEND_ACTIONS: tuple[type, ...] = (
+    (argparse._ExtendAction,) if hasattr(argparse, "_ExtendAction") else ()
+)
+_LIST_ACTIONS: tuple[type, ...] = (argparse._AppendAction, *_EXTEND_ACTIONS)
+_TIMESTAMPED_NAME = re.compile(
+    rf"{re.escape(PARAMETER_FILE_PREFIX)}_(\d{{8}}_\d{{6}})(?:_(\d+))?\.json"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +138,15 @@ def _is_list_action(action: argparse.Action) -> bool:
     )
 
 
+def _is_nested_action(action: argparse.Action) -> bool:
+    """``append`` with ``nargs``: each occurrence adds a list, so the value is a list of lists."""
+    return (
+        isinstance(action, argparse._AppendAction)
+        and not isinstance(action, _EXTEND_ACTIONS)
+        and action.nargs not in (None, argparse.OPTIONAL)
+    )
+
+
 def _none_allowed(action: argparse.Action) -> bool:
     return action.default is None or action.nargs == "?"
 
@@ -166,7 +185,7 @@ def describe_type(action: argparse.Action) -> str:
     if name == "<lambda>":
         name = "custom"
     if _is_list_action(action):
-        name = f"list[{name}]"
+        name = f"list[list[{name}]]" if _is_nested_action(action) else f"list[{name}]"
     if _none_allowed(action):
         name = f"{name} or None"
     return name
@@ -201,18 +220,24 @@ def parse_bool(value: Any) -> bool:
     raise ValueError(f"invalid boolean value {value!r}; use true/false, yes/no, on/off or 1/0")
 
 
+def _convert_text(text: str, converter: Callable[[Any], Any], value: Any) -> Any:
+    """Apply ``converter`` to ``text``; any conversion failure becomes ``ValueError``."""
+    try:
+        return converter(text)
+    except argparse.ArgumentTypeError as exc:
+        raise ValueError(str(exc)) from None
+    except (TypeError, ValueError, AttributeError) as exc:
+        name = getattr(converter, "__name__", "<lambda>")
+        kind = "value" if name == "<lambda>" else f"{name} value"
+        raise ValueError(f"invalid {kind} {value!r}: {exc}") from None
+
+
 def _convert_scalar(value: Any, converter: Callable[[Any], Any]) -> Any:
     if converter is bool:
         return parse_bool(value)
     if isinstance(value, str):
         text = value.strip() if converter in (int, float) else value
-        try:
-            return converter(text)
-        except argparse.ArgumentTypeError as exc:
-            raise ValueError(str(exc)) from None
-        except (TypeError, ValueError) as exc:
-            name = getattr(converter, "__name__", "value")
-            raise ValueError(f"invalid {name} value {value!r}: {exc}") from None
+        return _convert_text(text, converter, value)
     # Already-typed input, e.g. from a JSON file.
     if converter is int:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -228,12 +253,17 @@ def _convert_scalar(value: Any, converter: Callable[[Any], Any]) -> Any:
         if isinstance(value, (list, tuple, dict)):
             raise ValueError(f"invalid str value {value!r}")
         return str(value)
+    # Custom ``type=`` callables are written for command-line text. Try the value
+    # itself, then its text form (booleans as 'true'/'false', the canonical text).
     try:
         return converter(value)
-    except argparse.ArgumentTypeError as exc:
-        raise ValueError(str(exc)) from None
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"invalid value {value!r}: {exc}") from None
+    except (argparse.ArgumentTypeError, TypeError, ValueError, AttributeError):
+        pass
+    if isinstance(value, bool):
+        text = "true" if value else "false"
+    else:
+        text = str(value)
+    return _convert_text(text, converter, value)
 
 
 def _split_list(text: str) -> list[Any]:
@@ -263,10 +293,23 @@ def _check_count(action: argparse.Action, items: list[Any]) -> None:
         raise ValueError(f"expected exactly {nargs} values, got {len(items)}")
 
 
-def _check_choices(action: argparse.Action, value: Any, is_list: bool) -> None:
+def _group_items(action: argparse.Action, items: list[Any]) -> list[list[Any]]:
+    """Split the items of an ``append`` + ``nargs`` action into one list per occurrence."""
+    if all(isinstance(item, (list, tuple)) for item in items):
+        return [list(item) for item in items]
+    nargs = action.nargs
+    flat = not any(isinstance(item, (list, tuple)) for item in items)
+    if flat and isinstance(nargs, int) and not isinstance(nargs, bool) and nargs > 0:
+        if len(items) % nargs == 0:
+            return [items[i : i + nargs] for i in range(0, len(items), nargs)]
+        raise ValueError(f"expected groups of {nargs} values, got {len(items)} values")
+    raise ValueError(f"expected a list of value lists such as [[1, 2], [3, 4]], got {items!r}")
+
+
+def _check_choices(action: argparse.Action, items: list[Any]) -> None:
     if not action.choices:
         return
-    for item in value if is_list else [value]:
+    for item in items:
         if item not in action.choices:
             options = ", ".join(repr(c) for c in action.choices)
             raise ValueError(f"{item!r} is not a valid choice; value must be one of: {options}")
@@ -335,13 +378,22 @@ def parse_value(
             items = list(text)
         else:
             raise ValueError(f"expected a list of values, got {text!r}")
-        _check_count(action, items)
-        value: Any = [_convert_scalar(item, converter) for item in items]
+        if _is_nested_action(action):
+            value: Any = []
+            for group in _group_items(action, items):
+                _check_count(action, group)
+                value.append([_convert_scalar(item, converter) for item in group])
+            flat = [item for group in value for item in group]
+        else:
+            if not isinstance(action, _LIST_ACTIONS):  # append/extend accumulate values
+                _check_count(action, items)
+            value = flat = [_convert_scalar(item, converter) for item in items]
     else:
         if isinstance(text, (list, tuple)):
             raise ValueError(f"expected a single value, got {text!r}")
         value = _convert_scalar(text, converter)
-    _check_choices(action, value, is_list)
+        flat = [value]
+    _check_choices(action, flat)
     if validator is not None:
         _run_validator(validator, value)
     return value
@@ -350,16 +402,17 @@ def parse_value(
 def format_value(action: argparse.Action, value: Any) -> str:
     """Text representation of ``value`` that :func:`parse_value` converts back.
 
-    Lists are written as JSON, ``None`` as ``'None'`` and booleans as
-    ``'True'``/``'False'``.
+    Lists (including lists of lists) are written as JSON, with elements that are
+    not JSON types (e.g. :class:`pathlib.Path`) written as strings; ``None`` is
+    written as ``'None'`` and booleans as ``'True'``/``'False'``.
     """
     if value is None:
         return "None"
     if isinstance(value, (list, tuple)):
         try:
-            return json.dumps(list(value))
-        except (TypeError, ValueError):
-            return " ".join(str(v) for v in value)
+            return json.dumps(list(value), default=str)
+        except (TypeError, ValueError):  # e.g. circular references
+            return json.dumps([str(v) for v in value])
     return str(value)
 
 
@@ -397,6 +450,23 @@ def _timestamped_path(directory: Path, prefix: str = PARAMETER_FILE_PREFIX) -> P
     return candidate
 
 
+def _create_temp_file(target: Path) -> tuple[int, str]:
+    """Create a unique temporary file next to ``target`` and return ``(fd, name)``.
+
+    Unlike ``tempfile.mkstemp`` (mode 0600), the file is created with mode 0666
+    filtered by the process umask, so the renamed file has the permissions of a file
+    written with :func:`open`. The umask itself is not read or changed.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    for _ in range(100):
+        name = target.parent / f".{target.name}.{secrets.token_hex(6)}.tmp"
+        try:
+            return os.open(name, flags, 0o666), str(name)
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"could not create a temporary file next to {target}")
+
+
 def save_parameters(values: Mapping[str, Any], path_or_dir: PathLike) -> Path:
     """Write ``values`` as JSON and return the file path.
 
@@ -413,7 +483,8 @@ def save_parameters(values: Mapping[str, Any], path_or_dir: PathLike) -> Path:
     Returns
     -------
     pathlib.Path
-        The written file. The write is atomic (temporary file + rename).
+        The written file. The write is atomic (temporary file + rename); the file
+        gets the default permissions of new files (``0o666`` minus the umask).
     """
     target = Path(path_or_dir).expanduser()
     if target.is_dir() or not target.suffix:
@@ -422,7 +493,7 @@ def save_parameters(values: Mapping[str, Any], path_or_dir: PathLike) -> Path:
     else:
         target.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(dict(values), indent=4, ensure_ascii=False, default=_json_default)
-    fd, tmp_name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+    fd, tmp_name = _create_temp_file(target)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(payload + "\n")
@@ -434,6 +505,14 @@ def save_parameters(values: Mapping[str, Any], path_or_dir: PathLike) -> Path:
     return target
 
 
+def _file_rank(path: Path) -> tuple[bool, str, int, str]:
+    """Sort key of parameter files: (timestamped, timestamp, counter, name)."""
+    match = _TIMESTAMPED_NAME.fullmatch(path.name)
+    if match is None:
+        return (False, "", 0, path.name)
+    return (True, match.group(1), int(match.group(2) or 0), path.name)
+
+
 def load_parameters(path: PathLike) -> dict[str, Any]:
     """Read a JSON parameter file written by :func:`save_parameters`.
 
@@ -441,7 +520,9 @@ def load_parameters(path: PathLike) -> dict[str, Any]:
     ----------
     path : str or path-like
         A JSON file, or a directory, in which case the newest
-        ``parameters_*.json`` file (by timestamped name) is read.
+        ``parameters_*.json`` file is read: files are ranked by the timestamp and
+        counter in their name (``parameters_YYYYmmdd_HHMMSS_N.json``, so ``_10``
+        is newer than ``_9``); other ``parameters_*.json`` names rank below them.
 
     Raises
     ------
@@ -452,7 +533,7 @@ def load_parameters(path: PathLike) -> dict[str, Any]:
     """
     source = Path(path).expanduser()
     if source.is_dir():
-        candidates = sorted(source.glob(f"{PARAMETER_FILE_PREFIX}_*.json"))
+        candidates = sorted(source.glob(f"{PARAMETER_FILE_PREFIX}_*.json"), key=_file_rank)
         if not candidates:
             raise FileNotFoundError(f"no {PARAMETER_FILE_PREFIX}_*.json files in {source}")
         source = candidates[-1]

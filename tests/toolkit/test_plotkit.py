@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import importlib.util
 import inspect
 import subprocess
@@ -19,7 +20,7 @@ from matplotlib.container import BarContainer
 import toolkit.plotkit as pk
 from toolkit.plotkit import core
 from toolkit.plotkit.__main__ import DEMOS, main
-from toolkit.plotkit._data import as_series_list, to_numpy
+from toolkit.plotkit._data import as_series_list, is_scalar_like, to_numpy
 from toolkit.plotkit._stats import _ema_filter, _ema_filter_loop, ema, moving_average
 
 OLD_NAMES = [
@@ -247,6 +248,73 @@ def test_pandas_inputs():
     assert len(ax.lines) == 3  # one series per column
 
 
+def test_dataframe_is_one_sample_matrix_for_shadow_and_learning_curves(rng):
+    pd = pytest.importorskip("pandas")
+    data = rng.normal(size=(5, 12))  # 5 seeds x 12 steps
+    frame = pd.DataFrame(data)
+    ax = pk.plot_shadow_curve(frame)
+    assert len(ax.lines) == 1 and len(ax.collections) == 1
+    np.testing.assert_allclose(ax.lines[0].get_ydata(), data.mean(axis=0))
+    ax = pk.plot_shadow_curve(pd.DataFrame(data.T), axis=1)  # steps x seeds
+    assert len(ax.lines) == 1
+    np.testing.assert_allclose(ax.lines[0].get_ydata(), data.mean(axis=0))
+    ax = pk.plot_shadow_curve([frame, frame + 1])
+    assert len(ax.lines) == 2
+    ax = pk.plot_learning_curves({"A": frame, "B": data}, band="std")
+    np.testing.assert_allclose(ax.lines[0].get_ydata(), data.mean(axis=0))
+    np.testing.assert_allclose(ax.lines[0].get_ydata(), ax.lines[1].get_ydata())
+    lower, upper = band_edges(ax, np.arange(12))
+    np.testing.assert_allclose(upper - lower, 2 * data.std(axis=0))
+    # Line, bar and histogram keep "one series per column".
+    assert len(as_series_list(frame)) == 12
+    assert len(pk.plot_bar(None, pd.DataFrame({"a": [1, 2], "b": [3, 4]})).containers) == 2
+    assert len(pk.plot_histogram(pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})).patches) == 2
+
+
+def test_dates_times_and_durations_are_scalars():
+    days = [datetime.date(2024, 1, d) for d in (1, 2, 3)]
+    stamps = [datetime.datetime(2024, 1, d, 12, tzinfo=datetime.timezone.utc) for d in (1, 2, 3)]
+    spans = [datetime.timedelta(minutes=m) for m in (0, 1, 2)]
+    for value in (
+        days[0],
+        stamps[0],
+        datetime.time(1, 2),
+        spans[0],
+        np.datetime64("2024-01-01"),
+        np.timedelta64(1, "s"),
+    ):
+        assert is_scalar_like(value)
+    for x in (days, stamps, spans):
+        assert len(as_series_list(x, numeric=False)) == 1
+        for func in (pk.plot_line, pk.plot_scatter):
+            ax = func(x, [1.0, 2.0, 3.0])
+            ax.figure.canvas.draw()
+        ax = pk.plot_shadow_curve(np.ones((2, 3)), x=x)
+        assert len(ax.lines) == 1
+        ax.figure.canvas.draw()
+    # Durations are drawn as seconds; dates keep a date axis.
+    np.testing.assert_allclose(pk.plot_line(spans, [1, 2, 3]).lines[0].get_xdata(), [0, 60, 120])
+    ax = pk.plot_bar(days, [1, 2, 3])
+    assert [t.get_text() for t in ax.get_xticklabels()] == ["2024-01-01", "2024-01-02", "2024-01-03"]
+    ax = pk.plot_bar(spans, [1, 2, 3])
+    assert [t.get_text() for t in ax.get_xticklabels()] == ["0:00:00", "0:01:00", "0:02:00"]
+    ax = pk.plot_bar([datetime.time(9, 30), datetime.time(10, 0)], [1, 2])
+    assert [t.get_text() for t in ax.get_xticklabels()] == ["09:30:00", "10:00:00"]
+
+
+def test_pandas_timestamps_as_x():
+    pd = pytest.importorskip("pandas")
+    stamps = list(pd.date_range("2024-01-01", periods=3))
+    for x in (stamps, pd.date_range("2024-01-01", periods=3)):
+        ax = pk.plot_line(x, [1.0, 2.0, 3.0])
+        ax.figure.canvas.draw()
+        ax = pk.plot_bar(x, [1, 2, 3])
+        labels = [t.get_text() for t in ax.get_xticklabels()]
+        assert all(label.startswith("2024-01-0") for label in labels)
+    ax = pk.plot_scatter([pd.Timedelta(hours=h) for h in range(3)], [1.0, 2.0, 3.0])
+    np.testing.assert_allclose(ax.collections[0].get_offsets()[:, 0], [0, 3600, 7200])
+
+
 # ---------------------------------------------------------------------------
 # plot_line / plot_scatter
 # ---------------------------------------------------------------------------
@@ -273,9 +341,26 @@ def test_plot_line_shape_errors():
     with pytest.raises(ValueError, match=r"series 0 has 50 points but its x has 40"):
         pk.plot_line(np.arange(40), np.zeros(50))
     with pytest.raises(ValueError, match="transpose"):
-        pk.plot_line(np.arange(100), np.zeros((100, 3)))
+        pk.plot_scatter(np.arange(100), np.zeros((100, 3)))
     with pytest.raises(ValueError, match="3 x arrays for 2 series"):
         pk.plot_line([np.arange(3)] * 3, [np.zeros(3), np.zeros(3)])
+
+
+def test_plot_line_accepts_matplotlib_column_layout():
+    x = np.linspace(0, 1, 50)
+    columns = np.column_stack([np.sin(x), np.cos(x), x])  # (n_points, n_series)
+    ax = pk.plot_line(x, columns)
+    assert len(ax.lines) == 3
+    for line, column in zip(ax.lines, columns.T):
+        np.testing.assert_array_equal(line.get_xdata(), x)
+        np.testing.assert_array_equal(line.get_ydata(), column)
+    # Rows stay series when the rows match x, including square arrays.
+    ax = pk.plot_line(np.arange(3), np.arange(9.0).reshape(3, 3))
+    np.testing.assert_array_equal(ax.lines[0].get_ydata(), [0, 1, 2])
+    ax = pk.plot_line(np.arange(3), np.arange(6.0).reshape(2, 3))
+    assert len(ax.lines) == 2
+    ax = pk.plot_line(None, np.zeros((4, 3)))  # without x rows are series
+    assert len(ax.lines) == 4
 
 
 def test_plot_line_color_and_label_aliases():
@@ -513,6 +598,42 @@ def test_bar_asymmetric_errors_and_scalar_error():
     assert all(c.errorbar is not None for c in bar_containers(ax))
 
 
+def test_bar_asymmetric_errors_as_nested_lists():
+    for yerr in ([[0.1, 0.2, 0.3], [0.5, 0.6, 0.7]], ([0.1, 0.2, 0.3], np.array([0.5, 0.6, 0.7]))):
+        ax = pk.plot_bar(["a", "b", "c"], [1.0, 2.0, 3.0], yerr=yerr)
+        segments = bar_containers(ax)[0].errorbar.lines[2][0].get_segments()
+        np.testing.assert_allclose([s[0][1] for s in segments], [0.9, 1.8, 2.7])
+        np.testing.assert_allclose([s[1][1] for s in segments], [1.5, 2.6, 3.7])
+    # With two series the same nested list is one symmetric error array per series.
+    ax = pk.plot_bar(["a", "b"], [[1.0, 2.0], [3.0, 4.0]], yerr=[[0.1, 0.2], [0.3, 0.4]])
+    segments = bar_containers(ax)[1].errorbar.lines[2][0].get_segments()
+    np.testing.assert_allclose([s[0][1] for s in segments], [2.7, 3.6])
+
+
+@pytest.mark.parametrize(
+    "fmt,expected",
+    [
+        ("d", ["1", "2", "1500"]),
+        ("{:d}", ["1", "2", "1500"]),
+        (",d", ["1", "2", "1,500"]),
+        ("%d", ["1", "2", "1500"]),
+        ("x", ["1", "2", "5dc"]),
+        (".1%", ["100.0%", "200.0%", "150000.0%"]),
+        ("{:.0%}", ["100%", "200%", "150000%"]),
+        ("%.1f%%", ["1.0%", "2.0%", "1500.0%"]),
+        ("n = %d", ["n = 1", "n = 2", "n = 1500"]),
+    ],
+)
+def test_bar_value_label_formats(fmt, expected):
+    ax = pk.plot_bar(["a", "b", "c"], np.array([1.0, 2.0, 1500.0]), value_labels=fmt)
+    assert [t.get_text() for t in ax.texts] == expected
+
+
+def test_value_label_integer_format_rejects_fractions():
+    with pytest.raises(ValueError, match="cannot format value 1.5 with format 'd'"):
+        pk.plot_bar(["a"], [1.5], value_labels="d")
+
+
 def test_bar_horizontal_and_per_bar_colors():
     ax = pk.plot_bar(["a", "b", "c"], [3, 1, 2], horizontal=True, colors=["r", "g", "b"])
     rects = ax.patches
@@ -546,6 +667,20 @@ def test_histogram_common_bins_and_nan(rng):
     assert pk.plot_histogram(b).get_ylabel() == "Count"
     with pytest.raises(ValueError, match="no finite"):
         pk.plot_histogram([np.nan, np.nan])
+
+
+def test_histogram_range_limits_shared_bins(rng):
+    data = rng.normal(0, 3, size=1000)
+    ax = pk.plot_histogram([data, data + 0.5], bins=10, range=(0, 1))
+    reference = np.histogram(data, bins=10, range=(0, 1))
+    for patch in ax.patches:
+        xs = patch.get_path().vertices[:, 0]
+        assert xs.min() == pytest.approx(0.0) and xs.max() == pytest.approx(1.0)
+    heights = np.unique(ax.patches[0].get_path().vertices[:, 1])
+    assert set(reference[0]) <= set(heights)
+    ax = pk.plot_histogram(data, bins="auto", range=(-1, 2))
+    xs = ax.patches[0].get_path().vertices[:, 0]
+    assert xs.min() == pytest.approx(-1.0) and xs.max() == pytest.approx(2.0)
 
 
 # ---------------------------------------------------------------------------
@@ -624,6 +759,39 @@ def test_heatmap_integer_default_format_and_errors():
         pk.plot_heatmap(np.full((2, 2), np.nan))
     with pytest.raises(ValueError, match="2-D"):
         pk.plot_heatmap(np.zeros((2, 2, 2)))
+
+
+@pytest.mark.parametrize(
+    "fmt,expected",
+    [
+        ("d", ["0", "1", "2", "1200"]),
+        ("{:d}", ["0", "1", "2", "1200"]),
+        (",d", ["0", "1", "2", "1,200"]),
+        ("%d", ["0", "1", "2", "1200"]),
+    ],
+)
+def test_heatmap_integer_formats(fmt, expected):
+    ax = pk.plot_heatmap(np.array([[0, 1], [2, 1200]]), annot=True, fmt=fmt)
+    assert [t.get_text() for t in ax.texts] == expected
+
+
+def test_heatmap_percent_formats():
+    data = np.array([[0.25, 0.5], [0.125, 1.0]])
+    for fmt, first in ((".1%", "25.0%"), ("{:.0%}", "25%"), ("%.2f", "0.25"), (",.2%", "25.00%")):
+        ax = pk.plot_heatmap(data, annot=True, fmt=fmt)
+        assert ax.texts[0].get_text() == first
+        plt.close("all")
+
+
+def test_heatmap_default_format_uses_annotation_values():
+    counts = np.array([[1, 2], [3, 4]])
+    fractions = np.array([[0.25, 0.5], [0.74, 0.126]])
+    ax = pk.plot_heatmap(counts, annot=fractions)
+    assert [t.get_text() for t in ax.texts] == ["0.25", "0.5", "0.74", "0.13"]
+    ax = pk.plot_heatmap(fractions, annot=counts)
+    assert [t.get_text() for t in ax.texts] == ["1", "2", "3", "4"]
+    ax = pk.plot_heatmap(fractions, annot=np.array([["a", "b"], ["c", "d"]]))
+    assert [t.get_text() for t in ax.texts] == ["a", "b", "c", "d"]
 
 
 def test_gray_scale_delegates_to_heatmap():

@@ -2,9 +2,9 @@
 % Consensus and formation control environment
 % ---------------------------------------------------------------------------
 \begingroup
-% Extra interword stretch for paragraphs with long, unbreakable identifiers
-% (local to this chapter).
-\setlength{\emergencystretch}{2em}
+% Line breaking for paragraphs with long, unbreakable identifiers (local to
+% this chapter): allow looser lines instead of overfull ones.
+\setlength{\emergencystretch}{3em}\tolerance=1000
 \chapter{Consensus and Formation Control}\label{chap:consensus}
 
 \code{env\_lib.consensus\_env.ConsensusEnv} is a networked multi-agent control
@@ -73,7 +73,7 @@ convergence rate of linear consensus.
   \centering\small
   \caption{Communication topologies.}
   \label{tab:consensus-topologies}
-  \begin{tabularx}{\textwidth}{@{}lX@{}}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
     \toprule
     \code{topology} & Graph \\
     \midrule
@@ -139,7 +139,7 @@ columns are described by \code{ConsensusEnv.neighbor\_slot\_layout}.
   \centering\small
   \caption{Consensus observation (row $i$; slot $s = 0, \dots, K-1$).}
   \label{tab:consensus-obs}
-  \begin{tabularx}{\textwidth}{@{}llX@{}}
+  \begin{tabularx}{\textwidth}{@{}ll>{\raggedright\arraybackslash}X@{}}
     \toprule
     Columns & Layout key & Content \\
     \midrule
@@ -224,7 +224,7 @@ All constructor arguments are keyword-only.
   \centering\small
   \caption{Consensus info dictionary (returned by \code{reset()} and \code{step()}).}
   \label{tab:consensus-info}
-  \begin{tabularx}{\textwidth}{@{}lX@{}}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
     \toprule
     Key & Content \\
     \midrule
@@ -238,17 +238,41 @@ All constructor arguments are keyword-only.
   \end{tabularx}
 \end{table}
 
-Read-only properties give access to the state: \code{positions},
-\code{velocities}, \code{formation\_offsets}, \code{adjacency},
-\code{laplacian}, \code{algebraic\_connectivity}, \code{task\_error},
-\code{step\_count}, \code{observation\_layout}; \code{obs\_dim} and
-\code{max\_neighbors} are attributes. The module also exports the helpers used
-by the environment: \code{make\_topology(topology, n\_agents, *,
-edge\_probability=0.3, rng=None)}, \code{proximity\_adjacency(positions,
-comm\_radius)}, \code{make\_formation(shape, n\_agents, radius=1.0)},
-\code{algebraic\_connectivity(adjacency)} and \code{is\_connected(adjacency)},
-as well as the tuples \code{TASKS}, \code{TOPOLOGIES}, \code{DYNAMICS} and
-\code{FORMATION\_SHAPES}.
+The state is available through read-only properties
+(Table~\ref{tab:consensus-properties}); \code{obs\_dim} and
+\code{max\_neighbors} are plain attributes.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Read-only properties of \code{ConsensusEnv} (arrays are copies).}
+  \label{tab:consensus-properties}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Property & Content \\
+    \midrule
+    \code{positions}, \code{velocities} & $x_i$ and $v_i$, shape \code{(N, 2)} \\
+    \code{formation\_offsets} & offsets $d_i$, shape \code{(N, 2)} (zeros for consensus) \\
+    \code{adjacency}, \code{laplacian} & adjacency matrix $A$ and Laplacian $L = D - A$ of the current graph \\
+    \code{algebraic\_connectivity} & $\lambda_2(L)$ of the current graph \\
+    \code{task\_error} & task error $e$ \\
+    \code{step\_count} & number of steps taken in the episode \\
+    \code{observation\_layout} & column slices of an observation row \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+The module
+\code{env\_lib.consensus\_env} also exports the helpers used by the
+environment, which are useful for analysis and for reference controllers:
+\begin{itemize}
+  \item \code{make\_topology(topology, n\_agents, *, edge\_probability=0.3, rng=None)}:
+        adjacency matrix of a static graph;
+  \item \code{proximity\_adjacency(positions, comm\_radius)}: disk-graph adjacency;
+  \item \code{make\_formation(shape, n\_agents, radius=1.0)}: formation offsets;
+  \item \code{algebraic\_connectivity(adjacency)} and \code{is\_connected(adjacency)};
+  \item the tuples \code{TASKS}, \code{TOPOLOGIES}, \code{DYNAMICS} and
+        \code{FORMATION\_SHAPES} of valid option values.
+\end{itemize}
 
 % ---------------------------------------------------------------------------
 \section{Baseline controller}\label{sec:consensus-baseline}
@@ -332,7 +356,7 @@ $\lambda_2$ and a status badge.
 % ---------------------------------------------------------------------------
 \section{Registered ids}\label{sec:consensus-ids}
 
-\begin{table}[htbp]
+\begin{table}[!htbp]
   \centering\small
   \caption{Registered ids of the consensus environment.}
   \label{tab:consensus-ids}
@@ -346,8 +370,8 @@ $\lambda_2$ and a status badge.
   \end{tabular}
 \end{table}
 
-Keyword arguments of \code{env\_lib.make} override the registered configuration,
-for example \code{env\_lib.make("Formation-v0", formation\_shape="wedge",
+Table~\ref{tab:consensus-ids} lists the two ids. Keyword arguments of
+\code{env\_lib.make} override the registered configuration, for example \code{env\_lib.make("Formation-v0", formation\_shape="wedge",
 topology="proximity")}.
 
 % ---------------------------------------------------------------------------
@@ -356,12 +380,13 @@ topology="proximity")}.
 \begin{pycode}
 import env_lib
 
-env = env_lib.make("Formation-v0", formation_shape="wedge", topology="proximity",
-                   dynamics="double", graph_seed=0)
+env = env_lib.make("Formation-v0", formation_shape="wedge",
+                   topology="proximity", dynamics="double")
 core = env.unwrapped
-obs, info = env.reset(seed=0)                 # obs: (8, 36) float32, K = 6 slots
+obs, info = env.reset(seed=0)                 # obs: (8, 36), K = 6 slots
 layout = core.observation_layout
-slots = obs[:, layout["neighbors"]].reshape(core.n_agents, core.max_neighbors, 5)
+n, k = core.n_agents, core.max_neighbors
+slots = obs[:, layout["neighbors"]].reshape(n, k, 5)   # neighbour slots
 episode_return = 0.0
 while True:
     action = core.laplacian_policy(gain=1.0)  # u = -gain L (x - d) - k_v v
@@ -380,7 +405,7 @@ records the controller:
 python examples/consensus_demo.py
 python examples/consensus_demo.py --task formation --save renders/formation.gif
 python examples/consensus_demo.py --task formation --shape wedge \
-    --topology proximity --dynamics double --theme light --save renders/wedge.gif
+    --topology proximity --dynamics double --save renders/wedge.gif
 \end{shellcode}
 
 % ---------------------------------------------------------------------------

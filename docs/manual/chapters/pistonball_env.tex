@@ -2,9 +2,9 @@
 % Pistonball environment
 % ---------------------------------------------------------------------------
 \begingroup
-% Extra interword stretch for paragraphs with long, unbreakable identifiers
-% (local to this chapter).
-\setlength{\emergencystretch}{2em}
+% Line breaking for paragraphs with long, unbreakable identifiers (local to
+% this chapter): allow looser lines instead of overfull ones.
+\setlength{\emergencystretch}{3em}\tolerance=1000
 \chapter{Pistonball}\label{chap:pistonball}
 
 Pistonball is a cooperative physics game. A row of pistons forms the floor of a
@@ -64,8 +64,8 @@ $x \in [80, W - 80]$ and $y \in [80, 480]$. The left wall is the goal.
   \item discrete (\code{continuous=False}): \code{MultiDiscrete([3] * n)} with
         0 = down, 1 = stay and 2 = up (4 pixels).
 \end{itemize}
-Actions of the wrong shape, NaN or infinite values, and discrete values outside
-$\{0, 1, 2\}$ raise \code{ValueError}.
+Actions of the wrong shape, continuous actions with NaN or infinite values, and
+discrete values outside $\{0, 1, 2\}$ raise \code{ValueError}.
 
 \paragraph{Observation.} \code{float32} array of shape \code{(n, 7)} in an
 unbounded \code{Box}. Row $i$ is the observation of piston $i$
@@ -75,15 +75,16 @@ unbounded \code{Box}. Row $i$ is the observation of piston $i$
 \end{equation}
 and piston $i$ observes the ball when $|i - p(x)| \le \kappa$, where $x$ is the
 ball centre and $\kappa$ = \code{kappa}. Columns 2--6 are zero for pistons that
-do not observe the ball. \code{env.observable\_mask(ball\_x=None)} returns the
-boolean mask of observing pistons for the current ball (or for a given $x$).
+do not observe the ball. The method \code{observable\_mask()} returns the
+boolean mask of the observing pistons; its optional argument \code{ball\_x}
+evaluates the mask for another ball position.
 
 \begin{table}[htbp]
   \centering\small
   \caption{Pistonball observation (row $i$). $(x, y)$ is the ball centre,
     $(v_x, v_y)$ its velocity in px/s and $\dot\phi$ its angular velocity.}
   \label{tab:pistonball-obs}
-  \begin{tabularx}{\textwidth}{@{}clX@{}}
+  \begin{tabularx}{\textwidth}{@{}cl>{\raggedright\arraybackslash}X@{}}
     \toprule
     Column & Value & Meaning \\
     \midrule
@@ -114,11 +115,13 @@ motion in full:
 \end{equation}
 The local reward of piston $i$ is
 \begin{equation}
+  \begin{split}
   r_i = \tau
-      + g_t\, \mathbb{1}\bigl[i \in O(b_{t-1}) \cup O(b_t)\bigr]
-      + \rho_T\, \mathbb{1}\bigl[\text{goal},\; i \in O(x_t)\bigr]
-      + \rho_L\, \mathbb{1}\bigl[\text{goal},\; i = 0\bigr]
-      + \mu\, \frac{|\Delta y_i|}{4}\, \mathbb{1}\bigl[|\Delta y_i| > \epsilon_\mu\bigr],
+      &+ g_t\, \mathbf{1}\bigl[i \in O(b_{t-1}) \cup O(b_t)\bigr]
+       + \rho_T\, \mathbf{1}\bigl[\text{goal},\; i \in O(x_t)\bigr]
+       + \rho_L\, \mathbf{1}\bigl[\text{goal},\; i = 0\bigr] \\
+      &+ \mu\, \frac{|\Delta y_i|}{4}\, \mathbf{1}\bigl[|\Delta y_i| > \epsilon_\mu\bigr],
+  \end{split}
   \label{eq:pistonball-reward}
 \end{equation}
 where $O(z) = \{ i : |i - p(z)| \le \kappa \}$ is the set of pistons within
@@ -263,13 +266,13 @@ while True:
     observers = np.any(obs[:, 2:] != 0.0, axis=1)
     if observers.any():
         ball_x = obs[observers, 2].mean()          # (x - 80) / (40 n)
-        offset = (obs[:, 1] - ball_x) * env.n_pistons  # distance to the ball in pistons
+        offset = (obs[:, 1] - ball_x) * env.n_pistons  # in piston widths
         action = np.clip(2.0 * offset, -1.0, 1.0).astype(np.float32)
     obs, reward, terminated, truncated, info = env.step(action)
     episode_return += reward
     if terminated or truncated:
         break
-print(episode_return, terminated, info["agent_rewards"].shape)   # goal after 99 steps
+print(env.frames, terminated, episode_return)     # goal after 99 steps
 env.close()
 \end{pycode}
 

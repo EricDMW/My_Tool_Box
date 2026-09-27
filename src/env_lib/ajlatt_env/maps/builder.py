@@ -36,8 +36,8 @@ always be rebuilt from its own ``.yaml`` file.
 
 Command line::
 
-    ajlatt-build-map --create-sample my_map        # writes my_map.spec.yaml
-    ajlatt-build-map my_map.spec.yaml --png        # writes my_map.yaml/.cfg/.png
+    ajlatt-build-map --create-sample my_map        # writes my_map.spec.yaml (map_info.name: my_map)
+    ajlatt-build-map my_map.spec.yaml --png        # writes <map_info.name>.yaml/.cfg/.png
 """
 
 from __future__ import annotations
@@ -428,7 +428,8 @@ def main(argv: Iterable[str] | None = None) -> int:
         path = Path(args.create_sample)
         if not path.name.endswith(".yaml"):
             path = path.with_name(path.name + ".spec.yaml")
-        path.write_text(SAMPLE_SPEC, encoding="utf-8")
+        name = path.name.split(".")[0]
+        path.write_text(SAMPLE_SPEC.replace("name: sample_map", f"name: {name}"), encoding="utf-8")
         print(f"wrote sample specification to {path}")
         return 0
     if not args.spec:

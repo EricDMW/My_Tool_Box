@@ -1,0 +1,830 @@
+% ---------------------------------------------------------------------------
+% AJLATT: active joint localisation and target tracking
+% ---------------------------------------------------------------------------
+\begingroup
+% Line breaking for paragraphs with long, unbreakable identifiers (local to
+% this chapter): allow looser lines instead of overfull ones.
+\setlength{\emergencystretch}{3em}\tolerance=1000
+\chapter{AJLATT: Active Joint Localisation and Target Tracking}\label{chap:ajlatt}
+
+In AJLATT a team of mobile robots with range-bearing sensors has to localise
+itself and track a moving target on an occupancy grid map. Every robot runs an
+estimator for its own pose and for the target; estimates are exchanged within a
+limited communication range and fused with covariance intersection. The robots
+choose their velocities, and the reward drives the team to keep the target and
+its own poses well estimated while avoiding obstacles, the map border and each
+other. The environment is used to study active perception and
+information-driven control, cooperative localisation and distributed target
+tracking, and multi-agent reinforcement learning with continuous actions,
+partial observability and safety constraints.
+
+The main entry points are exported by \code{env\_lib.ajlatt\_env}:
+\begin{description}[style=nextline,leftmargin=3.9cm]
+  \item[\code{AJLATTEnv}] the Gymnasium environment with joint multi-agent
+    spaces (also available as \code{env\_lib.AJLATTEnv});
+  \item[\code{AJLATTConfig}] a validated dataclass holding every parameter;
+  \item[\code{TeamRewardWrapper}] a scalar-reward view for single-agent
+    algorithms;
+  \item[\code{make}] the backwards-compatible factory accepting the original
+    keyword names;
+  \item[\code{maps}] occupancy maps, the map builder and map plotting
+    (Section~\ref{sec:ajlatt-maps}).
+\end{description}
+
+% ---------------------------------------------------------------------------
+\section{Scenario and motion model}\label{sec:ajlatt-scenario}
+
+The team consists of \code{num\_robots} robots (default 4) and
+\code{num\_targets} targets (default 1). Target 0 moves according to a target
+policy (Section~\ref{sec:ajlatt-target}); further targets are static landmarks
+whose positions are estimated in 2-D. One step lasts $\Delta t$ =
+\code{sampling\_period} (0.5\,s), so the default episode of 120 steps covers
+60\,s. Robots and the target follow the unicycle model
+\begin{equation}
+  \begin{bmatrix} p_x \\ p_y \\ \theta \end{bmatrix}_{k+1}
+  = \begin{bmatrix} p_x \\ p_y \\ \theta \end{bmatrix}_{k}
+  + \begin{bmatrix} v\,\Delta t \cos\theta_k \\ v\,\Delta t \sin\theta_k \\ \omega\,\Delta t \end{bmatrix},
+  \label{eq:ajlatt-unicycle}
+\end{equation}
+with the heading wrapped to $[-\pi, \pi)$. The true robot poses are propagated
+with noisy velocities $v \sim \mathcal{N}(v_{\mathrm{cmd}}, \sigma_v^2)$,
+$\omega \sim \mathcal{N}(\omega_{\mathrm{cmd}}, \sigma_\omega^2)$, where
+$(\sigma_v, \sigma_\omega)$ = (\code{sigma\_vR}, \code{sigma\_wR}); with
+\code{process\_noise\_fixed=False} the noise scales with the speed,
+$\sigma_v = \sigma/\sqrt{2}$ and $\sigma_\omega = 2\sqrt{2}\,\sigma$ with
+$\sigma$ = \code{sigmapR}$\,\cdot v_{\mathrm{cmd}}$. The target moves exactly
+with the command of its policy, while the robots predict their target beliefs
+with a noisy copy of that command (\code{sigma\_vT}, \code{sigma\_wT}, or
+\code{sigmapT}$\,\cdot$\code{target\_linear\_velocity} in the speed-dependent
+case).
+
+% ---------------------------------------------------------------------------
+\section{Sensing, communication and estimation}\label{sec:ajlatt-estimation}
+
+\paragraph{Beliefs.} Robot $i$ keeps a Gaussian belief
+$(\hat x_i, P_i)$ of its own pose and a belief
+$(\hat x^{T}_{i,t}, P^{T}_{i,t})$ of every target $t$ (a pose for target 0, a
+position for landmarks). At reset the means are drawn around the initial poses
+with the initial covariances: $P_i$ = \code{robot\_init\_cov[i]}$\,I$ with
+heading variance $10^{-3}$, and $P^T_{i,t}$ = \code{target\_init\_cov[t]}$\,I$
+with heading variance 0.1 for target 0.
+
+\paragraph{Prediction.} Every belief is predicted with an extended Kalman filter
+step for \eqref{eq:ajlatt-unicycle}:
+\begin{equation}
+  \hat x \leftarrow f(\hat x, u), \qquad
+  P \leftarrow \Phi P \Phi^\top + G Q G^\top, \qquad
+  Q = \operatorname{diag}(\sigma_v^2, \sigma_\omega^2),
+\end{equation}
+where $\Phi$ is the Jacobian of the motion with respect to the pose and
+$G = \Delta t \bigl[\begin{smallmatrix} \cos\theta & 0 \\ \sin\theta & 0 \\ 0 & 1 \end{smallmatrix}\bigr]$
+its Jacobian with respect to the velocity noise.
+
+\paragraph{Measurements.} Robot $\ell$ measures the range and bearing
+$z = (\rho, \beta)$ of another robot or a target $j$ when
+\code{sensor\_r\_min} $< \rho <$ \code{sensor\_r\_max},
+$|\beta| \le$ \code{fov}$/2$, the straight line between the two (true)
+positions does not cross an occupied cell of the grid (Bresenham ray casting),
+and robot $\ell$'s estimated position lies inside the map. The measurement noise
+has standard deviations $\sigma_\rho$ = \code{sigma\_p}$\,\cdot\rho$ (with
+\code{range\_noise\_proportional=True}) or \code{sigma\_r}, and
+$\sigma_\beta$ = \code{sigma\_th}. All three default to zero: by default the
+measurements are exact, and the uncertainty of the estimates stems from the
+motion noise and from the uncertainty of the measured party's own estimate.
+
+\paragraph{Communication.} Robots closer than \code{commu\_r\_max} (true
+distance) are neighbours; the neighbour set $\mathcal{N}_i$ of robot $i$
+includes $i$ itself.
+
+\paragraph{Update.} With \code{use\_update=True} (default) the robots are
+processed one after another in index order, and each update is applied in place,
+so later robots use the updated beliefs of earlier ones:
+\begin{enumerate}
+  \item \emph{Self-localisation.} Every measurement $z$ of an entity $j$ with
+        belief $(\hat x_j, P_j)$ contributes the information pair
+        \begin{equation*}
+          S = H_i^\top W H_i, \qquad
+          y = H_i^\top W \bigl(z - \hat z + H_i \hat x_i\bigr), \qquad
+          W = \bigl(R + H_j P_j H_j^\top\bigr)^{-1},
+        \end{equation*}
+        where $\hat z$ is the predicted measurement and $H_i$, $H_j$ are the
+        Jacobians of the range-bearing model with respect to the observer and
+        the observed pose. These pairs and the prior
+        $(P_i^{-1}, P_i^{-1}\hat x_i)$ are fused by covariance intersection.
+  \item \emph{Target tracking.} For each target, the measurements of all
+        neighbours $r \in \mathcal{N}_i$ that detect it contribute analogous
+        information pairs (with the roles of observer and target exchanged);
+        these are fused by covariance intersection in information form. The
+        neighbours' prior beliefs of the target are fused in the same way, and
+        the two results are combined by a final covariance intersection. If no
+        neighbour detects the target, robot $i$'s belief is the fusion of the
+        neighbours' priors.
+\end{enumerate}
+With \code{use\_update=False} the robots only dead-reckon.
+
+\paragraph{Covariance intersection.} Given information pairs
+$(S_k, y_k)$, $k = 1, \dots, K$, covariance intersection chooses weights $c$ on
+the probability simplex that minimise the trace of the fused covariance,
+\begin{equation}
+  c^\star = \operatorname*{arg\,min}_{c \ge 0,\; \sum_k c_k = 1}
+    \operatorname{tr}\Bigl(\bigl(\textstyle\sum_k c_k S_k\bigr)^{-1}\Bigr),
+  \qquad
+  P = \Bigl(\sum_k c^\star_k S_k\Bigr)^{-1},\quad
+  \hat x = P \sum_k c^\star_k y_k .
+\end{equation}
+The fused estimate is consistent without knowledge of the correlations between
+the sources. The solver is chosen with \code{ci\_solver}:
+\code{"newton"} (default) is an active-set projected Newton method with the
+analytic gradient $g_k = -\operatorname{tr}(P S_k P)$ and Hessian
+$H_{kl} = 2 \operatorname{tr}(P S_k P S_l P)$; its objective is never worse than
+that of \code{"slsqp"}, the original solver (SciPy SLSQP with finite-difference
+gradients), which reproduces trajectories of the implementation before
+version 1.0 to about $10^{-6}$.
+
+% ---------------------------------------------------------------------------
+\section{Spaces}\label{sec:ajlatt-spaces}
+
+\paragraph{Action.} \code{Box} of shape \code{(num\_robots, 2)}, one command
+$(v, \omega)$ per robot with $0 \le v \le v_{\max}$ and
+$|\omega| \le \omega_{\max}$, where $v_{\max}$ =
+\code{max\_linear\_velocity} (default 2\,m/s) and $\omega_{\max}$ =
+\code{max\_angular\_velocity} (default $\pi/4$\,rad/s). The per-robot space
+is \code{env.single\_action\_space}. Actions are not clipped unless
+\code{clip\_actions=True} (the original environment did not clip). NumPy arrays
+and tensors are accepted; rows beyond \code{num\_robots} are ignored with a
+warning, and fewer rows raise \code{ValueError}.
+
+\paragraph{Observation.} \code{Box} of shape \code{(num\_robots, obs\_dim)}
+with $\text{obs\_dim} = 7 + 4(n_R - 1) + 5$ for $n_R$ robots (24 for the
+default team); the per-robot space is \code{env.single\_observation\_space}.
+Row $i$ is computed from robot $i$'s beliefs; positions and headings of other
+entities are expressed in robot $i$'s estimated body frame.
+\code{env.observation\_layout()} returns the slices of
+Table~\ref{tab:ajlatt-obs}.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{AJLATT observation of robot $i$ ($n = 6 + 4(n_R - 1)$).}
+  \label{tab:ajlatt-obs}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.33\textwidth}l>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Key of \code{observation\_layout()} & Columns & Content \\
+    \midrule
+    \code{target\_relative\_position} & \code{0:2} & believed target position in the robot frame \\
+    \code{target\_relative\_heading} & \code{2} & believed target heading minus own heading \\
+    \code{target\_velocity} & \code{3:5} & commanded target velocity $(v, \omega)$ of the last step (zero after reset) \\
+    \code{target\_cov\_trace} & \code{5} & $\operatorname{tr} P^T_{i,0}$ \\
+    \code{neighbours} & \code{6:n} & for every other robot, in index order: relative $x$, relative $y$, relative heading (estimates), trace of its covariance \\
+    \code{closest\_obstacle} & \code{n:n+2} & range and bearing of the closest obstacle cell within the field of view and sensor range; $(r_{\max}, \pi)$ if none; zeros while the robot is within \code{obstacle\_sensing\_margin} of the map border \\
+    \code{self\_pose} & \code{n+2:n+5} & own pose estimate $(x, y, \theta)$ in the map frame \\
+    \code{self\_cov\_trace} & \code{n+5} & $\operatorname{tr} P_i$ \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Reward and episode end}\label{sec:ajlatt-reward}
+
+\code{step()} returns the per-robot rewards as an array of shape
+\code{(num\_robots,)}:
+\begin{equation}
+  r_i = -w_T \operatorname{tr} P^T_{i,0} - w_R \operatorname{tr} P_i
+        - \beta_B\, \mathbf{1}_{\mathrm{border}}(i)
+        - \beta_O\, \mathbf{1}_{\mathrm{obstacle}}(i)
+        - \beta_M\, \mathbf{1}_{\mathrm{mutual}}(i),
+  \label{eq:ajlatt-reward}
+\end{equation}
+with $w_T$ = \code{target\_cov\_weight} (10), $w_R$ = \code{robot\_cov\_weight}
+(5) and the penalties
+\begin{itemize}
+  \item $\beta_B$ = \code{boundary\_penalty} (20) when the estimated position
+        lies within 0.1\,m of the map border or outside the map;
+  \item otherwise $\beta_O$ = \code{obstacle\_penalty} (1.3) when an obstacle
+        cell is closer to the estimated pose than
+        \code{obstacle\_collision\_distance} (0.2\,m, searched in all
+        directions up to \code{sensor\_r\_max}); this also sets the robot's
+        collision flag;
+  \item $\beta_M$ = \code{mutual\_collision\_penalty} (0.5) when another
+        robot's estimated position is closer than
+        \code{mutual\_collision\_distance} (0.4\,m).
+\end{itemize}
+The team reward is $\sum_i r_i$ (\code{info["team\_reward"]}).
+
+\paragraph{Episode end.} \code{terminated} is a boolean array of shape
+\code{(num\_robots,)} holding the obstacle collision flags (all \code{False}
+with \code{terminate\_on\_collision=False}). If an estimator diverges
+(non-finite covariance) all flags are set, a \code{RuntimeWarning} is issued and
+\code{info["numerical\_error"]} is \code{True}. \code{truncated} is a
+\code{bool}, set after \code{max\_episode\_steps} steps. The environment keeps
+simulating after a collision flag; whether a flag ends the episode is left to
+the caller (\code{record\_episode} and \code{TeamRewardWrapper} use
+\code{any(terminated)}).
+
+% ---------------------------------------------------------------------------
+\section{Configuration}\label{sec:ajlatt-config}
+
+\code{AJLATTEnv(config=None, render\_mode=None, **overrides)} takes an
+\code{AJLATTConfig} and/or individual fields as keyword arguments, which are
+applied on top of \code{config}. Unknown field names raise \code{TypeError}.
+
+\begin{pycode}
+from env_lib import AJLATTConfig, AJLATTEnv
+
+env = AJLATTEnv(map_name="obstacles05", num_robots=3)   # fields as keywords
+config = AJLATTConfig(map_name="obstacles04", sensor_r_max=5.0, fov=120.0)
+env = AJLATTEnv(config, render_mode="rgb_array")
+env = AJLATTEnv(config.replace(ci_solver="slsqp"))              # validated copy
+\end{pycode}
+
+\code{AJLATTConfig} validates its values on construction (for example
+\code{0 <= sensor\_r\_min < sensor\_r\_max}, \code{0 < fov <= 360}, non-negative
+noise levels, enough initial poses and covariances for the team) and offers
+\code{replace(**changes)}, \code{to\_dict()} and \code{from\_dict(data)}, the
+property \code{observation\_dim}, and \code{from\_kwargs(strict=True, **kwargs)},
+which also accepts the legacy names of Table~\ref{tab:ajlatt-legacy} (as do
+\code{AJLATTEnv}, \code{env\_lib.ajlatt\_env.make} and the callable module
+\code{env\_lib.ajlatt\_env}). All
+fields are listed in Table~\ref{tab:ajlatt-params}.
+
+\begingroup\small
+\setlength{\LTcapwidth}{\textwidth}
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.32\textwidth}>{\raggedright\arraybackslash}p{0.18\textwidth}>{\raggedright\arraybackslash}p{0.44\textwidth}@{}}
+  \caption{Fields of \code{AJLATTConfig} (keyword arguments of \code{AJLATTEnv}).}\label{tab:ajlatt-params}\\
+  \toprule
+  Field & Default & Description \\
+  \midrule
+  \endfirsthead
+  \toprule
+  Field & Default & Description \\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  \multicolumn{3}{@{}l}{\textit{Scenario}} \\
+  \code{map\_name} & \code{"obstacles04"} & Bundled map name or path to a user map (Section~\ref{sec:ajlatt-maps}). \\
+  \code{num\_robots} & \code{4} & Team size $n_R$ ($\ge 1$). \\
+  \code{num\_targets} & \code{1} & Number of targets; target 0 moves, the others are static landmarks. \\
+  \code{max\_episode\_steps} & \code{120} & Episode length; reaching it sets \code{truncated}. \\
+  \code{sampling\_period} & \code{0.5} & Duration $\Delta t$ of one step in seconds. \\
+  \code{margin2wall} & \code{1.0} & Safety margin of the map queries \code{in\_bound} and \code{is\_collision}. \\
+  \code{robot\_init\_pose} & six poses & $(x, y, \theta)$ per robot; the first four defaults are $(7.5, 12.5, 0)$, $(7.5, 10.5, 0)$, $(10, 12.5, 0)$, $(10, 10.5, 0)$. \\
+  \code{target\_init\_pose} & 13 poses & $(x, y, \theta)$ per target; target 0 starts at $(10.5, 11.5, 0)$. \\
+  \code{robot\_init\_cov} & \code{(0.1,) * 6} & Initial position variance per robot. \\
+  \code{target\_init\_cov} & \code{(1.0,) + (10.0,) * 10} & Initial position variance per target. \\
+  \multicolumn{3}{@{}l}{\textit{Sensing and communication}} \\
+  \code{sensor\_r\_min} & \code{0.0} & Minimum sensing range (m). \\
+  \code{sensor\_r\_max} & \code{3.0} & Maximum sensing range (m); also the range of the obstacle reading. \\
+  \code{fov} & \code{180.0} & Field of view in degrees, centred on the heading. \\
+  \code{sigma\_p} & \code{0.0} & Range noise as a fraction of the range (proportional mode). \\
+  \code{sigma\_r} & \code{0.0} & Absolute range noise (m) when \code{range\_noise\_proportional=False}. \\
+  \code{sigma\_th} & \code{0.0} & Bearing noise (rad). \\
+  \code{range\_noise\_proportional} & \code{True} & Use \code{sigma\_p} instead of \code{sigma\_r}. \\
+  \code{use\_update} & \code{True} & Run measurement updates (\code{False}: dead reckoning only). \\
+  \code{commu\_r\_max} & \code{6.0} & Communication range (m). \\
+  \code{ci\_solver} & \code{"newton"} & Covariance-intersection solver, \code{"newton"} or \code{"slsqp"}. \\
+  \multicolumn{3}{@{}l}{\textit{Motion noise}} \\
+  \code{process\_noise\_fixed} & \code{True} & Fixed velocity noise; \code{False} scales it with the speed. \\
+  \code{sigmapR} & \code{0.1} & Robot noise factor in the speed-dependent mode. \\
+  \code{sigma\_vR} & \code{0.1} & Robot linear-velocity noise (m/s). \\
+  \code{sigma\_wR} & $0.5\pi/180$ & Robot angular-velocity noise (rad/s, 0.5 degrees/s). \\
+  \code{sigmapT} & \code{0.1} & Target noise factor in the speed-dependent mode. \\
+  \code{sigma\_vT} & \code{0.2} & Target linear-velocity noise used by the estimators (m/s). \\
+  \code{sigma\_wT} & $0.5\pi/180$ & Target angular-velocity noise used by the estimators (rad/s). \\
+  \multicolumn{3}{@{}l}{\textit{Target motion}} \\
+  \code{target\_policy} & \code{"auto"} & Target policy (Table~\ref{tab:ajlatt-target}). \\
+  \code{target\_linear\_velocity} & \code{0.3} & Speed of the \code{"sine"} policy; also scales the speed-dependent target noise. \\
+  \code{target\_omega\_bound} & $\pi/4$ & Turn-rate bound of the \code{"random"} policy. \\
+  \code{k\_theta} & \code{0.5} & Heading gain of the \code{"sine"} and \code{"waypoints"} policies. \\
+  \code{k\_p} & \code{1.0} & Kept for compatibility; currently unused. \\
+  \multicolumn{3}{@{}l}{\textit{Actions}} \\
+  \code{max\_linear\_velocity} & \code{2.0} & Upper bound of $v$ (m/s); the lower bound is 0. \\
+  \code{max\_angular\_velocity} & $\pi/4$ & Bound of $|\omega|$ (rad/s). \\
+  \code{clip\_actions} & \code{False} & Clip actions to the action space. \\
+  \multicolumn{3}{@{}l}{\textit{Rewards and termination}} \\
+  \code{target\_cov\_weight} & \code{10.0} & Weight $w_T$ of the target covariance trace. \\
+  \code{robot\_cov\_weight} & \code{5.0} & Weight $w_R$ of the self-localisation covariance trace. \\
+  \code{boundary\_penalty} & \code{20.0} & Penalty $\beta_B$ near or beyond the map border (0.1\,m margin). \\
+  \code{obstacle\_penalty} & \code{1.3} & Penalty $\beta_O$ for an obstacle closer than \code{obstacle\_collision\_distance}. \\
+  \code{obstacle\_collision\_distance} & \code{0.2} & Obstacle collision distance (m). \\
+  \code{mutual\_collision\_penalty} & \code{0.5} & Penalty $\beta_M$ for robots closer than \code{mutual\_collision\_distance}. \\
+  \code{mutual\_collision\_distance} & \code{0.4} & Robot-robot distance threshold (m). \\
+  \code{terminate\_on\_collision} & \code{True} & Report obstacle collisions in \code{terminated}. \\
+  \code{obstacle\_sensing\_margin} & \code{1.0} & Robots closer than this to the map border report a zero obstacle reading (original behaviour). \\
+  \multicolumn{3}{@{}l}{\textit{Miscellaneous}} \\
+  \code{seed} & \code{None} & Seed of the first \code{reset()} when none is passed. \\
+\end{longtable}
+\endgroup
+
+The default poses and covariances cover up to six robots and eleven targets;
+larger teams need explicit \code{robot\_init\_pose} and \code{robot\_init\_cov}
+(and likewise for targets).
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Legacy parameter names; each emits a \code{DeprecationWarning}.}
+  \label{tab:ajlatt-legacy}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Legacy name & Replacement \\
+    \midrule
+    \code{num\_Robot}, \code{num\_Target} & \code{num\_robots}, \code{num\_targets} \\
+    \code{T\_steps} & \code{max\_episode\_steps} \\
+    \code{maxmum\_run} & caps \code{max\_episode\_steps} at \code{maxmum\_run + 1} \\
+    \code{SIGPERCENT} & \code{range\_noise\_proportional} \\
+    \code{useupdate} & \code{use\_update} \\
+    \code{fix\_seed} & \code{seed} (\code{fix\_seed=True} sets \code{seed=1}) \\
+    \code{render=True} & \code{render\_mode="human"} (factory only) \\
+    obsolete keys (\code{figID}, \code{ssh\_debug}, \code{episode\_num}, \dots) & ignored with a warning \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\paragraph{Command-line integration.} \code{AJLATTConfig.add\_arguments(parser,
+prefix="")} registers every scalar field as an option \code{-{}-<prefix><name>}
+on an \code{argparse} parser, and \code{AJLATTConfig.from\_namespace(namespace,
+prefix="")} builds a configuration from the parsed arguments. Training scripts
+keep their own options next to the environment's:
+
+\begin{pycode}
+import argparse
+from env_lib import AJLATTConfig, AJLATTEnv
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--lr", type=float, default=3e-4)     # training options
+AJLATTConfig.add_arguments(parser, prefix="env.")        # --env.map_name, ...
+args = parser.parse_args(["--env.map_name", "obstacles05",
+                          "--env.num_robots", "3"])
+env = AJLATTEnv(AJLATTConfig.from_namespace(args, prefix="env."))
+\end{pycode}
+
+% ---------------------------------------------------------------------------
+\section{Target motion}\label{sec:ajlatt-target}
+
+The target policy maps the true target pose to a unicycle command. Policies are
+per-environment objects that are reset with the environment's generator at
+every \code{reset()}.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Target policies (\code{target\_policy}).}
+  \label{tab:ajlatt-target}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Policy & Behaviour \\
+    \midrule
+    \code{"auto"} & \code{"sine"} on the map \code{empty}, \code{"waypoints"} on
+      \code{obstacles04} and \code{obstacles05}, \code{"circle"} otherwise \\
+    \code{"sine"} & follows the slope field $dy/dx = 5\cos x$ at speed
+      \code{target\_linear\_velocity} with heading gain \code{k\_theta} until
+      $x \ge 32$\,m, then circles with $v = 0.25$\,m/s on a 4\,m radius \\
+    \code{"waypoints"} & proportional heading control (gain \code{k\_theta})
+      towards piecewise waypoints; built-in routes for \code{obstacles04}
+      (0.1\,m/s) and \code{obstacles05} (0.25\,m/s); other routes with
+      \code{env\_lib.ajlatt\_env.controllers.WaypointPolicy} \\
+    \code{"circle"} & constant $(v, \omega) = (0.25\,\mathrm{m/s}, 0.15\,\mathrm{rad/s})$ \\
+    \code{"random"} & $v = 0.25$\,m/s and a turn rate drawn uniformly from
+      $[-$\code{target\_omega\_bound}, \code{target\_omega\_bound}$]$ at every step \\
+    \code{"static"} & the target does not move \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Info dictionary and episode statistics}\label{sec:ajlatt-info}
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{AJLATT info dictionary ($n_R$ = \code{num\_robots}).}
+  \label{tab:ajlatt-info}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Key & Content \\
+    \midrule
+    \code{agent\_rewards} & \code{float64} array $(n_R,)$, equal to the returned rewards (zeros at reset) \\
+    \code{team\_reward} & sum of the per-robot rewards \\
+    \code{collisions} & boolean array $(n_R,)$: obstacle collisions in this step \\
+    \code{episode\_collisions} & integer array $(n_R,)$: number of border, obstacle and robot-robot penalty events in the episode \\
+    \code{target\_observed} & boolean array $(n_R,)$: robot measured target 0 in this step \\
+    \code{communication} & boolean matrix $(n_R, n_R)$: communication links, including self-loops \\
+    \code{robot\_cov\_trace} & array $(n_R,)$: $\operatorname{tr} P_i$ \\
+    \code{target\_cov\_trace} & array $(n_R,)$: $\operatorname{tr} P^T_{i,0}$ \\
+    \code{step} & number of steps taken \\
+    \code{numerical\_error} & \code{True} if an estimator diverged (\code{step()} only) \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\code{env.episode\_statistics()} returns per-step traces of the current
+episode as arrays of shape \code{(steps + 1, num\_robots)}, starting with the
+state after reset: \code{robot\_cov\_trace}, \code{target\_cov\_trace},
+\code{robot\_error} and \code{target\_error} (Euclidean position errors of the
+robots' own and target beliefs) and \code{reward}. The traces are cleared at
+every reset.
+
+% ---------------------------------------------------------------------------
+\section{Team reward wrapper and legacy factory}\label{sec:ajlatt-wrapper}
+
+\code{TeamRewardWrapper(env)} returns the team reward $\sum_i r_i$ as a
+\code{float} and \code{any(terminated)} as a \code{bool}, for algorithms that
+expect scalar values. The per-robot values remain available in the info
+dictionary under \code{"agent\_rewards"} and \code{"agent\_terminated"}.
+
+\begin{pycode}
+from env_lib import AJLATTEnv
+from env_lib.ajlatt_env import TeamRewardWrapper
+
+env = TeamRewardWrapper(AJLATTEnv(map_name="obstacles04"))
+obs, info = env.reset(seed=1)
+obs, reward, terminated, truncated, info = env.step(env.action_space.sample())
+\end{pycode}
+
+The original factory remains available for existing code:
+\code{env\_lib.ajlatt\_env.make(**kwargs)}, or the callable module
+\code{env\_lib.ajlatt\_env(num\_Robot=4, T\_steps=100)}. It translates the legacy
+names of Table~\ref{tab:ajlatt-legacy}, ignores unknown keys with a warning and
+maps \code{render=True} to \code{render\_mode="human"}. New code should create
+\code{AJLATTEnv} directly.
+
+% ---------------------------------------------------------------------------
+\section{Maps}\label{sec:ajlatt-maps}
+
+The subpackage \code{env\_lib.ajlatt\_env.maps} contains the occupancy maps and
+the tools to create and inspect them.
+
+\subsection{Bundled maps}\label{sec:ajlatt-bundled-maps}
+
+\code{available\_maps()} lists the bundled maps (Table~\ref{tab:ajlatt-maps});
+\code{ajlatt-plot-map -{}-list} prints the same list. All maps start at the
+origin (\code{mapmin} $= (0, 0)$). Figure~\ref{fig:ajlatt-map} shows
+\code{obstacles05}.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Bundled maps. Size in cells ($n_x \times n_y$) and metres.}
+  \label{tab:ajlatt-maps}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.34\textwidth}lll>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Map & Cells & Cell size & Extent & Notes \\
+    \midrule
+    \code{obstacles} & $51 \times 51$ & 0.5\,m & 25.5\,m & \\
+    \code{obstacles02}, \code{obstacles07}, \code{obstacles07-02}, \code{obstacles08} & $181 \times 181$ & 0.2\,m & 36.2\,m & \\
+    \code{obstacles03} & $102 \times 102$ & 0.2\,m & 20.4\,m & \\
+    \code{obstacles04} & $181 \times 181$ & 0.2\,m & 36.2\,m & default; waypoint route \\
+    \code{obstacles05} & $181 \times 181$ & 0.4\,m & 72.4\,m & waypoint route \\
+    \code{obstacles06}, \code{obstacles06-02}, \code{obstacles06-03}, \code{obstacles08-02} & $181 \times 181$ & 0.1\,m & 18.1\,m & \\
+    \code{example\_complete\_map}, \code{sample\_map\_config} & $181 \times 181$ & 0.4\,m & 72.4\,m & map builder examples \\
+    \code{empty} & $82 \times 62$ & 0.5\,m & $41 \times 31$\,m & no obstacles; sine target policy \\
+    \code{empty05} & $181 \times 181$ & 0.4\,m & 72.4\,m & no obstacles \\
+    \code{emptySmall} & $135 \times 135$ & 0.2\,m & 27\,m & no obstacles \\
+    \code{emptySmall05} & $65 \times 65$ & 0.4\,m & 26\,m & no obstacles \\
+    \code{dynamic\_map}, \code{dynamic\_map\_2} & $181 \times 181$ & 0.4\,m & 72.4\,m & obstacles resampled at every reset \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.55\textwidth]{map_obstacles05.png}
+  \caption{The bundled map \code{obstacles05} ($72.4 \times 72.4$\,m,
+    0.4\,m cells) plotted with \code{ajlatt-plot-map obstacles05}; occupied
+    cells are grey, including the one-cell wall around the map.}
+  \label{fig:ajlatt-map}
+\end{figure}
+
+\subsection{Map files}\label{sec:ajlatt-map-format}
+
+A static map consists of two files with the same name:
+\begin{itemize}
+  \item \code{<name>.yaml}, the header, with the keys \code{mapdim}
+        ($[n_x, n_y]$, cells along $x$ and $y$), \code{mapres} (cell size
+        $[r_x, r_y]$ in metres), \code{mapmin} and \code{mapmax} (corners of the
+        map in metres) and optionally \code{origin}. Further keys written by
+        older tools or the map builder (\code{datatype}, \code{mappath},
+        \code{origincells}, \code{storage}, the embedded specification) are
+        ignored by the loader.
+  \item \code{<name>.cfg}, the occupancy grid as whitespace-separated numbers,
+        one text row per grid row: $n_y$ rows of $n_x$ values, where row 0 is
+        the bottom row ($y$ = \code{mapmin}) and 1 marks an occupied cell.
+\end{itemize}
+Cell $(c_x, c_y)$ has its centre at $(c + 0.5)\,r + $\code{mapmin}. A grid with
+fewer cells than its header declares is padded with occupied cells and a
+warning. Maps whose name contains \code{empty} are treated as obstacle-free and
+need no grid. A dynamic map has only a header, which defines
+\code{submaporigin} (four $(\text{row}, \text{column})$ cell anchors, flattened
+to eight numbers) and \code{lib\_path} (a directory of \code{.npy} obstacle
+masks relative to the header).
+
+To use your own map, pass its path to \code{map\_name}, with or without the
+\code{.yaml} suffix, for example \code{AJLATTEnv(map\_name="maps/my\_map")};
+the grid file must sit next to the header. Check that the default initial poses
+(Table~\ref{tab:ajlatt-params}) are free cells of the map, or pass
+\code{robot\_init\_pose} and \code{target\_init\_pose}.
+
+\subsection{Map API}\label{sec:ajlatt-map-api}
+
+\begin{itemize}
+  \item \code{load\_grid\_map(name\_or\_path, margin2wall=0.5)} returns a
+        \code{GridMap}, or a \code{DynamicMap} for a header with
+        \code{submaporigin} and no grid. \code{load\_map(name)} returns
+        \code{(occupancy, mapmin, mapmax)} for plotting, and
+        \code{resolve\_map\_path(name)} the file path without suffix.
+  \item \code{GridMap} holds the grid as \code{map} (shape $(n_y, n_x)$,
+        \code{None} for empty maps) together with \code{mapdim}, \code{mapres},
+        \code{mapmin} and \code{mapmax}; its queries are listed in
+        Table~\ref{tab:ajlatt-gridmap}. \code{GridMap.from\_array(occupancy,
+        mapmin=(0, 0), mapres=0.4)} builds a map from an array of shape
+        $(n_y, n_x)$.
+  \item \code{DynamicMap.generate\_map(chosen\_idx=None, rot\_angs=None,
+        rng=None)} places four distinct obstacles from its library at the four
+        anchors, each rotated by a random multiple of 18 degrees, and closes the
+        border. The environment calls it with its own generator at every reset.
+\end{itemize}
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Queries of \code{GridMap} (positions and poses in metres and radians).}
+  \label{tab:ajlatt-gridmap}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.47\textwidth}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Method & Result \\
+    \midrule
+    \code{is\_blocked(start, end)} & \code{True} if the straight line crosses an occupied
+      cell (exact Bresenham ray casting) \\
+    \code{is\_blocked\_batch(starts, ends)} & the same for arrays of shape \code{(k, 2)} or \code{(k, 3)} \\
+    \code{get\_closest\_obstacle(pose, ang\_res=0.05, fov=pi, r\_max=3.0)} & range and
+      bearing of the closest occupied cell in the field of view, or \code{None} \\
+    \code{is\_collision(pos, margin=None)} & \code{True} if \code{pos} is out of bounds or
+      within \code{margin} (default \code{margin2wall}) of an occupied cell \\
+    \code{in\_bound(pos)} & \code{True} if \code{pos} is at least \code{margin2wall} inside the map \\
+    \code{se2\_to\_cell(pos)}, \code{cell\_to\_se2(cell)} & conversion between positions and cell indices \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\subsection{Building maps}\label{sec:ajlatt-builder}
+
+The map builder (\code{env\_lib.ajlatt\_env.maps.builder}, command
+\code{ajlatt-build-map}) rasterises a YAML specification that describes the map
+in metres:
+
+\begin{textcode}
+map_info:
+  name: my_map
+  width: 36.0            # metres along x
+  height: 36.0           # metres along y
+  resolution: 0.2        # cell size in metres
+  boundary:
+    enabled: true
+    thickness: 0.2
+    style: rectangle     # rectangle | circle | polygon
+    rectangle: {margin: 0.0}
+obstacles:
+  - {type: rectangle, center: [10, 10], width: 4, height: 2, angle: 0.3}
+  - {type: circle, center: [25, 25], radius: 3, filled: false}
+  - {type: polygon, points: [[5, 20], [9, 20], [7, 26]]}
+  - {type: line, start: [0, 18], end: [12, 18], width: 0.4}
+  - {type: random, num_obstacles: 5, min_size: 0.5, max_size: 1.5, seed: 3}
+\end{textcode}
+
+The grid has $n_x = \operatorname{round}(\text{width}/\text{resolution})$ columns
+and $n_y = \operatorname{round}(\text{height}/\text{resolution})$ rows; a cell
+is occupied when its centre lies inside a shape. The boundary (enabled by
+default) is a rectangular wall with an optional \code{margin}, the outside of a
+circle (\code{circle: \{center, radius\}}) or the outside of a polygon
+(\code{polygon: \{points\}}), \code{thickness} metres thick. The obstacle types
+are listed in Table~\ref{tab:ajlatt-obstacles}; closed shapes accept
+\code{filled: false} for a one-cell outline.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Obstacle types of the map builder (lengths in metres, angles in radians).}
+  \label{tab:ajlatt-obstacles}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Type & Keys \\
+    \midrule
+    \code{rectangle} & \code{center}, \code{width}, \code{height}, \code{angle} (default 0), \code{filled} \\
+    \code{circle} & \code{center}, \code{radius}, \code{filled} \\
+    \code{triangle} & \code{vertices} (three points), \code{filled} \\
+    \code{hexagon} & \code{center}, \code{radius}, \code{angle}, \code{filled} \\
+    \code{polygon} & \code{points} (at least three), \code{filled} \\
+    \code{line} & \code{start}, \code{end}, \code{width} (default: one cell) \\
+    \code{maze} & \code{cell\_size} (5.0), \code{wall\_thickness} (0.5) and \code{gaps}, a list of
+      \code{\{type: horizontal|vertical, position: <cell index>\}} walls to leave open \\
+    \code{random} & \code{num\_obstacles} (10), \code{min\_size} (1.0), \code{max\_size} (3.0), \code{seed}: axis-aligned squares \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+The builder writes \code{<name>.yaml} (the grid header followed by the
+specification, so a map can always be rebuilt from its own header) and
+\code{<name>.cfg}, in the orientation the environment reads. The name is
+\code{map\_info.name} unless \code{-n} is given:
+
+\begin{shellcode}
+ajlatt-build-map --create-sample my_map        # writes my_map.spec.yaml
+ajlatt-build-map my_map.spec.yaml --png        # my_map.yaml, .cfg, .png
+ajlatt-build-map spec.yaml -o maps/ -n arena   # other directory and name
+\end{shellcode}
+
+\code{-{}-create-sample} sets \code{map\_info.name} to the requested file name,
+so the second command writes \code{my\_map.yaml}, \code{my\_map.cfg} and
+\code{my\_map.png}. The same functionality is available from Python:
+\code{build\_map(spec, output\_dir=None, *, name=None, png=False)} accepts a path
+or a dictionary and returns the paths of the header and grid,
+\code{rasterize(spec)} returns the occupancy array and the header, and
+\code{save\_map} writes them.
+
+\begin{pycode}
+from env_lib import AJLATTEnv
+from env_lib.ajlatt_env.maps.builder import build_map
+
+spec = {
+    "map_info": {"name": "corridor", "width": 20.0, "height": 10.0,
+                 "resolution": 0.2},
+    "obstacles": [
+        {"type": "line", "start": [10, 0], "end": [10, 6], "width": 0.4},
+        {"type": "circle", "center": [15, 5], "radius": 1.5},
+    ],
+}
+header, grid = build_map(spec, "maps", png=True)   # maps/corridor.yaml, ...
+env = AJLATTEnv(map_name="maps/corridor",
+                robot_init_pose=[(2, 2, 0), (2, 4, 0), (4, 2, 0), (4, 4, 0)],
+                target_init_pose=[(5, 5, 0)], target_policy="static")
+\end{pycode}
+
+\subsection{Plotting maps}\label{sec:ajlatt-plot}
+
+\code{ajlatt-plot-map} draws a bundled or user map; without \code{-{}-save} it
+writes \code{<map>.png} in the working directory. It uses the light theme unless
+\code{-{}-theme dark} is given. Dynamic maps are drawn with a fixed obstacle
+sample.
+
+\begin{shellcode}
+ajlatt-plot-map --list                          # bundled map names
+ajlatt-plot-map obstacles04 --save o4.png
+ajlatt-plot-map maps/corridor --theme dark
+\end{shellcode}
+
+From Python, \code{plot\_map(map\_or\_name, ax=None, *, theme=None,
+title=None, save=None, dpi=150)} in \code{env\_lib.ajlatt\_env.maps.plotting}
+draws a map into existing axes (or a new off-screen figure) and returns the
+axes.
+
+% ---------------------------------------------------------------------------
+\section{Rendering}\label{sec:ajlatt-render}
+
+The dashboard ($1100 \times 620$ pixels, Figure~\ref{fig:ajlatt}) shows the map
+on the left with the robots' true poses as oriented arrowheads, their pose
+beliefs as covariance ellipses, their sensing sectors, fading trajectory trails,
+communication links, the active target measurements, the true target (star)
+and every robot's belief about the target (crosses). The two panels on the
+right plot the trace of each robot's target covariance and of its
+self-localisation covariance over the episode. The header shows the map, the
+step, the simulated time, the team reward and how many robots currently see
+the target. Human mode requires an interactive matplotlib backend; TkAgg needs
+the \pkg{tk} bindings of the Python installation (\code{python3-tk} on Debian
+and Ubuntu, \code{tk} in conda).
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{ajlatt.png}
+  \caption{AJLATT dashboard on \code{obstacles04} (four robots running the
+    encircling heuristic of the example script, step 90 of 120). The robots
+    surround the target; the right panels show the trace of the target
+    covariance and of the self-localisation covariances of the four robots.}
+  \label{fig:ajlatt}
+\end{figure}
+
+% ---------------------------------------------------------------------------
+\section{Registered id}\label{sec:ajlatt-ids}
+
+\envid{AJLATT-v0} creates \code{AJLATTEnv} with the default configuration (four
+robots on \code{obstacles04}). Gymnasium's passive environment checker is
+disabled for this id because rewards and \code{terminated} are per-robot
+arrays. Keyword arguments of \code{env\_lib.make} are configuration fields, for
+example \code{env\_lib.make("AJLATT-v0", map\_name="obstacles05")}.
+
+% ---------------------------------------------------------------------------
+\section{Usage}\label{sec:ajlatt-usage}
+
+The following controller sends robot $i$ to the $i$-th of $n_R$ evenly spaced
+slots on a circle of radius 1.8\,m around its belief of the target, using only
+the observation:
+
+\begin{pycode}
+import numpy as np
+from env_lib import AJLATTEnv
+
+
+def encircle(obs, layout, radius=1.8, gain=1.2):
+    """Send robot i to the i-th slot of a circle around its target belief."""
+    n = len(obs)
+    pose = obs[:, layout["self_pose"]].astype(np.float64)   # x, y, theta
+    rel = obs[:, layout["target_relative_position"]].astype(np.float64)
+    c, s = np.cos(pose[:, 2]), np.sin(pose[:, 2])
+    target = pose[:, :2] + np.column_stack([c * rel[:, 0] - s * rel[:, 1],
+                                            s * rel[:, 0] + c * rel[:, 1]])
+    angle = 2 * np.pi * np.arange(n) / n
+    slot = target + radius * np.column_stack([np.cos(angle), np.sin(angle)])
+    delta = slot - pose[:, :2]
+    heading = np.arctan2(delta[:, 1], delta[:, 0])
+    error = np.angle(np.exp(1j * (heading - pose[:, 2])))  # wrapped
+    speed = np.minimum(2.0, 0.5 * np.linalg.norm(delta, axis=1))
+    v = speed * np.maximum(0.0, np.cos(error))
+    w = np.clip(gain * error, -np.pi / 4, np.pi / 4)
+    return np.column_stack([v, w])
+
+
+env = AJLATTEnv(map_name="obstacles04", num_robots=4)
+layout = env.observation_layout()
+obs, info = env.reset(seed=0)                  # obs: (4, 24) float32
+episode_return = np.zeros(env.num_robots)
+while True:
+    obs, reward, terminated, truncated, info = env.step(encircle(obs, layout))
+    episode_return += reward                   # per-robot rewards
+    if truncated:                              # collision flags ignored
+        break
+stats = env.episode_statistics()               # arrays of shape (121, 4)
+print(episode_return.sum(), info["episode_collisions"])
+print(stats["target_cov_trace"][-1])
+env.close()
+\end{pycode}
+
+The example script compares a similar heuristic with random actions and can
+record an episode:
+
+\begin{shellcode}
+python examples/ajlatt_demo.py --episodes 3
+python examples/ajlatt_demo.py --save renders/ajlatt.gif
+python examples/ajlatt_demo.py --map obstacles05 --render-mode human
+\end{shellcode}
+
+With the default configuration the heuristic of the script obtains a team
+return of about $-7250$ per episode without collision events and keeps the
+trace of the target covariance near 2, whereas random actions obtain returns of
+$-25\,000$ or lower with dozens of collision events and target covariance traces
+of 7 to 12 (the random actions are not seeded, so these values vary from run to
+run).
+
+% ---------------------------------------------------------------------------
+\section{Reproducibility and performance}\label{sec:ajlatt-perf}
+
+All randomness (initial beliefs, motion and measurement noise, the random target
+policy and dynamic maps) is drawn from \code{self.np\_random}. If
+\code{reset()} is called without a seed for the first time and
+\code{config.seed} is set, that seed is used. With
+\code{ci\_solver="slsqp"} trajectories match the implementation before
+version 1.0 to about $10^{-6}$; the default Newton solver finds weights that
+are at least as good and therefore produces slightly different, not worse,
+estimates.
+
+Measured on the development machine without rendering, a step takes 5--9\,ms on
+\code{obstacles04} (90\,ms before 1.0) and 6--7\,ms on \code{obstacles05}
+(67\,ms before). The gains come from exact batched Bresenham ray casting
+(closest-obstacle queries are 7 to 19 times faster) and from the Newton
+covariance-intersection solver. Rendering a frame takes about 25\,ms (about
+110\,ms before). The cost of a step grows with the number of robots, because
+every robot fuses the measurements and priors of its neighbours.
+
+% ---------------------------------------------------------------------------
+\section{Changes in 1.0}\label{sec:ajlatt-changes}
+
+AJLATT was rewritten as a Gymnasium environment. See Appendix~\ref{app:migration}
+for migration advice.
+
+\begin{itemize}
+  \item The environment class \code{AJLATTEnv} with its configuration
+        dataclass \code{AJLATTConfig} replaces the former factory, which parsed
+        the command line internally and therefore failed in scripts with their
+        own command-line arguments. The legacy factory
+        still works and translates the old names with a
+        \code{DeprecationWarning}. Training options that used to live in the
+        parameter module (PPO, LLM and debug settings) were removed; use
+        \code{AJLATTConfig.add\_arguments}.
+  \item \code{reset()} returns \code{(observation, info)}. Rendering is off by
+        default; pass \code{render\_mode}.
+  \item The spaces are joint multi-agent spaces with one row per robot, and
+        rewards and \code{terminated} are per-robot arrays; the per-robot
+        spaces are available as \code{single\_action\_space} and
+        \code{single\_observation\_space}.
+  \item The target-velocity entries of the observation contain the commanded
+        target velocity instead of a configured constant.
+  \item Fixed a memory leak: covariance traces accumulated across episodes
+        (per-episode traces are now returned by \code{episode\_statistics()}).
+        Also fixed: target policies were shared between environments and never
+        reset, unknown maps triggered an interactive prompt, and dynamic maps
+        did not work; they now resample at every reset and no longer need
+        scikit-image. Three bundled maps that were one row short of their header
+        were padded with a wall row.
+  \item About ten times faster (Section~\ref{sec:ajlatt-perf}) and a new
+        renderer.
+  \item Map tools were consolidated into \code{env\_lib.ajlatt\_env.maps}; the
+        builder now writes grids in the orientation the environment reads (the
+        old builder produced transposed maps) and embeds its specification in
+        the header.
+  \item The id \envid{AJLATT-v1}, an unusable alias of \envid{AJLATT-v0}, was
+        removed.
+\end{itemize}
+
+\endgroup

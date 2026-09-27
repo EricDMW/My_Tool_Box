@@ -62,10 +62,14 @@ instead of a name. The valid names are available as \code{ACTIVATION\_NAMES}:
 \end{center}
 
 \paragraph{MLPs.}
-\code{build\_mlp(input\_dim, hidden\_dims, output\_dim=None, activation="relu",
-dropout=0.0, layer\_norm=False, output\_activation=None, bias=True)} returns an
-\code{nn.Sequential}. Without \code{output\_dim} only the hidden stack is
-built; its output width is \code{hidden\_dims[-1]}.
+\code{build\_mlp} returns an \code{nn.Sequential}. Without \code{output\_dim}
+only the hidden stack is built; its output width is \code{hidden\_dims[-1]}.
+
+% norun
+\begin{pycode}
+build_mlp(input_dim, hidden_dims, output_dim=None, activation="relu", dropout=0.0,
+          layer_norm=False, output_activation=None, bias=True) -> nn.Sequential
+\end{pycode}
 
 \begin{pycode}
 import torch
@@ -91,9 +95,10 @@ buffer and is not stored in \code{state\_dict}.
 \section{Network families}\label{sec:neural-networks}
 
 Table~\ref{tab:neural-shapes} lists all networks with their input and output
-shapes. The names without \code{N} (\code{CNPolicyNetwork},
-\code{RNQNetwork}, \ldots) are the historical class names; the \code{CNN} and
-\code{RNN} spellings are aliases of the same classes.
+shapes. Four classes have two names: the historical spellings
+\code{CNPolicyNetwork}, \code{RNPolicyNetwork}, \code{CNQNetwork} and
+\code{RNQNetwork} and the aliases with \code{CNN} and \code{RNN} refer to the
+same classes.
 
 \begin{table}[htbp]
   \centering
@@ -120,7 +125,7 @@ shapes. The names without \code{N} (\code{CNPolicyNetwork},
     \midrule
     \multicolumn{3}{@{}l}{\emph{Q-networks} (\code{state\_dim}, \code{action\_dim}); optional integer \code{action} \code{(B,)}} \\
     \code{MLPQNetwork} & \code{(B, D)} & \code{(B, A)}, or \code{(B,)} with \code{action} \\
-    \code{MLPQNetwork(continuous\_action=True)} & \code{(B, D)}, \code{(B, A)} & \code{(B, 1)} \\
+    \code{MLPQNetwork}, continuous critic & \code{(B, D)}, \code{(B, A)} & \code{(B, 1)}; see below \\
     \code{DuelingQNetwork} & \code{(B, D)} & \code{(B, A)}, or \code{(B,)} with \code{action} \\
     \code{CNQNetwork} (\code{CNNQNetwork}) & \code{(B, C, H, W)} & \code{(B, A)}, or \code{(B,)} with \code{action} \\
     \code{RNQNetwork} (\code{RNNQNetwork}) & \code{(B, T, D)} or \code{(B, D)} & \code{(q, hidden)}, \code{q} as above \\
@@ -299,7 +304,7 @@ steps unless \code{forward(z, seq\_len=...)} asks for another length.
 
 \section{Factories}\label{sec:neural-factories}
 
-Four factories build networks from a type name, which is convenient when the
+Five factories build networks from a type name, which is convenient when the
 architecture is a command-line option. Names are case-insensitive; an unknown
 name raises a \code{ValueError} that lists the valid names. The remaining
 keyword arguments are passed to the constructor of the selected class.
@@ -308,16 +313,19 @@ keyword arguments are passed to the constructor of the selected class.
   \small
   \begin{tabular}{@{}lll@{}}
     \toprule
-    Factory & Method & Valid names \\
+    Factory & Static method & Valid type names \\
     \midrule
-    \code{PolicyFactory}   & \code{create\_policy(policy\_type, **kw)}         & \code{mlp}, \code{cnn}, \code{rnn}, \code{transformer} \\
-    \code{ValueFactory}    & \code{create\_value\_network(network\_type, **kw)} & \code{mlp}, \code{cnn}, \code{rnn}, \code{transformer} \\
-    \code{QNetworkFactory} & \code{create\_q\_network(network\_type, **kw)}     & \code{mlp}, \code{dueling}, \code{cnn}, \code{rnn}, \code{transformer} \\
-    \code{EncoderFactory}  & \code{create\_encoder(encoder\_type, **kw)}        & \code{mlp}, \code{cnn}, \code{rnn}, \code{transformer}, \code{vae} \\
-    \code{DecoderFactory}  & \code{create\_decoder(decoder\_type, **kw)}        & \code{mlp}, \code{cnn}, \code{rnn}, \code{transformer}, \code{vae} \\
+    \code{PolicyFactory}   & \code{create\_policy}         & \code{mlp}, \code{cnn}, \code{rnn}, \code{transformer} \\
+    \code{ValueFactory}    & \code{create\_value\_network} & \code{mlp}, \code{cnn}, \code{rnn}, \code{transformer} \\
+    \code{QNetworkFactory} & \code{create\_q\_network}     & \code{mlp}, \code{dueling}, \code{cnn}, \code{rnn}, \code{transformer} \\
+    \code{EncoderFactory}  & \code{create\_encoder}        & \code{mlp}, \code{cnn}, \code{rnn}, \code{transformer}, \code{vae} \\
+    \code{DecoderFactory}  & \code{create\_decoder}        & \code{mlp}, \code{cnn}, \code{rnn}, \code{transformer}, \code{vae} \\
     \bottomrule
   \end{tabular}
 \end{center}
+
+Each method takes the type name as its first argument followed by the keyword
+arguments of the constructor.
 
 \begin{pycode}
 from toolkit.neural_toolkit import PolicyFactory, QNetworkFactory
@@ -336,7 +344,7 @@ q_net = QNetworkFactory.create_q_network("dueling", state_dim=8, action_dim=4)
   \small
   \caption{Static methods of \code{NetworkUtils}.}
   \label{tab:neural-utils}
-  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{5.5cm}>{\raggedright\arraybackslash}X@{}}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{6.2cm}>{\raggedright\arraybackslash}X@{}}
     \toprule
     Method & Description \\
     \midrule
@@ -385,7 +393,7 @@ q_net = QNetworkFactory.create_q_network("dueling", state_dim=8, action_dim=4)
       MLP and (transposed) convolution stacks following the conventions of
       Section~\ref{sec:neural-conventions}. \\
     \code{create\_attention\_layer(input\_dim, num\_heads=8, dropout=0.1)} & Batch-first \code{nn.MultiheadAttention}. \\
-    \code{create\_positional\_encoding(d\_model, max\_len=5000)} & Frozen sinusoidal table \code{(1, max\_len, d\_model)}. \\
+    \code{create\_positional\_encoding(d\_model, max\_len)} & Frozen sinusoidal table of shape \code{(1, max\_len, d\_model)}; \code{max\_len=5000}. \\
     \code{get\_activation(activation)} & Same as the module-level function. \\
     \midrule
     \multicolumn{2}{@{}l}{\emph{Shape arithmetic}} \\
@@ -405,26 +413,39 @@ entropy) that is used for all sampling, so results are reproducible without
 touching the global random state. States and actions are integer indices;
 out-of-range indices raise \code{IndexError}.
 
-\begin{itemize}
-  \item \code{QTable(state\_space\_size, action\_space\_size, initial\_value=0.0,
-    dtype=np.float32, rng=None)}: action values $Q[s, a]$ with
-    \code{get\_value}, \code{set\_value}, \code{update\_value},
-    \code{get\_q\_values}, \code{get\_max\_q\_value}, \code{get\_max\_action}
-    (lowest index among ties), \code{get\_policy(state, epsilon)} (sampled
-    epsilon-greedy action), \code{get\_epsilon\_greedy\_probs},
-    \code{get\_softmax\_probs} and \code{get\_softmax\_policy}.
-  \item \code{ValueTable(state\_space\_size, ...)}: state values $V[s]$.
-  \item \code{PolicyTable(state\_space\_size, action\_space\_size, ...)}: a
-    stochastic policy $\pi[s, a]$ that starts uniform. \code{set\_value} and
-    \code{update\_value} change one probability and rescale the others so that
-    the row still sums to one; \code{set\_policy\_probs},
-    \code{set\_deterministic\_policy}, \code{get\_policy\_probs} and
-    \code{get\_policy} (sampling) complete the interface.
-  \item \code{DiscreteEnvironment(state\_space\_size, action\_space\_size,
-    rng=None)}: an abstract base class for small finite environments with
-    \code{reset() -> state} and \code{step(action) -> (state, reward, done,
-    info)}.
-\end{itemize}
+The three table classes share one constructor:
+
+% norun
+\begin{pycode}
+QTable(state_space_size, action_space_size=None, initial_value=0.0,
+       dtype=np.float32, rng=None)          # also ValueTable, PolicyTable
+\end{pycode}
+
+\begin{description}[leftmargin=0.6cm,style=nextline]
+  \setlength{\emergencystretch}{3em}% long identifiers; local to this list
+  \item[\code{QTable}] Action values $Q[s, a]$ (\code{action\_space\_size}
+    is required). Entries are read and written with \code{get\_value},
+    \code{set\_value}, \code{update\_value} and \code{get\_q\_values}.
+    \code{get\_max\_q\_value} and \code{get\_max\_action} return the
+    greedy value and action (the lowest index among ties). \code{get\_policy}
+    samples an epsilon-greedy action, and the methods
+    \code{get\_epsilon\_greedy\_probs}, \code{get\_softmax\_probs} and
+    \code{get\_softmax\_policy} give the corresponding probabilities or a
+    softmax sample.
+  \item[\code{ValueTable}] State values $V[s]$, with \code{get\_values} for
+    the whole array.
+  \item[\code{PolicyTable}] A stochastic policy $\pi[s, a]$ that starts
+    uniform. \code{set\_value} and \code{update\_value} change one
+    probability and rescale the others so that the row still sums to one;
+    \code{set\_policy\_probs}, \code{set\_deterministic\_policy},
+    \code{get\_policy\_probs} and \code{get\_policy} (sampling) complete
+    the interface.
+  \item[\code{DiscreteEnvironment}] An abstract base class for small finite
+    environments, constructed with \code{(state\_space\_size,
+    action\_space\_size, rng=None)}. Subclasses implement \code{reset()},
+    which returns the initial state, and \code{step(action)}, which returns
+    \code{(state, reward, done, info)}.
+\end{description}
 
 \code{update\_value(state, value, action, learning\_rate)} moves an entry
 towards a target: $x \leftarrow x + \alpha\,(\text{value} - x)$. The static
@@ -444,28 +465,35 @@ $V(s) = \max_a Q(s,a)$ (the Q-table must already hold one-step look-ahead
 values), and \code{policy\_iteration\_update(policy\_table, state, q\_table)}
 makes $\pi(\cdot \mid s)$ greedy with respect to $Q$.
 
-The exploration rules sample with the Q-table's generator:
-\begin{itemize}
-  \item \code{epsilon\_greedy\_policy(q, s, epsilon)}: a uniformly random
+The exploration rules are static methods of \code{DiscreteTools} whose first
+two arguments are the Q-table and the state; they sample with the Q-table's
+generator.
+\begin{description}[leftmargin=0.6cm,style=nextline]
+  \item[\code{epsilon\_greedy\_policy(q, s, epsilon)}] A uniformly random
     action with probability $\varepsilon$, otherwise the greedy one. The
     corresponding probabilities (with ties sharing the greedy mass) are
     $\pi(a \mid s) = \varepsilon/|\mathcal{A}| + (1-\varepsilon)\,
     \mathbf{1}[a \in G_s]/|G_s|$, where $G_s$ is the set of greedy actions.
-  \item \code{softmax\_policy(q, s, temperature)} (alias
-    \code{boltzmann\_policy}): $\pi(a \mid s) \propto \exp(Q(s,a)/\tau)$,
-    computed in a numerically stable way.
-  \item \code{ucb\_policy(q, s, visit\_counts, exploration\_constant=1.0)}:
-    UCB1, $\arg\max_a Q(s,a) + c\sqrt{\ln N(s) / N(s,a)}$ with
+  \item[\code{softmax\_policy(q, s, temperature)}] Also available as
+    \code{boltzmann\_policy}. Samples from
+    $\pi(a \mid s) \propto \exp(Q(s,a)/\tau)$, computed in a numerically
+    stable way.
+  \item[\code{ucb\_policy(q, s, visit\_counts, exploration\_constant=1.0)}]
+    UCB1: $\arg\max_a Q(s,a) + c\sqrt{\ln N(s) / N(s,a)}$ with
     $N(s) = \sum_a N(s,a)$; untried actions are chosen first, at random among
     themselves. \code{visit\_counts} has the shape of the Q-table.
-  \item \code{thompson\_sampling\_policy(q, s, visit\_counts, prior\_alpha=1.0,
-    prior\_beta=1.0)}: a heuristic Beta-Bernoulli Thompson sampler with
+  \item[\code{thompson\_sampling\_policy(q, s, visit\_counts, ...)}] A
+    heuristic Beta-Bernoulli Thompson sampler with
     $p = \operatorname{sigmoid}(Q(s,a))$ and posterior
-    $\mathrm{Beta}(\alpha_0 + n p,\ \beta_0 + n(1-p))$, $n = N(s,a)$. It is
-    exact only for Bernoulli rewards with $Q$ in logit space.
-\end{itemize}
+    $\mathrm{Beta}(\alpha_0 + n p,\ \beta_0 + n(1-p))$, $n = N(s,a)$, where
+    $\alpha_0$ and $\beta_0$ are \code{prior\_alpha} and \code{prior\_beta}
+    (default 1). It is exact only for Bernoulli rewards with $Q$ in logit
+    space.
+\end{description}
 
-The following example learns to walk right on a six-state chain:
+The following example learns to walk right on a six-state chain. The reward
+is sparse, so the Q-table starts with optimistic values of 1, which makes the
+greedy policy try every action before settling:
 
 \begin{pycode}
 import numpy as np
@@ -485,7 +513,7 @@ class Chain(DiscreteEnvironment):
         return self.current_state, float(done), done, {}
 
 env = Chain(state_space_size=6, action_space_size=2, rng=0)
-q = DiscreteTools.create_q_table(6, 2, rng=0)
+q = DiscreteTools.create_q_table(6, 2, initial_value=1.0, rng=0)   # optimistic
 for episode in range(200):
     state = env.reset()
     for t in range(50):
@@ -560,7 +588,7 @@ for step in range(4000):
     if step % 500 == 0:
         target_net.load_state_dict(q_net.state_dict())
 
-NetworkUtils.save_checkpoint(q_net, optimizer, epoch=step, loss=float(loss),
+NetworkUtils.save_checkpoint(q_net, optimizer, epoch=step, loss=loss.item(),
                              filepath="checkpoints/dqn_linemsg.pt")
 \end{pycode}
 
@@ -587,11 +615,13 @@ random_return = evaluate(lambda o: int(rng.integers(n_actions)))
 print(f"greedy {greedy_return:.1f}, random {random_return:.1f}")
 \end{pycode}
 
-Two larger examples ship with the repository:
-\code{examples/simple\_transformer\_example.py} trains a
-\code{TransformerPolicyNetwork} with REINFORCE on a memory task, and
-\code{examples/transformer\_rl\_example.py} trains transformer actor and
-critic networks with PPO on batched environments (Chapter~\ref{chap:examples}).
+Two larger examples ship with the repository (Chapter~\ref{chap:examples}):
+\begin{itemize}
+  \item \code{examples/simple\_transformer\_example.py} trains a
+    \code{TransformerPolicyNetwork} with REINFORCE on a memory task;
+  \item \code{examples/transformer\_rl\_example.py} trains transformer actor
+    and critic networks with PPO on batched environments.
+\end{itemize}
 
 \section{Changes in version 1.0}\label{sec:neural-changes}
 

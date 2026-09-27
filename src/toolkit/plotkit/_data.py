@@ -9,11 +9,18 @@ one set of rules:
 * a list or tuple of array-likes is **several** series (one per element);
 * a 2-D array is interpreted by the caller: either several series stacked as rows
   (``two_d="series"``) or one series whose rows are samples (``two_d="samples"``);
-* a pandas ``DataFrame`` contributes one series per column.
+* a pandas ``DataFrame`` contributes one series per column, except with
+  ``two_d="samples"``, where it is one 2-D sample matrix like a 2-D array;
+* dates, times and durations (``datetime.date``, ``datetime.datetime``,
+  ``datetime.time``, ``datetime.timedelta``, their pandas subclasses and NumPy
+  ``datetime64`` / ``timedelta64`` values) are scalars, so a list of them is one series.
+  As x values, dates are drawn on a matplotlib date axis and durations as seconds
+  (float), since matplotlib has no duration axis.
 """
 
 from __future__ import annotations
 
+import datetime
 import numbers
 from collections.abc import Sequence
 from typing import Any
@@ -87,9 +94,20 @@ def as_float_array(value: Any, *, name: str = "data") -> np.ndarray:
         raise TypeError(f"{name} must contain numbers; got dtype {arr.dtype}") from exc
 
 
+_SCALAR_TYPES = (
+    str,
+    bytes,
+    numbers.Number,
+    np.generic,  # includes numpy.datetime64 and numpy.timedelta64
+    datetime.date,  # includes datetime.datetime and pandas.Timestamp
+    datetime.time,
+    datetime.timedelta,  # includes pandas.Timedelta
+)
+
+
 def is_scalar_like(value: Any) -> bool:
-    """Return True for numbers, strings and 0-d arrays or tensors."""
-    if isinstance(value, (str, bytes, numbers.Number, np.generic)):
+    """Return True for numbers, strings, dates, times, durations and 0-d arrays or tensors."""
+    if isinstance(value, _SCALAR_TYPES):
         return True
     ndim = getattr(value, "ndim", None)
     if ndim is not None:
@@ -112,6 +130,34 @@ def describe_shape(value: Any) -> str:
 
 def _is_dataframe(value: Any) -> bool:
     return hasattr(value, "columns") and hasattr(value, "iloc") and getattr(value, "ndim", 0) == 2
+
+
+def _scalar_item(value: Any) -> Any:
+    """Unwrap a scalar-like value (e.g. a 0-d array or tensor) to a scalar.
+
+    Python scalars, dates and durations are returned unchanged (time zones are kept).
+    """
+    if isinstance(value, _SCALAR_TYPES):
+        return value
+    arr = to_numpy(value)
+    return arr[()] if arr.ndim == 0 else arr
+
+
+def _durations_to_seconds(arr: np.ndarray) -> np.ndarray:
+    """Convert ``timedelta64`` or ``datetime.timedelta`` values to float seconds (NaT -> NaN).
+
+    matplotlib has no converter for durations: ``timedelta`` objects raise and
+    ``timedelta64`` values are drawn as raw integers in the array's unit.
+    """
+    if (
+        arr.dtype == object
+        and arr.size
+        and all(isinstance(v, datetime.timedelta) for v in arr.flat)
+    ):
+        arr = arr.astype("timedelta64[us]")
+    if arr.dtype.kind == "m":
+        return arr / np.timedelta64(1, "s")
+    return arr
 
 
 def _convert(value: Any, numeric: bool, name: str) -> np.ndarray:
@@ -137,6 +183,8 @@ def as_series_list(
     two_d : {"series", "samples"}, default "series"
         How a single 2-D array is read. ``"series"`` splits it into rows (one series
         per row); ``"samples"`` keeps it as one series whose samples are stacked.
+        With ``"series"`` a ``DataFrame`` gives one series per column; with
+        ``"samples"`` it is converted to one 2-D array (rows and columns kept).
     numeric : bool, default True
         Convert to float64 (masked entries become NaN). When False the dtype is kept,
         which allows dates or category labels.
@@ -160,6 +208,8 @@ def as_series_list(
         raise ValueError(f"two_d must be 'series' or 'samples', got {two_d!r}")
 
     if _is_dataframe(value):
+        if two_d == "samples":
+            return [_convert(value, numeric, name)]
         return [_convert(value.iloc[:, j], numeric, name) for j in range(value.shape[1])]
 
     if isinstance(value, (list, tuple)):
@@ -169,7 +219,7 @@ def as_series_list(
             return [_convert(np.asarray(value), numeric, name)]
         scalar_flags = [is_scalar_like(v) for v in value]
         if all(scalar_flags):
-            return [_convert(np.asarray([to_numpy(v) for v in value]), numeric, name)]
+            return [_convert(np.asarray([_scalar_item(v) for v in value]), numeric, name)]
         if any(scalar_flags):
             raise ValueError(
                 f"{name} mixes scalars and array-likes; pass a flat sequence of numbers for "
@@ -218,7 +268,8 @@ def broadcast_x(
     ----------
     x : array-like, sequence of array-likes or None
         None gives ``arange(n)`` per series. A single 1-D array is shared by all
-        series; a list (or 2-D array) provides one x per series.
+        series; a list (or 2-D array) provides one x per series. Durations
+        (``timedelta``) are converted to float seconds.
     ys : sequence of numpy.ndarray
         The y series (only their number and lengths are used).
     lengths : sequence of int, optional
@@ -242,7 +293,7 @@ def broadcast_x(
         lengths = [len(y) for y in ys]
     if x is None:
         return [np.arange(n) for n in lengths]
-    xs = as_series_list(x, name="x", numeric=False)
+    xs = [_durations_to_seconds(xi) for xi in as_series_list(x, name="x", numeric=False)]
     if len(xs) == 1 and n_series > 1:
         xs = xs * n_series
     elif len(xs) != n_series:

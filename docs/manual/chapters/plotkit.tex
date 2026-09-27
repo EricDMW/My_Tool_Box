@@ -271,8 +271,9 @@ plot_bar(x, height, labels=None, colors=None, ax=None, figsize=(10, 6),
 
 \subsection{plot\_histogram}
 
-\code{plot\_histogram(data, bins="auto", ..., *, density=False, alpha=0.45,
-histtype="stepfilled", **kwargs)} overlays one histogram per series. The bin
+\code{plot\_histogram(data, bins="auto", ...)} overlays one histogram per
+series; its keyword-only arguments are \code{density=False},
+\code{alpha=0.45} and \code{histtype="stepfilled"}. The bin
 edges are computed once from the pooled data (\code{numpy.histogram\_bin\_edges})
 so that all series share the same bins; NaN and infinite values are dropped.
 \code{density=True} normalises each histogram to unit area, and the default
@@ -301,7 +302,7 @@ work unchanged.
   \small
   \caption{Parameters specific to \code{plot\_heatmap}.}
   \label{tab:plotkit-heatmap}
-  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{2.8cm}>{\raggedright\arraybackslash}p{1.6cm}>{\raggedright\arraybackslash}X@{}}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{2.8cm}>{\raggedright\arraybackslash}p{1.9cm}>{\raggedright\arraybackslash}X@{}}
     \toprule
     Parameter & Default & Meaning \\
     \midrule
@@ -453,9 +454,9 @@ save_figure(fig_or_ax, path, formats=None, dpi=300, transparent=False,
 \code{Axes} or an array of axes (the whole parent figure is saved), creates
 missing parent directories and returns the written paths. With
 \code{formats} given, the extension of \code{path} is replaced by (or, if it
-has no recognised extension, extended with) each format, so
-\code{save\_figure(fig, "results/curve", formats=("pdf", "png"))} writes
-\code{results/curve.pdf} and \code{results/curve.png}. Without
+has no recognised extension, extended with) each format: with the path
+\code{"results/curve"} and \code{formats=("pdf", "png")}, the files
+\code{results/curve.pdf} and \code{results/curve.png} are written. Without
 \code{formats} the extension of \code{path} is used, or
 \code{rcParams["savefig.format"]} if it has none. \code{dpi} applies to raster
 formats and to rasterised parts of vector files. The defaults

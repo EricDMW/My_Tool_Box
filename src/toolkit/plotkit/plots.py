@@ -18,6 +18,8 @@ axis-label fonts) so that axes created outside the style context match. Pass
 from __future__ import annotations
 
 import numbers
+import re
+import string
 import warnings
 from collections.abc import Mapping, Sequence
 from typing import Any, Callable, Union
@@ -30,6 +32,7 @@ from matplotlib.axes import Axes
 from matplotlib.ticker import MaxNLocator
 
 from ._data import (
+    _is_dataframe,
     as_float_array,
     as_series_list,
     broadcast_x,
@@ -62,6 +65,14 @@ _MAX_CELLS_FOR_LINES = 50
 _MAX_CELLS_FOR_INDEX_LABELS = 30
 
 _SERIES_HINT = "2-D arrays are read as (n_series, n_points); transpose if your series are columns"
+
+# printf-style conversion such as "%d", "%-8.3f" or "%(name)s" (not "%%" or a trailing "%").
+_PRINTF_FIELD = re.compile(
+    r"%(?:\([^)]*\))?[-+ #0]*(?:\*|\d+)?(?:\.(?:\*|\d+))?[hlL]?[diouxXeEfFgGcrsa]"
+)
+# Presentation types that need an int argument.
+_INT_TYPES = frozenset("bdoxX")
+_PRINTF_INT_TYPES = frozenset("diouxX")
 _SAMPLES_HINT = (
     "2-D y is read with samples along `axis` (default 0: rows are samples, columns are "
     "steps); pass axis=1 if samples are columns"
@@ -197,7 +208,28 @@ def _finish_axes(
         ax.legend(loc=legend if isinstance(legend, str) else "best")
 
 
+def _format_specs(fmt: str) -> tuple[str, list[str]]:
+    """Classify ``fmt`` as ``"brace"``, ``"printf"`` or ``"spec"`` and list its field specs."""
+    if "{" in fmt:
+        try:
+            return "brace", [spec for _, _, spec, _ in string.Formatter().parse(fmt) if spec]
+        except ValueError:  # malformed; str.format reports the error
+            return "brace", []
+    printf = [m.group(0) for m in _PRINTF_FIELD.finditer(fmt)]
+    if printf or fmt.startswith("%"):
+        return "printf", printf
+    return "spec", [fmt]
+
+
 def _format_value(value: Any, fmt: ValueFormat) -> str:
+    """Format one annotation value.
+
+    ``fmt`` is True (``".3g"``), a callable, a ``str.format`` template (``"{:.1%}"``),
+    a printf-style template (``"%.2f"``, ``"%d items"``) or a format spec
+    (``".2f"``, ``".1%"``, ``",d"``). Integral values are passed as ``int`` to integer
+    presentation types (``d``, ``b``, ``o``, ``x``, ``X``), so ``"d"`` works for
+    float arrays holding whole numbers.
+    """
     if isinstance(value, str):
         return value
     try:
@@ -210,11 +242,19 @@ def _format_value(value: Any, fmt: ValueFormat) -> str:
         fmt = ".3g"
     if callable(fmt):
         return str(fmt(number))
-    if "{" in fmt:
-        return fmt.format(number)
-    if "%" in fmt:
-        return fmt % number
-    return format(number, fmt)
+    kind, specs = _format_specs(fmt)
+    int_types = _PRINTF_INT_TYPES if kind == "printf" else _INT_TYPES
+    arg: float | int = number
+    if number.is_integer() and any(spec[-1] in int_types for spec in specs):
+        arg = int(number)
+    try:
+        if kind == "brace":
+            return fmt.format(arg)
+        if kind == "printf":
+            return fmt % arg
+        return format(arg, fmt)
+    except (TypeError, ValueError, KeyError, IndexError) as exc:
+        raise ValueError(f"cannot format value {number!r} with format {fmt!r}: {exc}") from None
 
 
 def _set_tick_labels(ax: Axes, which: str, labels: Any, positions: np.ndarray | None) -> None:
@@ -307,10 +347,12 @@ def plot_shadow_curve(
     ----------
     y : array-like or sequence of array-likes
         One curve per element. A 2-D array holds samples of one curve (e.g. seeds)
-        along ``axis``; its mean is drawn with a band (see ``band``). A 1-D array (or
-        flat list of numbers) is drawn as is, with a band only when ``y_std`` is
-        given. A list/tuple of arrays gives several curves (use ``np.asarray`` to pass
-        a nested list as a single 2-D sample matrix).
+        along ``axis``; its mean is drawn with a band (see ``band``). A pandas
+        ``DataFrame`` is read like a 2-D array (with the default ``axis=0`` its rows
+        are samples and its columns are steps). A 1-D array (or flat list of numbers)
+        is drawn as is, with a band only when ``y_std`` is given. A list/tuple of
+        arrays gives several curves (use ``np.asarray`` to pass a nested list as a
+        single 2-D sample matrix).
     x : array-like or sequence of array-likes, optional
         Shared x values (broadcast to every curve) or one x array per curve.
         Defaults to ``0 .. n_steps - 1``.
@@ -432,8 +474,12 @@ def plot_shadow_curve(
 
 
 def _stack_seeds(value: Any, name: str) -> np.ndarray:
-    """Stack the seeds of one run into (n_seeds, n_steps), padding ragged runs with NaN."""
-    seeds = as_series_list(value, name=f"runs[{name!r}]")
+    """Stack the seeds of one run into (n_seeds, n_steps), padding ragged runs with NaN.
+
+    Rows of a 2-D array or ``DataFrame`` are seeds; a list holds one 1-D array per seed.
+    """
+    groups = as_series_list(value, name=f"runs[{name!r}]", two_d="samples")
+    seeds = list(groups[0]) if len(groups) == 1 and groups[0].ndim == 2 else groups
     length = max(len(s) for s in seeds)
     out = np.full((len(seeds), length), np.nan)
     for i, s in enumerate(seeds):
@@ -464,9 +510,10 @@ def plot_learning_curves(
     Parameters
     ----------
     runs : mapping of str to array-like
-        ``{method name: values}`` where values is an array of shape
-        ``(n_seeds, n_steps)``, a 1-D array (single seed), or a list of 1-D arrays
-        of possibly different lengths (padded with NaN; statistics ignore NaN).
+        ``{method name: values}`` where values is an array or ``DataFrame`` of shape
+        ``(n_seeds, n_steps)`` (rows are seeds), a 1-D array (single seed), or a list
+        of 1-D arrays of possibly different lengths (padded with NaN; statistics
+        ignore NaN).
     x : array-like or mapping, optional
         Shared x values (e.g. environment steps) or ``{method name: x}``.
     band : {"std", "sem", "ci95", "minmax"} or None, default "ci95"
@@ -531,6 +578,26 @@ def plot_learning_curves(
     )
 
 
+def _columns_as_series(x: Any, y: Any, ys: list[np.ndarray]) -> list[np.ndarray]:
+    """Read a 2-D ``y`` as ``(n_points, n_series)`` when only its columns match ``x``.
+
+    This keeps the matplotlib convention ``ax.plot(x, Y)`` working for arrays whose
+    columns are series. Lists and DataFrames follow their own rules and are untouched.
+    """
+    if x is None or isinstance(y, (list, tuple)) or _is_dataframe(y):
+        return ys
+    if getattr(y, "ndim", None) != 2 or not ys:
+        return ys
+    xs = as_series_list(x, name="x", numeric=False)
+    if len(xs) != 1:  # one x per series
+        return ys
+    n_points = len(xs[0])
+    n_rows, n_cols = len(ys), len(ys[0])
+    if n_cols != n_points and n_rows == n_points:
+        return list(np.stack(ys).T)
+    return ys
+
+
 def plot_line(
     x: Any,
     y: Any,
@@ -555,7 +622,11 @@ def plot_line(
         ``0 .. n - 1``.
     y : array-like or sequence of array-likes
         A 1-D array (or flat list of numbers) is one series; a list of arrays or a
-        2-D array of shape ``(n_series, n_points)`` gives several series.
+        2-D array of shape ``(n_series, n_points)`` gives several series, and a
+        ``DataFrame`` gives one series per column. For compatibility with
+        :meth:`matplotlib.axes.Axes.plot`, a 2-D array whose rows do not have
+        ``len(x)`` points but whose columns do is read as ``(n_points, n_series)``
+        (one series per column). When both match (square array) rows are series.
     labels, colors, ax, figsize, title, xlabel, ylabel, legend, grid, style
         As in :func:`plot_shadow_curve`.
     **kwargs
@@ -575,10 +646,11 @@ def plot_line(
     >>> import numpy as np
     >>> t = np.linspace(0, 2 * np.pi, 100)
     >>> ax = plot_line(t, [np.sin(t), np.cos(t)], labels=["sin", "cos"])
+    >>> ax = plot_line(t, np.column_stack([np.sin(t), np.cos(t)]))  # matplotlib layout
     """
     labels = _pop_alias(kwargs, "label", labels)
     colors = _pop_alias(kwargs, "color", colors)
-    ys = as_series_list(y, name="y")
+    ys = _columns_as_series(x, y, as_series_list(y, name="y"))
     xs = broadcast_x(x, ys, func="plot_line", y_input=y, hint=_SERIES_HINT)
     with style_context(style):
         ax = _get_axes(ax, figsize)
@@ -682,6 +754,8 @@ def _bar_errors(yerr: Any, n_series: int, n_cat: int) -> list[np.ndarray | None]
         return [np.full(n_cat, float(to_numpy(yerr)))] * n_series
     if isinstance(yerr, (list, tuple)):
         items = as_series_list(yerr, name="yerr", max_element_ndim=2)
+        if n_series == 1 and len(items) == 2 and all(e.shape == (n_cat,) for e in items):
+            items = [np.stack(items)]  # [lower, upper] errors of a single series
     else:
         arr = as_float_array(yerr, name="yerr")
         if arr.ndim == 1:
@@ -712,6 +786,15 @@ def _bar_errors(yerr: Any, n_series: int, n_cat: int) -> list[np.ndarray | None]
     return out
 
 
+def _category_labels(values: np.ndarray) -> list[Any]:
+    """Category values whose ``str`` is a readable label (dates as ISO strings)."""
+    if values.dtype.kind == "M":  # datetime64: tolist() gives integers for ns resolution
+        return np.datetime_as_string(values, unit="auto").tolist()
+    if values.dtype.kind == "m":  # timedelta64 -> datetime.timedelta
+        return values.astype("timedelta64[us]").tolist()
+    return values.tolist()
+
+
 def _bar_categories(x: Any, n_cat: int, height: Any) -> list[str]:
     if x is None:
         return [str(i) for i in range(n_cat)]
@@ -720,7 +803,7 @@ def _bar_categories(x: Any, n_cat: int, height: Any) -> list[str]:
         raise ValueError(
             f"plot_bar: x must be one sequence of category labels, got {describe_shape(x)}"
         )
-    values = cats[0].tolist()
+    values = _category_labels(cats[0])
     if len(values) != n_cat:
         msg = (
             f"plot_bar: x has {len(values)} categories but each height series has {n_cat} "
@@ -772,11 +855,13 @@ def plot_bar(
         Total width of a group of bars (in category units); each bar is
         ``width / n_series`` wide.
     yerr : float, array-like or sequence, optional
-        Error bars: a scalar, one array per series (or one shared array), or a
-        ``(2, n_categories)`` array of lower/upper errors for a single series.
+        Error bars: a scalar, one array per series (or one shared array), or
+        lower/upper errors for a single series as a ``(2, n_categories)`` array or
+        a pair of lists ``[lower, upper]``.
     value_labels : bool, str or callable, default False
-        Annotate bars with their values. A string is a format such as ``".2f"``,
-        ``"{:.1%}"`` or ``"%.2f"``; a callable maps the value to its label.
+        Annotate bars with their values. A string is a format spec such as
+        ``".2f"``, ``"d"`` or ``".1%"``, a template such as ``"{:.1%}"``, or a
+        printf-style format such as ``"%.2f"``; a callable maps the value to its label.
     horizontal : bool, default False
         Draw horizontal bars (categories on the y axis, first category on top).
     capsize : float, default 3.0
@@ -914,7 +999,8 @@ def plot_histogram(
         infinite values are dropped.
     bins : int, str or sequence of float, default "auto"
         Bin specification of :func:`numpy.histogram_bin_edges`, computed on the
-        pooled data so all series share the same bins.
+        pooled data (restricted to ``range`` when given) so all series share the
+        same bins.
     labels, colors, ax, figsize, title, xlabel, legend, grid, style
         As in :func:`plot_shadow_curve`.
     ylabel : str, optional
@@ -926,7 +1012,8 @@ def plot_histogram(
     histtype : {"stepfilled", "step", "bar"}, default "stepfilled"
         Passed to :meth:`matplotlib.axes.Axes.hist`.
     **kwargs
-        Passed to :meth:`matplotlib.axes.Axes.hist`.
+        Passed to :meth:`matplotlib.axes.Axes.hist`. ``range=(lo, hi)`` limits the
+        shared bins as in :meth:`~matplotlib.axes.Axes.hist`.
 
     Returns
     -------
@@ -952,7 +1039,10 @@ def plot_histogram(
             raise ValueError(f"plot_histogram: series {i} contains no finite values")
         series.append(finite)
     if isinstance(bins, (int, np.integer, str)):
-        edges = np.histogram_bin_edges(np.concatenate(series), bins=bins)
+        # ax.hist ignores ``range`` when given explicit edges, so apply it here.
+        edges = np.histogram_bin_edges(
+            np.concatenate(series), bins=bins, range=kwargs.get("range")
+        )
     else:
         edges = as_float_array(bins, name="bins")
     if ylabel is None:
@@ -1050,6 +1140,19 @@ def _heatmap_ticks(ax: Axes, which: str, labels: Any, n: int, data_shape: tuple)
             text.set_rotation_mode("anchor")
 
 
+def _default_annot_format(annotations: np.ndarray) -> str:
+    """``".0f"`` when every finite (numeric) annotation is a whole number, else ``".2g"``."""
+    try:
+        numeric = as_float_array(annotations, name="annot")
+    except TypeError:  # text annotations are written as they are
+        return ".2g"
+    numeric = numeric[np.isfinite(numeric)]
+    if numeric.size == 0:
+        return ".2g"
+    integral = np.all(np.mod(numeric, 1) == 0) and np.max(np.abs(numeric)) < 1e15
+    return ".0f" if integral else ".2g"
+
+
 def _contrast_colors(rgba: np.ndarray) -> np.ndarray:
     """Black or white text colour for each RGBA background (WCAG relative luminance)."""
     rgb = np.asarray(rgba, dtype=float)[..., :3]
@@ -1115,8 +1218,10 @@ def plot_heatmap(
     cbar_label : str, optional
         Colorbar label (also accepted as ``cbar_kws={"label": ...}``).
     fmt : str or callable, optional
-        Annotation format, e.g. ``".2g"`` (seaborn style), ``"{:.1%}"`` or
-        ``"%.2f"``. Defaults to ``".0f"`` for integer-valued data, else ``".2g"``.
+        Annotation format: a format spec (seaborn style) such as ``".2g"``, ``"d"``
+        or ``".1%"``, a template such as ``"{:.1%}"``, or a printf-style format such
+        as ``"%.2f"``. Defaults to ``".0f"`` when every numeric annotation (the data,
+        or the ``annot`` array when one is given) is a whole number, else ``".2g"``.
     vmin, vmax : float, optional
         Colour limits; default to the data range.
     center : float, optional
@@ -1219,8 +1324,7 @@ def plot_heatmap(
                 f"plot_heatmap: annot has shape {annot_values.shape} but data has shape {values.shape}"
             )
     if fmt is None:
-        integral = np.all(np.mod(finite, 1) == 0) and np.max(np.abs(finite)) < 1e15
-        fmt = ".0f" if integral else ".2g"
+        fmt = _default_annot_format(finite if annot_values is None else annot_values[~hidden])
 
     if isinstance(cmap, str) or cmap is None:
         cmap_obj = mpl.colormaps[cmap if cmap is not None else mpl.rcParams["image.cmap"]]

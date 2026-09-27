@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import stat
 import subprocess
 import sys
 import textwrap
@@ -169,6 +171,57 @@ def test_custom_type_callable():
     assert parse_value(action, "5") == 5
     with pytest.raises(ValueError, match="must be > 0"):
         parse_value(action, "-2")
+    with pytest.raises(ValueError, match="must be > 0"):
+        parse_value(action, -2)
+
+
+def str2bool(text):
+    """Typical command-line boolean converter (fails on non-strings)."""
+    if text.lower() in ("yes", "true", "t", "1"):
+        return True
+    if text.lower() in ("no", "false", "f", "0"):
+        return False
+    raise argparse.ArgumentTypeError("Boolean value expected.")
+
+
+def test_custom_type_callables_accept_json_values():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--use_gpu", type=str2bool, default=False)
+    parser.add_argument("--hexv", type=lambda s: int(s, 0), default=16)
+    parser.add_argument("--path", type=Path, default=Path("runs/a b"))
+    a = tunable_actions(parser)
+    assert parse_value(a["use_gpu"], True) is True
+    assert parse_value(a["use_gpu"], False) is False
+    assert parse_value(a["use_gpu"], "yes") is True
+    assert parse_value(a["hexv"], 32) == 32
+    assert parse_value(a["hexv"], "0x20") == 32
+    with pytest.raises(ValueError, match="Boolean value expected"):
+        parse_value(a["use_gpu"], 5)
+    with pytest.raises(ValueError, match="invalid value 1.5"):
+        parse_value(a["hexv"], 1.5)
+
+    def attribute_error(text):
+        return text.missing_method()
+
+    parser.add_argument("--broken", type=attribute_error, default=None)
+    with pytest.raises(ValueError, match="invalid attribute_error value 'x'"):
+        parse_value(tunable_actions(parser)["broken"], "x")
+    with pytest.raises(ValueError, match="broken:"):
+        apply_parameters(parser, {"broken": "x"})
+
+
+def test_custom_type_callables_survive_save_load_apply(tmp_path):
+    def make():
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--use_gpu", type=str2bool, default=False)
+        parser.add_argument("--hexv", type=lambda s: int(s, 0), default=16)
+        return parser
+
+    source = apply_parameters(make(), {"use_gpu": "true", "hexv": "0x40"})
+    path = save_parameters(get_parameters(source), tmp_path)
+    assert load_parameters(path) == {"use_gpu": True, "hexv": 64}
+    fresh = apply_parameters(make(), load_parameters(path))
+    assert vars(fresh.parse_args([])) == {"use_gpu": True, "hexv": 64}
 
 
 @pytest.mark.parametrize(
@@ -212,6 +265,50 @@ def test_nargs_counts_and_list_actions():
         parse_value(a["opt"], [1, 2])
     with pytest.raises(ValueError, match="cannot parse list"):
         parse_value(a["plus"], "[1, 2")
+
+
+def test_append_and_extend_with_nargs():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--point", action="append", type=int, nargs=2, default=[[1, 2]])
+    parser.add_argument("--group", action="append", nargs="+", default=None)
+    parser.add_argument("--ext", action="extend", type=int, nargs=2, default=[1, 2, 3])
+    parser.add_argument("--ext_plus", action="extend", nargs="+", default=[])
+    parser.add_argument("--pick", action="append", nargs=2, choices=["a", "b"], default=[])
+    a = tunable_actions(parser)
+    assert describe_type(a["point"]) == "list[list[int]]"
+    assert describe_type(a["ext"]) == "list[int]"
+    assert parse_value(a["point"], [[3, 4], [5, 6]]) == [[3, 4], [5, 6]]
+    assert parse_value(a["point"], "[[3, 4], [5, 6]]") == [[3, 4], [5, 6]]
+    assert parse_value(a["point"], "3 4 5 6") == [[3, 4], [5, 6]]  # like --point 3 4 --point 5 6
+    with pytest.raises(ValueError, match="exactly 2 values, got 3"):
+        parse_value(a["point"], "[[1, 2, 3]]")
+    with pytest.raises(ValueError, match="groups of 2"):
+        parse_value(a["point"], "1 2 3")
+    assert parse_value(a["group"], '[["x"], ["y", "z"]]') == [["x"], ["y", "z"]]
+    with pytest.raises(ValueError, match="list of value lists"):
+        parse_value(a["group"], "x y")
+    assert parse_value(a["ext"], "1 2 3 4 5") == [1, 2, 3, 4, 5]  # accumulated values
+    assert parse_value(a["ext_plus"], "[]") == []
+    assert parse_value(a["pick"], [["a", "b"]]) == [["a", "b"]]
+    with pytest.raises(ValueError, match="'c' is not a valid choice"):
+        parse_value(a["pick"], [["a", "c"]])
+    for value in ([[7, 8]], [], [[1, 2], [3, 4]]):
+        assert parse_value(a["point"], format_value(a["point"], value)) == value
+    assert parse_value(a["ext"], format_value(a["ext"], [1, 2, 3])) == [1, 2, 3]
+    args = apply_parameters(parser, {"point": [[9, 9]], "ext": [4]}).parse_args(["--point", "0", "1"])
+    assert args.point == [[9, 9], [0, 1]] and args.ext == [4]
+
+
+def test_format_value_writes_non_json_list_elements_as_strings():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--paths", type=Path, nargs="+", default=[Path("/tmp/a b"), Path("c")])
+    parser.add_argument("--nested", action="append", type=Path, nargs="+", default=None)
+    a = tunable_actions(parser)
+    text = format_value(a["paths"], [Path("/tmp/a b"), Path("c")])
+    assert json.loads(text) == ["/tmp/a b", "c"]
+    assert parse_value(a["paths"], text) == [Path("/tmp/a b"), Path("c")]
+    nested = [[Path("x y")], [Path("z"), Path("w")]]
+    assert parse_value(a["nested"], format_value(a["nested"], nested)) == nested
 
 
 def test_none_handling():
@@ -325,6 +422,38 @@ def test_save_into_directory_uses_timestamped_names(tmp_path):
     assert TIMESTAMPED.fullmatch(second.name) and first != second
     assert json.loads(first.read_text()) == {"a": 1}
     assert load_parameters(target) == {"a": 2}  # newest file in the directory
+
+
+def test_load_newest_file_orders_counters_numerically(tmp_path):
+    stamp = "parameters_20250101_120000"
+    names = [f"{stamp}.json"] + [f"{stamp}_{i}.json" for i in range(1, 12)]
+    for i, name in enumerate(names):
+        (tmp_path / name).write_text(json.dumps({"i": i}))
+    (tmp_path / "parameters_best.json").write_text(json.dumps({"i": "best"}))
+    (tmp_path / "parameters_20241231_235959_99.json").write_text(json.dumps({"i": "older"}))
+    assert load_parameters(tmp_path) == {"i": 11}  # "_11" is newer than "_9"
+    for name in names:
+        (tmp_path / name).unlink()
+    assert load_parameters(tmp_path) == {"i": "older"}  # timestamped names rank first
+
+
+def test_save_many_times_in_one_directory_loads_the_last(tmp_path):
+    paths = [save_parameters({"i": i}, tmp_path) for i in range(12)]
+    assert len(set(paths)) == 12
+    assert load_parameters(tmp_path) == {"i": 11}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_saved_file_has_default_permissions(tmp_path):
+    old = os.umask(0o027)
+    try:
+        path = save_parameters({"a": 1}, tmp_path / "run.json")
+        timestamped = save_parameters({"a": 1}, tmp_path)
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+    assert stat.S_IMODE(timestamped.stat().st_mode) == 0o640
+    assert not list(tmp_path.glob(".*.tmp"))
 
 
 def test_save_to_explicit_file_and_non_json_values(tmp_path):

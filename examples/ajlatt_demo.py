@@ -46,6 +46,7 @@ def encircle_policy(env: AJLATTEnv, radius: float = 1.8, gain: float = 1.2) -> n
 
 def run_episode(env: AJLATTEnv, policy: str, seed: int) -> dict:
     obs, _ = env.reset(seed=seed)
+    env.action_space.seed(seed)
     total = np.zeros(env.num_robots)
     collisions = 0
     while True:

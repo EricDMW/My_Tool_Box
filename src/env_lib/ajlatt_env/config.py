@@ -120,7 +120,11 @@ class AJLATTConfig:
     -------------
     target_policy: ``"auto"``, ``"sine"``, ``"waypoints"``, ``"circle"``, ``"random"``
         or ``"static"`` (see :mod:`env_lib.ajlatt_env.controllers`).
-    target_linear_velocity, target_omega_bound, k_theta, k_p: Policy parameters.
+    target_linear_velocity: Speed of the ``sine`` policy (and of the speed-dependent
+        target noise); the other policies use their own fixed speeds.
+    target_omega_bound: Turn-rate bound of the ``random`` policy.
+    k_theta: Heading gain of the ``sine`` and ``waypoints`` policies.
+    k_p: Unused; kept for compatibility with the original parameter set.
 
     Actions
     -------
@@ -294,8 +298,8 @@ class AJLATTConfig:
             Raise ``TypeError`` for unknown keys (otherwise warn and ignore).
         **kwargs:
             Field values. Legacy names (``num_Robot``, ``num_Target``,
-            ``num_targets``, ``T_steps``, ``maxmum_run``, ``SIGPERCENT``,
-            ``useupdate``, ``fix_seed``) are translated with a
+            ``T_steps``, ``maxmum_run``, ``SIGPERCENT``, ``useupdate``,
+            ``fix_seed``) are translated with a
             ``DeprecationWarning``; obsolete keys (``figID``, ``ssh_debug``,
             ``episode_num``, ...) are ignored with a warning.
         """

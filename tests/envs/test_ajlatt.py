@@ -386,3 +386,24 @@ def test_render_without_mode_returns_none():
 def test_gym_passive_checker_disabled_for_joint_api():
     spec = gym.registry["AJLATT-v0"]
     assert spec.disable_env_checker
+
+
+def test_non_finite_actions_rejected():
+    env = AJLATTEnv()
+    env.reset(seed=0)
+    bad = _forward()
+    bad[1, 0] = np.nan
+    with pytest.raises(ValueError, match="NaN"):
+        env.step(bad)
+
+
+def test_builder_sample_is_named_after_file(tmp_path):
+    from env_lib.ajlatt_env.maps import builder
+
+    assert builder.main(["--create-sample", str(tmp_path / "my_map")]) == 0
+    spec = tmp_path / "my_map.spec.yaml"
+    assert "name: my_map" in spec.read_text()
+    builder.main([str(spec)])
+    assert (tmp_path / "my_map.yaml").exists() and (tmp_path / "my_map.cfg").exists()
+    grid = env_lib.ajlatt_env.load_grid_map(tmp_path / "my_map")
+    assert grid.map.shape == (181, 181)

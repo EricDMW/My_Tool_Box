@@ -14,7 +14,7 @@ Examples
 from __future__ import annotations
 
 import os
-import tempfile
+import secrets
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any, Union
@@ -87,6 +87,24 @@ def _per_layer_list(
     if len(values) != n:
         raise ValueError(f"{name} must have {n} entries (one per layer), got {len(values)}")
     return values
+
+
+def _create_temp_file(target: Path) -> str:
+    """Create an empty, uniquely named temporary file next to ``target``.
+
+    Unlike ``tempfile.mkstemp`` (mode 0600), the file is created with mode 0666
+    filtered by the process umask, so the renamed checkpoint has the permissions of
+    a file written with :func:`open`. The umask itself is not read or changed.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    for _ in range(100):
+        name = target.parent / f".{target.name}.{secrets.token_hex(6)}.tmp"
+        try:
+            os.close(os.open(name, flags, 0o666))
+        except FileExistsError:
+            continue
+        return str(name)
+    raise FileExistsError(f"could not create a temporary file next to {target}")
 
 
 class NetworkUtils:
@@ -448,8 +466,28 @@ class NetworkUtils:
     ) -> Path:
         """Save model/optimizer state, epoch and loss to ``filepath``.
 
-        Parent directories are created and the file is written atomically.
-        Additional keyword arguments are stored in the checkpoint under their names.
+        Parent directories are created and the file is written atomically; it gets
+        the default permissions of new files (``0o666`` minus the umask).
+
+        Parameters
+        ----------
+        model : torch.nn.Module
+            Model whose ``state_dict`` is saved.
+        optimizer : torch.optim.Optimizer, optional
+            Optimizer whose ``state_dict`` is saved (``None`` stores ``None``).
+        epoch : int
+            Epoch number stored as ``"epoch"``.
+        loss : float
+            Loss value stored as ``"loss"``.
+        filepath : str or path-like
+            Destination file.
+        **extra
+            Additional entries stored under their names. :meth:`load_checkpoint`
+            uses ``weights_only=True`` by default, which only accepts tensors and
+            plain Python values (numbers, strings, lists, tuples, dicts of them);
+            extras holding other objects (e.g. NumPy arrays or scalars, paths,
+            custom classes) require ``load_checkpoint(..., weights_only=False)``,
+            which should only be used for trusted files.
 
         Returns
         -------
@@ -465,8 +503,7 @@ class NetworkUtils:
             "loss": float(loss),
             **extra,
         }
-        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-        os.close(fd)
+        tmp_name = _create_temp_file(path)
         try:
             torch.save(payload, tmp_name)
             os.replace(tmp_name, path)

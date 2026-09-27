@@ -12,10 +12,10 @@ installable project, \pkg{my-tool-box}, that provides two import packages:
     the Gymnasium API: coupled oscillators, message passing and wireless
     access on graphs, a cooperative physics game, consensus and formation
     control, and multi-robot localisation and target tracking.
-  \item[\pkg{toolkit}] Research utilities that are independent of the
-    environments: \pkg{plotkit} for publication-quality figures,
-    \pkg{neural\_toolkit} for PyTorch network building blocks and tabular
-    reinforcement-learning tools, and \pkg{parakit} for managing
+  \item[\pkg{toolkit}] Research utilities that do not depend on the
+    environments: \pkg{plotkit} creates publication-quality figures,
+    \pkg{neural\_toolkit} provides PyTorch network building blocks and
+    tabular reinforcement-learning tools, and \pkg{parakit} manages
     \pkg{argparse} parameters, with an optional graphical editor.
 \end{description}
 
@@ -124,11 +124,13 @@ algorithm that can drive a Gymnasium environment can use them.
 \section{Design principles}\label{sec:intro-principles}
 
 \paragraph{Gymnasium compatibility.}
-Every environment subclasses \code{gymnasium.Env}.
-\code{reset(*, seed=None, options=None)} returns \code{(observation, info)} and
-\code{step(action)} returns \code{(observation, reward, terminated, truncated,
-info)}, where \code{terminated} signals a task-defined end (success or
-failure) and \code{truncated} the episode limit. Observations are
+Every environment subclasses \code{gymnasium.Env}. The method \code{reset}
+accepts a \code{seed} and an \code{options} dictionary as keyword arguments
+and returns the pair \code{(observation, info)}. The method \code{step}
+returns the observation, the reward, the flags \code{terminated} and
+\code{truncated}, and the \code{info} dictionary, where \code{terminated}
+signals a task-defined end (success or failure) and \code{truncated} the
+episode limit. Observations are
 \code{float32} arrays contained in \code{observation\_space}. Multi-agent
 environments expose the whole team through joint spaces whose leading axis
 indexes the agents, and every environment reports per-agent rewards in
@@ -145,8 +147,8 @@ CPU or a GPU. The networks of \pkg{neural\_toolkit} are batch-first PyTorch
 modules. Section~\ref{sec:examples-benchmarks} reports measured step times.
 
 \paragraph{Reproducibility.}
-All randomness of an environment comes from its own generator,
-\code{self.np\_random}, seeded through \code{reset(seed=...)}. No library code
+All randomness of an environment comes from its own random generator
+(\code{self.np\_random}), which is seeded by \code{reset(seed=...)}. No library code
 seeds or draws from the global NumPy, Python or PyTorch random state, and
 plotting functions never modify the global matplotlib configuration unless
 asked to. Section~\ref{sec:trouble-seeding} lists everything that must be

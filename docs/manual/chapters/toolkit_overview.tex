@@ -386,9 +386,9 @@ print("saved to", tuner.last_saved_path)
 
 \paragraph{Systems without Tk or without a display.}
 \code{tune()} raises \code{ImportError} with installation instructions when
-Tk is missing (the message is available as
-\code{toolkit.parakit.TK\_MISSING\_MESSAGE}) and \code{RuntimeError} when no
-display is available, for example on a cluster node or over SSH without X
+Tk is missing (the text of the message is the constant
+\code{TK\_MISSING\_MESSAGE} of \pkg{toolkit.parakit}) and \code{RuntimeError}
+when no display is available, for example on a cluster node or over SSH without X
 forwarding. Scripts that should run everywhere catch both exceptions and fall
 back to the headless API:
 

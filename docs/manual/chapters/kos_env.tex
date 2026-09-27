@@ -2,9 +2,9 @@
 % Kuramoto oscillator environments
 % ---------------------------------------------------------------------------
 \begingroup
-% Extra interword stretch for paragraphs with long, unbreakable identifiers
-% (local to this chapter).
-\setlength{\emergencystretch}{2em}
+% Line breaking for paragraphs with long, unbreakable identifiers (local to
+% this chapter): allow looser lines instead of overfull ones.
+\setlength{\emergencystretch}{3em}\tolerance=1000
 \chapter{Kuramoto Oscillator Networks}\label{chap:kuramoto}
 
 The Kuramoto environments simulate a network of coupled phase oscillators that
@@ -93,7 +93,7 @@ Table~\ref{tab:kuramoto-topologies}; \code{adj\_matrix} overrides
   \centering\small
   \caption{Network topologies. $M$ is the number of undirected edges.}
   \label{tab:kuramoto-topologies}
-  \begin{tabularx}{\textwidth}{@{}lXl@{}}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}Xl@{}}
     \toprule
     \code{topology} & Edges & $M$ \\
     \midrule
@@ -109,7 +109,7 @@ Table~\ref{tab:kuramoto-topologies}; \code{adj\_matrix} overrides
   \end{tabularx}
 \end{table}
 
-\paragraph{Dynamic coupling} (\code{coupling\_mode="dynamic"}, default). The
+\paragraph{Dynamic coupling.} With \code{coupling\_mode="dynamic"} (default) the
 coupling strength of every edge is part of the action. The edges are listed in
 row-major order of the upper triangle of $A$; the list is available as
 \code{env.coupling\_indices} (pairs $(i, j)$ with $i < j$) and its length as
@@ -117,11 +117,11 @@ row-major order of the upper triangle of $A$; the list is available as
 $K_{ij} = K_{ji} = k_e$. A non-symmetric \code{adj\_matrix} triggers a warning,
 because every connected pair is one undirected edge with a single strength.
 
-\paragraph{Constant coupling} (\code{coupling\_mode="constant"}). $K$ is fixed:
-it is \code{constant\_coupling\_matrix} when given (the diagonal is set to zero)
-and \code{coupling\_strength}~$\cdot A$ otherwise. Only the control inputs are
-actions. A \code{constant\_coupling\_matrix} passed in dynamic mode is ignored
-with a warning.
+\paragraph{Constant coupling.} With \code{coupling\_mode="constant"} the
+coupling matrix is fixed and only the control inputs are actions. $K$ is the
+matrix passed as \code{constant\_coupling\_matrix}, with its diagonal set to
+zero, or $K$ = \code{coupling\_strength}$\,\cdot A$ when no matrix is given. A
+matrix passed in dynamic mode is ignored with a warning.
 
 % ---------------------------------------------------------------------------
 \section{Spaces}\label{sec:kuramoto-spaces}
@@ -134,7 +134,7 @@ of the wrong shape or with non-finite values raises \code{ValueError}.
   \centering\small
   \caption{Action layout.}
   \label{tab:kuramoto-action}
-  \begin{tabularx}{\textwidth}{@{}llX@{}}
+  \begin{tabularx}{\textwidth}{@{}ll>{\raggedright\arraybackslash}X@{}}
     \toprule
     Indices & Content & Bounds \\
     \midrule
@@ -154,7 +154,7 @@ an action of size 55 and an observation of size 75.
   \centering\small
   \caption{Observation layout (dynamic mode; in constant mode the coupling block is absent and the control inputs occupy \code{2N : 3N}).}
   \label{tab:kuramoto-obs}
-  \begin{tabularx}{\textwidth}{@{}lX@{}}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
     \toprule
     Indices & Content \\
     \midrule
@@ -247,7 +247,7 @@ shape \code{(n\_agents, size)} with one row per system.
     NumPy arrays with a leading dimension \code{n\_agents} for the quantities
     marked with an asterisk.}
   \label{tab:kuramoto-info}
-  \begin{tabularx}{\textwidth}{@{}lX@{}}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
     \toprule
     Key & Content \\
     \midrule
@@ -321,11 +321,15 @@ step, time, $r$ and the reward. The PyTorch backend shows system
 % ---------------------------------------------------------------------------
 \section{Registered ids}\label{sec:kuramoto-ids}
 
-\begin{table}[htbp]
+Table~\ref{tab:kuramoto-ids} lists the registered Kuramoto ids. The
+\code{KuramotoOscillatorTorch-*} ids require the \code{torch} extra; keyword
+arguments of \code{env\_lib.make} override their configuration.
+
+\begin{table}[!htbp]
   \centering\small
   \caption{Kuramoto ids (all other parameters keep their defaults).}
   \label{tab:kuramoto-ids}
-  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.52\textwidth}X@{}}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.52\textwidth}>{\raggedright\arraybackslash}X@{}}
     \toprule
     Id & Configuration \\
     \midrule
@@ -354,7 +358,7 @@ import numpy as np
 import env_lib
 
 env = env_lib.KuramotoOscillatorEnv(
-    n_oscillators=12, coupling_mode="constant", coupling_strength=0.5, max_steps=1000
+    n_oscillators=12, coupling_mode="constant", coupling_strength=0.5
 )
 obs, info = env.reset(seed=0)
 n = env.n_oscillators
@@ -362,10 +366,11 @@ while True:
     phases = obs[:n].astype(np.float64)
     z = np.exp(1j * phases).mean()                      # r exp(i psi)
     action = np.abs(z) * np.sin(np.angle(z) - phases)   # phase alignment
-    obs, reward, terminated, truncated, info = env.step(action.astype(np.float32))
+    action = action.astype(np.float32)
+    obs, reward, terminated, truncated, info = env.step(action)
     if terminated or truncated:
         break
-print(info["step_count"], info["order_parameter"])      # synchronised after 51 steps
+print(info["step_count"], info["order_parameter"])   # 51, above 0.99
 env.close()
 \end{pycode}
 
@@ -387,7 +392,7 @@ actions[:, n:] = np.linspace(1.0, 4.0, core.n_agents)[:, None]
 for _ in range(300):
     obs, reward, terminated, truncated, info = env.step(actions)
 print(info["order_parameter"])                     # one value per system
-print(info["agent_rewards"])                       # per-system rewards incl. bonus
+print(info["agent_rewards"])                       # per system, with bonus
 env.close()
 \end{pycode}
 
@@ -398,7 +403,8 @@ to synchronisation:
 \begin{shellcode}
 python examples/kuramoto_demo.py --save renders/kuramoto.gif
 python examples/kuramoto_demo.py --backend torch --n-agents 4 --theme light
-python examples/kuramoto_demo.py --mode constant --topology two_clusters --render-mode human
+python examples/kuramoto_demo.py --mode constant --topology two_clusters \
+    --render-mode human
 \end{shellcode}
 
 % ---------------------------------------------------------------------------

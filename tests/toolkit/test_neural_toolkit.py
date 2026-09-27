@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import inspect
+import os
+import stat
+import sys
 
 import numpy as np
 import pytest
@@ -818,6 +821,19 @@ def test_checkpoint_round_trip(tmp_path):
     assert clone_opt.state_dict()["state"].keys() == opt.state_dict()["state"].keys()
     epoch, _ = nt.NetworkUtils.load_checkpoint(clone, None, path, map_location="cpu")
     assert epoch == 7
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_checkpoint_file_has_default_permissions(tmp_path):
+    model = nn.Linear(2, 1)
+    old = os.umask(0o027)
+    try:
+        path = nt.NetworkUtils.save_checkpoint(model, None, 1, 0.5, tmp_path / "model.pt")
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640  # 0o666 & ~umask, not mkstemp's 0o600
+    assert [p.name for p in tmp_path.iterdir()] == ["model.pt"]  # no temporary file left
+    assert nt.NetworkUtils.load_checkpoint(nn.Linear(2, 1), None, path) == (1, 0.5)
 
 
 def test_conv_shape_helpers_match_pytorch():

@@ -2,9 +2,9 @@
 % Networked communication environments: LineMsg and WirelessComm
 % ---------------------------------------------------------------------------
 \begingroup
-% Extra interword stretch for paragraphs with long, unbreakable identifiers
-% (local to this chapter).
-\setlength{\emergencystretch}{2em}
+% Line breaking for paragraphs with long, unbreakable identifiers (local to
+% this chapter): allow looser lines instead of overfull ones.
+\setlength{\emergencystretch}{3em}\tolerance=1000
 \chapter{Networked Communication Environments}\label{chap:networked}
 
 This chapter documents two discrete multi-agent benchmarks in which agents on a
@@ -87,7 +87,7 @@ agent $i$:
   \centering\small
   \caption{LineMsg observation (row $i$).}
   \label{tab:linemsg-obs}
-  \begin{tabularx}{\textwidth}{@{}lX@{}}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
     \toprule
     Column & Content \\
     \midrule
@@ -107,7 +107,7 @@ agent $i$:
   \centering\small
   \caption{Constructor parameters of \code{LineMsgEnv}.}
   \label{tab:linemsg-params}
-  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.25\textwidth}>{\raggedright\arraybackslash}p{0.14\textwidth}X@{}}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.25\textwidth}>{\raggedright\arraybackslash}p{0.14\textwidth}>{\raggedright\arraybackslash}X@{}}
     \toprule
     Parameter & Default & Description \\
     \midrule
@@ -160,7 +160,7 @@ obs, info = env.reset(seed=0)                 # obs: (10, 3) float32
 rng = np.random.default_rng(0)
 episode_return = 0.0
 while True:
-    action = (rng.random(env.num_agents) < 0.9).astype(np.int64)  # duty-cycled relays
+    action = (rng.random(env.num_agents) < 0.9).astype(np.int64)  # duty cycle
     obs, reward, terminated, truncated, info = env.step(action)
     episode_return += reward
     if terminated or truncated:
@@ -168,7 +168,7 @@ while True:
 print(episode_return, info["agent_rewards"])
 
 env.reset(seed=1)
-env.step(0b1111111110)          # integer joint action: every agent except the sink acts
+env.step(0b1111111110)          # integer action: all agents but the sink act
 \end{pycode}
 
 The example script compares a random policy, duty-cycled relays and the
@@ -176,7 +176,7 @@ always-relay policy and can record an episode:
 
 \begin{shellcode}
 python examples/linemsg_demo.py --policy relay --save renders/linemsg.gif
-python examples/linemsg_demo.py --num-agents 30 --action-space-type multibinary
+python examples/linemsg_demo.py --num-agents 30 --episodes 50
 python examples/linemsg_demo.py --render-mode ansi
 \end{shellcode}
 
@@ -260,7 +260,7 @@ $d w^2 + k w + k$. The default configuration ($D = 2$, $k = 1$) has 18 columns.
   \centering\small
   \caption{Constructor parameters of \code{WirelessCommEnv}.}
   \label{tab:wireless-params}
-  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.36\textwidth}>{\raggedright\arraybackslash}p{0.1\textwidth}X@{}}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.39\textwidth}>{\raggedright\arraybackslash}p{0.1\textwidth}>{\raggedright\arraybackslash}X@{}}
     \toprule
     Parameter & Default & Description \\
     \midrule
@@ -279,7 +279,7 @@ $d w^2 + k w + k$. The default configuration ($D = 2$, $k = 1$) has 18 columns.
   \centering\small
   \caption{WirelessComm info dictionary (the same keys, all zero, at reset).}
   \label{tab:wireless-info}
-  \begin{tabularx}{\textwidth}{@{}lX@{}}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
     \toprule
     Key & Content \\
     \midrule
@@ -306,8 +306,8 @@ Every agent is a circle coloured by the outcome of its last action, with a
 small queue bar below it (one cell per deadline slot; the left cell expires
 first). Access points are squares at the interior corners, coloured by their
 load (idle, one transmitter, collision), and a line joins every transmitting
-agent to the access point it chose, coloured by the outcome; attempts towards a
-missing access point point out of the grid. The right panels show the packets
+agent to the access point it chose, coloured by the outcome; the line of an attempt
+towards a missing access point ends outside the grid. The right panels show the packets
 delivered per step with a rolling mean and the rolling collision count, and the
 cumulative return. \code{render\_mode="ansi"} returns the action and queue of
 every agent as text.
@@ -340,8 +340,9 @@ obs, info = env.reset(seed=0)                     # obs: (36, 18) float32
 k, w = env.n_obs_nghbr, env.window
 own = [d * w * w + k * w + k for d in range(env.ddl)]  # own queue columns
 directions = (4, 1, 2, 3)
+cells = [(i, j) for i in range(env.grid_x) for j in range(env.grid_y)]
 reachable = {d: np.array([env.access_point_mapping(i, j, d)[0] is not None
-                          for i in range(env.grid_x) for j in range(env.grid_y)])
+                          for i, j in cells])
              for d in directions}
 episode_return = 0.0
 for t in range(env.max_iter):
@@ -357,7 +358,8 @@ The example script compares uniformly random actions, $p$-persistent slotted
 ALOHA and the rotating schedule:
 
 \begin{shellcode}
-python examples/wireless_comm_demo.py --policy schedule --save renders/wireless.gif
+python examples/wireless_comm_demo.py --policy schedule \
+    --save renders/wireless.gif
 python examples/wireless_comm_demo.py --grid 8 8 --tau 0.5 --episodes 50
 \end{shellcode}
 
@@ -397,7 +399,8 @@ agents takes 0.013\,ms (0.019\,ms before 1.0), and a WirelessComm step takes
 0.05\,ms on the $6 \times 6$ grid (0.154\,ms before) and 0.046\,ms on a
 $12 \times 12$ grid (0.56\,ms before). Rendering a dashboard frame in
 \code{"rgb\_array"} mode takes about 15\,ms for either environment; the history
-needed by the dashboards is only recorded when a render mode is set.
+needed by the dashboards is only recorded in the \code{"human"} and
+\code{"rgb\_array"} modes.
 
 % ===========================================================================
 \section{Changes in 1.0}\label{sec:networked-changes}
@@ -408,9 +411,9 @@ summarised below; see Appendix~\ref{app:migration} for migration advice.
 \paragraph{LineMsg.}
 \begin{itemize}
   \item Action decoding and observations are vectorised.
-  \item Actions may be an integer in \code{Discrete(2**N)} or an array of $N$
-        bits; \code{action\_space\_type="multibinary"} supports more than 62
-        agents.
+  \item The joint action may be an integer or an array of $N$ bits. The new
+        option \code{action\_space\_type="multibinary"} declares a
+        \code{MultiBinary(N)} space and supports more than 62 agents.
   \item \code{step()} before \code{reset()} raises instead of resetting
         implicitly.
   \item The former text output is \code{render\_mode="ansi"}; \code{"human"}

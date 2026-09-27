@@ -319,6 +319,8 @@ class AJLATTEnv(gym.Env):
         actions = np.asarray(action, dtype=np.float64)
         if actions.ndim != 2 or actions.shape[1] != 2 or actions.shape[0] < self.nR:
             raise ValueError(f"action must have shape ({self.nR}, 2), got {actions.shape}")
+        if not np.all(np.isfinite(actions[: self.nR])):
+            raise ValueError("action contains NaN or infinite values")
         if actions.shape[0] > self.nR:
             if not self._warned_extra_rows:
                 warnings.warn(

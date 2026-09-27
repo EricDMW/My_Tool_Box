@@ -1,756 +1,610 @@
-\appendix
-
-\chapter{API Reference}
-
-\section{Neural Toolkit API}
-
-\subsection{Policy Networks}
-
-\subsubsection{MLPPolicyNetwork}
-
-\begin{lstlisting}[language=python]
-class MLPPolicyNetwork(nn.Module):
-    def __init__(self, input_dim, output_dim, hidden_dims=[256, 256], 
-                 activation='relu', dropout=0.1, layer_norm=False, 
-                 action_type='discrete', action_std=1.0):
-        """
-        Multi-layer perceptron policy network.
-        
-        Args:
-            input_dim (int): Input dimension
-            output_dim (int): Output dimension
-            hidden_dims (list): Hidden layer dimensions
-            activation (str): Activation function
-            dropout (float): Dropout rate
-            layer_norm (bool): Use layer normalization
-            action_type (str): 'discrete' or 'continuous'
-            action_std (float): Standard deviation for continuous actions
-        """
-\end{lstlisting}
-
-\subsubsection{CNPolicyNetwork}
-
-\begin{lstlisting}[language=python]
-class CNPolicyNetwork(nn.Module):
-    def __init__(self, input_channels, output_dim, conv_dims=[32, 64, 128],
-                 fc_dims=[256, 256], kernel_sizes=[3, 3, 3], strides=[2, 2, 2],
-                 activation='relu', dropout=0.1):
-        """
-        Convolutional neural network policy.
-        
-        Args:
-            input_channels (int): Number of input channels
-            output_dim (int): Output dimension
-            conv_dims (list): Convolutional layer dimensions
-            fc_dims (list): Fully connected layer dimensions
-            kernel_sizes (list): Kernel sizes for conv layers
-            strides (list): Strides for conv layers
-            activation (str): Activation function
-            dropout (float): Dropout rate
-        """
-\end{lstlisting}
-
-\subsubsection{RNNPolicyNetwork}
-
-\begin{lstlisting}[language=python]
-class RNNPolicyNetwork(nn.Module):
-    def __init__(self, input_dim, output_dim, hidden_dim=256, num_layers=2,
-                 rnn_type='lstm', fc_dims=[256], activation='relu', dropout=0.1):
-        """
-        Recurrent neural network policy.
-        
-        Args:
-            input_dim (int): Input dimension
-            output_dim (int): Output dimension
-            hidden_dim (int): Hidden dimension
-            num_layers (int): Number of RNN layers
-            rnn_type (str): 'lstm' or 'gru'
-            fc_dims (list): Fully connected layer dimensions
-            activation (str): Activation function
-            dropout (float): Dropout rate
-        """
-\end{lstlisting}
-
-\subsubsection{TransformerPolicyNetwork}
-
-\begin{lstlisting}[language=python]
-class TransformerPolicyNetwork(nn.Module):
-    def __init__(self, input_dim, output_dim, d_model=256, nhead=8, 
-                 num_layers=6, dim_feedforward=1024, dropout=0.1,
-                 fc_dims=[256], activation='relu'):
-        """
-        Transformer-based policy network.
-        
-        Args:
-            input_dim (int): Input dimension
-            output_dim (int): Output dimension
-            d_model (int): Model dimension
-            nhead (int): Number of attention heads
-            num_layers (int): Number of transformer layers
-            dim_feedforward (int): Feedforward dimension
-            dropout (float): Dropout rate
-            fc_dims (list): Fully connected layer dimensions
-            activation (str): Activation function
-        """
-\end{lstlisting}
-
-\subsection{Value Networks}
-
-\subsubsection{MLPValueNetwork}
-
-\begin{lstlisting}[language=python]
-class MLPValueNetwork(nn.Module):
-    def __init__(self, input_dim, hidden_dims=[256, 256], activation='relu',
-                 dropout=0.1, layer_norm=False):
-        """
-        Multi-layer perceptron value network.
-        
-        Args:
-            input_dim (int): Input dimension
-            hidden_dims (list): Hidden layer dimensions
-            activation (str): Activation function
-            dropout (float): Dropout rate
-            layer_norm (bool): Use layer normalization
-        """
-\end{lstlisting}
-
-\subsubsection{CNValueNetwork}
-
-\begin{lstlisting}[language=python]
-class CNValueNetwork(nn.Module):
-    def __init__(self, input_channels, conv_dims=[32, 64, 128],
-                 fc_dims=[256, 256], kernel_sizes=[3, 3, 3], strides=[2, 2, 2],
-                 activation='relu', dropout=0.1):
-        """
-        Convolutional neural network value network.
-        
-        Args:
-            input_channels (int): Number of input channels
-            conv_dims (list): Convolutional layer dimensions
-            fc_dims (list): Fully connected layer dimensions
-            kernel_sizes (list): Kernel sizes for conv layers
-            strides (list): Strides for conv layers
-            activation (str): Activation function
-            dropout (float): Dropout rate
-        """
-\end{lstlisting}
-
-\subsubsection{RNNValueNetwork}
-
-\begin{lstlisting}[language=python]
-class RNNValueNetwork(nn.Module):
-    def __init__(self, input_dim, hidden_dim=256, num_layers=2, rnn_type='lstm',
-                 fc_dims=[256], activation='relu', dropout=0.1):
-        """
-        Recurrent neural network value network.
-        
-        Args:
-            input_dim (int): Input dimension
-            hidden_dim (int): Hidden dimension
-            num_layers (int): Number of RNN layers
-            rnn_type (str): 'lstm' or 'gru'
-            fc_dims (list): Fully connected layer dimensions
-            activation (str): Activation function
-            dropout (float): Dropout rate
-        """
-\end{lstlisting}
-
-\subsubsection{TransformerValueNetwork}
-
-\begin{lstlisting}[language=python]
-class TransformerValueNetwork(nn.Module):
-    def __init__(self, input_dim, d_model=256, nhead=8, num_layers=6,
-                 dim_feedforward=1024, dropout=0.1, fc_dims=[256], activation='relu'):
-        """
-        Transformer-based value network.
-        
-        Args:
-            input_dim (int): Input dimension
-            d_model (int): Model dimension
-            nhead (int): Number of attention heads
-            num_layers (int): Number of transformer layers
-            dim_feedforward (int): Feedforward dimension
-            dropout (float): Dropout rate
-            fc_dims (list): Fully connected layer dimensions
-            activation (str): Activation function
-        """
-\end{lstlisting}
-
-\subsection{Q-Networks}
-
-\subsubsection{MLPQNetwork}
-
-\begin{lstlisting}[language=python]
-class MLPQNetwork(nn.Module):
-    def __init__(self, input_dim, output_dim, hidden_dims=[256, 256],
-                 activation='relu', dropout=0.1):
-        """
-        Multi-layer perceptron Q-network.
-        
-        Args:
-            input_dim (int): Input dimension
-            output_dim (int): Output dimension (number of actions)
-            hidden_dims (list): Hidden layer dimensions
-            activation (str): Activation function
-            dropout (float): Dropout rate
-        """
-\end{lstlisting}
-
-\subsubsection{DuelingQNetwork}
-
-\begin{lstlisting}[language=python]
-class DuelingQNetwork(nn.Module):
-    def __init__(self, input_dim, output_dim, hidden_dims=[256, 256],
-                 value_hidden_dims=[256], advantage_hidden_dims=[256],
-                 activation='relu', dropout=0.1):
-        """
-        Dueling architecture Q-network.
-        
-        Args:
-            input_dim (int): Input dimension
-            output_dim (int): Output dimension (number of actions)
-            hidden_dims (list): Shared hidden layer dimensions
-            value_hidden_dims (list): Value stream hidden dimensions
-            advantage_hidden_dims (list): Advantage stream hidden dimensions
-            activation (str): Activation function
-            dropout (float): Dropout rate
-        """
-\end{lstlisting}
-
-\subsection{State Encoders}
-
-\subsubsection{MLPEncoder}
-
-\begin{lstlisting}[language=python]
-class MLPEncoder(nn.Module):
-    def __init__(self, input_dim, output_dim, hidden_dims=[512, 256],
-                 activation='relu', dropout=0.1, layer_norm=False):
-        """
-        Multi-layer perceptron encoder.
-        
-        Args:
-            input_dim (int): Input dimension
-            output_dim (int): Output dimension
-            hidden_dims (list): Hidden layer dimensions
-            activation (str): Activation function
-            dropout (float): Dropout rate
-            layer_norm (bool): Use layer normalization
-        """
-\end{lstlisting}
-
-\subsubsection{CNNEncoder}
-
-\begin{lstlisting}[language=python]
-class CNNEncoder(nn.Module):
-    def __init__(self, input_channels, output_dim, conv_dims=[32, 64, 128, 256],
-                 fc_dims=[512], kernel_sizes=[3, 3, 3, 3], strides=[2, 2, 2, 2],
-                 activation='relu', dropout=0.1):
-        """
-        Convolutional neural network encoder.
-        
-        Args:
-            input_channels (int): Number of input channels
-            output_dim (int): Output dimension
-            conv_dims (list): Convolutional layer dimensions
-            fc_dims (list): Fully connected layer dimensions
-            kernel_sizes (list): Kernel sizes for conv layers
-            strides (list): Strides for conv layers
-            activation (str): Activation function
-            dropout (float): Dropout rate
-        """
-\end{lstlisting}
-
-\subsubsection{RNNEncoder}
-
-\begin{lstlisting}[language=python]
-class RNNEncoder(nn.Module):
-    def __init__(self, input_dim, output_dim, hidden_dim=256, num_layers=2,
-                 rnn_type='lstm', fc_dims=[256], activation='relu', dropout=0.1):
-        """
-        Recurrent neural network encoder.
-        
-        Args:
-            input_dim (int): Input dimension
-            output_dim (int): Output dimension
-            hidden_dim (int): Hidden dimension
-            num_layers (int): Number of RNN layers
-            rnn_type (str): 'lstm' or 'gru'
-            fc_dims (list): Fully connected layer dimensions
-            activation (str): Activation function
-            dropout (float): Dropout rate
-        """
-\end{lstlisting}
-
-\subsubsection{TransformerEncoder}
-
-\begin{lstlisting}[language=python]
-class TransformerEncoder(nn.Module):
-    def __init__(self, input_dim, output_dim, d_model=256, nhead=8, num_layers=6,
-                 dim_feedforward=1024, dropout=0.1, fc_dims=[256], activation='relu'):
-        """
-        Transformer-based encoder.
-        
-        Args:
-            input_dim (int): Input dimension
-            output_dim (int): Output dimension
-            d_model (int): Model dimension
-            nhead (int): Number of attention heads
-            num_layers (int): Number of transformer layers
-            dim_feedforward (int): Feedforward dimension
-            dropout (float): Dropout rate
-            fc_dims (list): Fully connected layer dimensions
-            activation (str): Activation function
-        """
-\end{lstlisting}
-
-\subsection{Output Decoders}
-
-\subsubsection{MLPDecoder}
-
-\begin{lstlisting}[language=python]
-class MLPDecoder(nn.Module):
-    def __init__(self, latent_dim, output_dim, hidden_dims=[256, 128],
-                 activation='relu', dropout=0.1):
-        """
-        Multi-layer perceptron decoder.
-        
-        Args:
-            latent_dim (int): Latent dimension
-            output_dim (int): Output dimension
-            hidden_dims (list): Hidden layer dimensions
-            activation (str): Activation function
-            dropout (float): Dropout rate
-        """
-\end{lstlisting}
-
-\subsubsection{CNNDecoder}
-
-\begin{lstlisting}[language=python]
-class CNNDecoder(nn.Module):
-    def __init__(self, latent_dim, output_channels, fc_dims=[512, 256],
-                 conv_dims=[256, 128, 64, 32], kernel_sizes=[3, 3, 3, 3],
-                 strides=[2, 2, 2, 2], initial_size=4):
-        """
-        Convolutional neural network decoder.
-        
-        Args:
-            latent_dim (int): Latent dimension
-            output_channels (int): Number of output channels
-            fc_dims (list): Fully connected layer dimensions
-            conv_dims (list): Convolutional layer dimensions
-            kernel_sizes (list): Kernel sizes for conv layers
-            strides (list): Strides for conv layers
-            initial_size (int): Initial feature map size
-        """
-\end{lstlisting}
-
-\subsubsection{RNNDecoder}
-
-\begin{lstlisting}[language=python]
-class RNNDecoder(nn.Module):
-    def __init__(self, latent_dim, output_dim, hidden_dim=256, num_layers=2,
-                 rnn_type='lstm', max_seq_len=100, fc_dims=[256], activation='relu'):
-        """
-        Recurrent neural network decoder.
-        
-        Args:
-            latent_dim (int): Latent dimension
-            output_dim (int): Output dimension
-            hidden_dim (int): Hidden dimension
-            num_layers (int): Number of RNN layers
-            rnn_type (str): 'lstm' or 'gru'
-            max_seq_len (int): Maximum sequence length
-            fc_dims (list): Fully connected layer dimensions
-            activation (str): Activation function
-        """
-\end{lstlisting}
-
-\subsubsection{TransformerDecoder}
-
-\begin{lstlisting}[language=python]
-class TransformerDecoder(nn.Module):
-    def __init__(self, latent_dim, output_dim, d_model=256, nhead=8, num_layers=6,
-                 dim_feedforward=1024, max_seq_len=100, dropout=0.1,
-                 fc_dims=[256], activation='relu'):
-        """
-        Transformer-based decoder.
-        
-        Args:
-            latent_dim (int): Latent dimension
-            output_dim (int): Output dimension
-            d_model (int): Model dimension
-            nhead (int): Number of attention heads
-            num_layers (int): Number of transformer layers
-            dim_feedforward (int): Feedforward dimension
-            max_seq_len (int): Maximum sequence length
-            dropout (float): Dropout rate
-            fc_dims (list): Fully connected layer dimensions
-            activation (str): Activation function
-        """
-\end{lstlisting}
-
-\subsection{Discrete Tools}
-
-\subsubsection{QTable}
-
-\begin{lstlisting}[language=python]
-class QTable:
-    def __init__(self, state_space_size, action_space_size, initial_value=0.0):
-        """
-        Q-learning table for discrete state-action spaces.
-        
-        Args:
-            state_space_size (int): Size of state space
-            action_space_size (int): Size of action space
-            initial_value (float): Initial Q-value
-        """
-    
-    def get_value(self, state, action):
-        """Get Q-value for state-action pair."""
-    
-    def update_value(self, state, action, value, learning_rate=0.1):
-        """Update Q-value for state-action pair."""
-    
-    def get_max_action(self, state):
-        """Get action with maximum Q-value for state."""
-    
-    def get_policy(self, state, epsilon=0.1):
-        """Get epsilon-greedy policy action."""
-\end{lstlisting}
-
-\subsubsection{ValueTable}
-
-\begin{lstlisting}[language=python]
-class ValueTable:
-    def __init__(self, state_space_size, initial_value=0.0):
-        """
-        Value table for discrete state spaces.
-        
-        Args:
-            state_space_size (int): Size of state space
-            initial_value (float): Initial value
-        """
-    
-    def get_value(self, state):
-        """Get value for state."""
-    
-    def update_value(self, state, value, learning_rate=0.1):
-        """Update value for state."""
-    
-    def get_values(self):
-        """Get all values."""
-\end{lstlisting}
-
-\subsubsection{PolicyTable}
-
-\begin{lstlisting}[language=python]
-class PolicyTable:
-    def __init__(self, state_space_size, action_space_size):
-        """
-        Policy table for discrete state-action spaces.
-        
-        Args:
-            state_space_size (int): Size of state space
-            action_space_size (int): Size of action space
-        """
-    
-    def get_value(self, state, action):
-        """Get policy probability for state-action pair."""
-    
-    def update_value(self, state, action, value, learning_rate=0.1):
-        """Update policy probability for state-action pair."""
-    
-    def get_policy(self, state):
-        """Sample action from policy."""
-    
-    def get_policy_probs(self, state):
-        """Get policy probabilities for state."""
-\end{lstlisting}
-
-\section{Plotkit API}
-
-\subsection{Core Plotting Functions}
-
-\subsubsection{plot\_training\_curves}
-
-\begin{lstlisting}[language=python]
-def plot_training_curves(episodes, rewards, losses=None, title="Training Progress",
-                        xlabel="Episode", ylabel="Value", save_path=None, show_plot=True):
-    """
-    Plot training curves for rewards and losses.
-    
-    Args:
-        episodes (array): Episode numbers
-        rewards (array): Reward values
-        losses (array, optional): Loss values
-        title (str): Plot title
-        xlabel (str): X-axis label
-        ylabel (str): Y-axis label
-        save_path (str, optional): Path to save plot
-        show_plot (bool): Whether to display plot
-    """
-\end{lstlisting}
-
-\subsubsection{plot\_performance\_metrics}
-
-\begin{lstlisting}[language=python]
-def plot_performance_metrics(episodes, metrics, title="Performance Metrics",
-                           xlabel="Episode", ylabel="Score", save_path=None, show_plot=True):
-    """
-    Plot multiple performance metrics.
-    
-    Args:
-        episodes (array): Episode numbers
-        metrics (dict): Dictionary of metric arrays
-        title (str): Plot title
-        xlabel (str): X-axis label
-        ylabel (str): Y-axis label
-        save_path (str, optional): Path to save plot
-        show_plot (bool): Whether to display plot
-    """
-\end{lstlisting}
-
-\subsubsection{plot\_network\_analysis}
-
-\begin{lstlisting}[language=python]
-def plot_network_analysis(model, title="Network Analysis", save_path=None,
-                         show_plot=True, bins=50):
-    """
-    Analyze and plot network weights and activations.
-    
-    Args:
-        model (nn.Module): Neural network model
-        title (str): Plot title
-        save_path (str, optional): Path to save plot
-        show_plot (bool): Whether to display plot
-        bins (int): Number of histogram bins
-    """
-\end{lstlisting}
-
-\subsubsection{plot\_weight\_distributions}
-
-\begin{lstlisting}[language=python]
-def plot_weight_distributions(model, title="Weight Distributions", save_path=None,
-                            show_plot=True, bins=50):
-    """
-    Plot weight distributions for network layers.
-    
-    Args:
-        model (nn.Module): Neural network model
-        title (str): Plot title
-        save_path (str, optional): Path to save plot
-        show_plot (bool): Whether to display plot
-        bins (int): Number of histogram bins
-    """
-\end{lstlisting}
-
-\subsection{Specialized Plotting Functions}
-
-\subsubsection{plot\_policy\_analysis}
-
-\begin{lstlisting}[language=python]
-def plot_policy_analysis(states, action_probabilities, action_names=None,
-                        title="Policy Analysis", xlabel="State", ylabel="Action Probability",
-                        save_path=None, show_plot=True):
-    """
-    Visualize policy distributions and action probabilities.
-    
-    Args:
-        states (array): State values
-        action_probabilities (array): Action probability arrays
-        action_names (list, optional): Names for actions
-        title (str): Plot title
-        xlabel (str): X-axis label
-        ylabel (str): Y-axis label
-        save_path (str, optional): Path to save plot
-        show_plot (bool): Whether to display plot
-    """
-\end{lstlisting}
-
-\subsubsection{plot\_value\_function}
-
-\begin{lstlisting}[language=python]
-def plot_value_function(states, values, title="Value Function", xlabel="State",
-                       ylabel="Value", save_path=None, show_plot=True):
-    """
-    Visualize value function estimates.
-    
-    Args:
-        states (array): State values
-        values (array): Value estimates
-        title (str): Plot title
-        xlabel (str): X-axis label
-        ylabel (str): Y-axis label
-        save_path (str, optional): Path to save plot
-        show_plot (bool): Whether to display plot
-    """
-\end{lstlisting}
-
-\subsubsection{plot\_q\_value\_analysis}
-
-\begin{lstlisting}[language=python]
-def plot_q_value_analysis(states, actions, q_values, action_names=None,
-                         title="Q-Value Analysis", xlabel="State", ylabel="Q-Value",
-                         save_path=None, show_plot=True):
-    """
-    Analyze Q-value distributions and action-value functions.
-    
-    Args:
-        states (array): State values
-        actions (array): Action values
-        q_values (array): Q-value matrix
-        action_names (list, optional): Names for actions
-        title (str): Plot title
-        xlabel (str): X-axis label
-        ylabel (str): Y-axis label
-        save_path (str, optional): Path to save plot
-        show_plot (bool): Whether to display plot
-    """
-\end{lstlisting}
-
-\section{Environment Library API}
-
-\subsection{Pistonball Environment}
-
-\subsubsection{PistonballEnv}
-
-\begin{lstlisting}[language=python]
-class PistonballEnv(gym.Env):
-    def __init__(self, num_agents=4, max_steps=1000, ball_speed=5.0, gravity=0.5,
-                 piston_speed=2.0, reward_scale=1.0, observation_type='vector',
-                 render_mode='rgb_array'):
-        """
-        Multi-agent physics-based environment.
-        
-        Args:
-            num_agents (int): Number of pistons/agents
-            max_steps (int): Maximum steps per episode
-            ball_speed (float): Initial ball speed
-            gravity (float): Gravity strength
-            piston_speed (float): Piston movement speed
-            reward_scale (float): Reward scaling factor
-            observation_type (str): Observation type
-            render_mode (str): Rendering mode
-        """
-    
-    def reset(self):
-        """Reset environment to initial state."""
-    
-    def step(self, actions):
-        """Take action and return (observations, rewards, dones, infos)."""
-    
-    def render(self, mode='human'):
-        """Render environment."""
-\end{lstlisting}
-
-\subsection{Kuramoto Oscillator Environment}
-
-\subsubsection{KuramotoEnv}
-
-\begin{lstlisting}[language=python]
-class KuramotoEnv(gym.Env):
-    def __init__(self, num_oscillators=10, coupling_strength=1.0, noise_strength=0.1,
-                 max_steps=200, dt=0.01, frequency_distribution='uniform',
-                 frequency_range=[-1.0, 1.0], reward_type='synchronization'):
-        """
-        Kuramoto oscillator environment.
-        
-        Args:
-            num_oscillators (int): Number of oscillators
-            coupling_strength (float): Initial coupling strength
-            noise_strength (float): Noise level
-            max_steps (int): Maximum steps per episode
-            dt (float): Time step for integration
-            frequency_distribution (str): Distribution type
-            frequency_range (list): Frequency range
-            reward_type (str): Reward type
-        """
-    
-    def reset(self):
-        """Reset environment to initial state."""
-    
-    def step(self, action):
-        """Take action and return (observation, reward, done, info)."""
-    
-    def compute_order_parameter(self):
-        """Compute synchronization order parameter."""
-\end{lstlisting}
-
-\section{Utility Functions}
-
-\subsection{Weight Initialization}
-
-\begin{lstlisting}[language=python]
-def initialize_weights(model, method='xavier_uniform'):
-    """
-    Initialize model weights.
-    
-    Args:
-        model (nn.Module): Neural network model
-        method (str): Initialization method
-    """
-\end{lstlisting}
-
-\subsection{Discrete Tools}
-
-\begin{lstlisting}[language=python]
-def q_learning_update(q_table, state, action, reward, next_state, gamma=0.99, alpha=0.1):
-    """Q-learning update rule."""
-    
-def sarsa_update(q_table, state, action, reward, next_state, next_action, gamma=0.99, alpha=0.1):
-    """SARSA update rule."""
-    
-def expected_sarsa_update(q_table, state, action, reward, next_state, policy_table, gamma=0.99, alpha=0.1):
-    """Expected SARSA update rule."""
-    
-def epsilon_greedy_policy(q_table, state, epsilon=0.1):
-    """Epsilon-greedy policy."""
-    
-def softmax_policy(q_table, state, temperature=1.0):
-    """Softmax policy."""
-\end{lstlisting}
-
-\section{Configuration}
-
-\subsection{Default Configuration}
-
-\begin{lstlisting}[language=python]
-DEFAULT_CONFIG = {
-    'device': 'cuda' if torch.cuda.is_available() else 'cpu',
-    'dtype': torch.float32,
-    'seed': 42,
-    'activation': 'relu',
-    'dropout': 0.1,
-    'layer_norm': False,
-    'hidden_dims': [256, 256],
-    'learning_rate': 0.001,
-    'batch_size': 32
-}
-\end{lstlisting}
-
-\subsection{Environment Configuration}
-
-\begin{lstlisting}[language=python]
-ENVIRONMENT_CONFIG = {
-    'pistonball': {
-        'num_agents': 4,
-        'max_steps': 1000,
-        'ball_speed': 5.0,
-        'gravity': 0.5,
-        'piston_speed': 2.0,
-        'reward_scale': 1.0,
-        'observation_type': 'vector',
-        'render_mode': 'rgb_array'
-    },
-    'kuramoto': {
-        'num_oscillators': 10,
-        'coupling_strength': 1.0,
-        'noise_strength': 0.1,
-        'max_steps': 200,
-        'dt': 0.01,
-        'frequency_distribution': 'uniform',
-        'frequency_range': [-1.0, 1.0],
-        'reward_type': 'synchronization'
-    }
-}
-\end{lstlisting} 
+% ---------------------------------------------------------------------------
+% Appendix: API reference
+% ---------------------------------------------------------------------------
+\chapter{API Reference}\label{app:api}
+
+This appendix lists the public classes and functions of version 1.0 with their
+signatures, grouped by module. Signatures omit type annotations; defaults are
+shown as in the source code. The chapters give the semantics, and the
+docstrings (\code{help(obj)} in Python) give full details. Names that start
+with an underscore and modules not listed here are internal and may change
+without notice.
+
+\section{env\_lib}\label{sec:api-envlib}
+
+\subsection{Package functions}
+
+\begin{pycode}
+env_lib.make(env_id, **kwargs) -> gym.Env
+env_lib.list_envs() -> list[str]
+env_lib.register_envs()
+env_lib.__version__                       # "1.0.0"
+\end{pycode}
+
+\code{make} creates a registered environment (a thin wrapper around
+\code{gymnasium.make} that suppresses the ``out of date'' warning of
+\code{-v0} ids); keyword arguments go to the environment constructor.
+\code{list\_envs} returns the registered ids in the order of
+Table~\ref{tab:api-ids}. \code{register\_envs} registers all ids with
+Gymnasium; it runs automatically on \code{import env\_lib} and is idempotent.
+The environment classes below are exported lazily by \pkg{env\_lib}, so
+optional dependencies are imported only when a class is used.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Registered environment ids and their preset arguments.}
+  \label{tab:api-ids}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{6.1cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Id & Class and preset arguments \\
+    \midrule
+    \envid{KuramotoOscillator-v0} & \code{KuramotoOscillatorEnv()} (10 oscillators) \\
+    \envid{KuramotoOscillator-v1} & \code{n\_oscillators=5} \\
+    \envid{KuramotoOscillator-Constant-v0} & \code{n\_oscillators=6}, \code{coupling\_mode="constant"} \\
+    \envid{KuramotoOscillator-FreqSync-Constant-v0} & as above, \code{reward\_type="frequency\_synchronization"}, \code{target\_frequency=2.0} \\
+    \envid{KuramotoOscillatorTorch-v0} & \code{KuramotoOscillatorEnvTorch()} (10 oscillators) \\
+    \envid{KuramotoOscillatorTorch-v1} & \code{n\_oscillators=8}, \code{n\_agents=4}, \code{device="cpu"} \\
+    \envid{KuramotoOscillatorTorch-v2} & \code{n\_oscillators=10}, \code{device="auto"}, \code{integration\_method="rk4"} \\
+    \envid{KuramotoOscillatorTorch-Constant-v0} & \code{n\_oscillators=6}, \code{coupling\_mode="constant"} \\
+    \envid{KuramotoOscillatorTorch-FreqSync-Constant-v0} & as above, frequency synchronisation, \code{target\_frequency=2.0} \\
+    \envid{LineMsg-v0} & \code{LineMsgEnv()} \\
+    \envid{WirelessComm-v0} & \code{WirelessCommEnv()} ($6 \times 6$ grid) \\
+    \envid{WirelessComm-v1} & \code{grid\_x=4}, \code{grid\_y=4} \\
+    \envid{Pistonball-v0} & \code{PistonballEnv()} \\
+    \envid{Consensus-v0} & \code{ConsensusEnv()} \\
+    \envid{Formation-v0} & \code{ConsensusEnv(task="formation")} \\
+    \envid{AJLATT-v0} & \code{AJLATTEnv()} (Gymnasium's passive environment checker disabled) \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\subsection{Common environment interface}
+
+Every environment class implements the Gymnasium methods
+
+\begin{pycode}
+reset(*, seed=None, options=None) -> tuple[observation, dict]
+step(action) -> tuple[observation, reward, terminated, truncated, dict]
+render() -> np.ndarray | None        # (H, W, 3) uint8 in "rgb_array" mode
+close()                              # idempotent
+\end{pycode}
+
+and has the attributes \code{action\_space}, \code{observation\_space},
+\code{render\_mode}, \code{metadata} and \code{np\_random}. The \code{info}
+dictionary always contains \code{"agent\_rewards"}, a \code{float64} array of
+shape \code{(n\_agents,)}. Chapter~\ref{chap:envlib} describes the conventions.
+
+\subsection{KuramotoOscillatorEnv and KuramotoOscillatorEnvTorch}
+
+Module \pkg{env\_lib.kos\_env}; Chapter~\ref{chap:kuramoto}.
+
+\begin{pycode}
+KuramotoOscillatorEnv(n_oscillators=10, n_agents=1, dt=0.01, max_steps=1000,
+                      coupling_range=(0.0, 5.0), control_input_range=(-1.0, 1.0),
+                      natural_freq_range=(0.5, 2.0), device='cpu',
+                      render_mode=None, integration_method='euler',
+                      reward_type='order_parameter', noise_std=0.0,
+                      topology='fully_connected', adj_matrix=None,
+                      target_frequency=1.0, coupling_mode='dynamic',
+                      constant_coupling_matrix=None, coupling_strength=1.0,
+                      normalize_coupling=False, topology_seed=42,
+                      sync_threshold=0.99, sync_bonus=10.0)
+
+KuramotoOscillatorEnvTorch(...same arguments..., device='cpu', render_agent=0)
+\end{pycode}
+
+\code{KuramotoOscillatorEnv} simulates one network with NumPy.
+\code{KuramotoOscillatorEnvTorch} simulates \code{n\_agents} independent
+systems in a batch on \code{device} (\code{"cpu"}, \code{"cuda"},
+\code{"cuda:<k>"}, a \code{torch.device} or \code{"auto"});
+\code{render\_agent} selects the rendered system. Additional methods of the
+PyTorch class:
+
+\begin{center}
+  \small
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{6.9cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Method & Description \\
+    \midrule
+    \code{get\_batch\_observations() -> Tensor} & Observations of all systems, \code{(n\_agents, obs\_dim)}, on the device. \\
+    \code{get\_batch\_rewards(dphases\_dt=None, include\_bonus=False)} & Per-system rewards of the current state, \code{(n\_agents,)}. \\
+    \bottomrule
+  \end{tabularx}
+\end{center}
+
+\code{env\_lib.kos\_env.register()} is deprecated; registration happens on
+import.
+
+\subsection{LineMsgEnv and WirelessCommEnv}
+
+Modules \pkg{env\_lib.linemsg\_env} and \pkg{env\_lib.wireless\_comm\_env};
+Chapter~\ref{chap:networked}.
+
+\begin{pycode}
+LineMsgEnv(num_agents=10, n_obs_neighbors=1, max_iter=50, render_mode=None,
+           action_space_type='discrete')
+
+WirelessCommEnv(grid_x=6, grid_y=6, ddl=2, packet_arrival_probability=0.8,
+                success_transmission_probability=0.8, n_obs_neighbors=1,
+                max_iter=50, render_mode=None)
+\end{pycode}
+
+Both support the render modes \code{"human"}, \code{"rgb\_array"} and
+\code{"ansi"} (text). \code{seed(seed=None)} is kept for backward
+compatibility and deprecated in favour of \code{reset(seed=...)}.
+\code{WirelessCommEnv} also exposes \code{access\_point\_mapping(i, j,
+agent\_action)}, which returns the access point \code{(row, column)} used by
+agent \code{(i, j)} (or \code{(None, None)}), and
+\code{check\_transmission\_fail(ap\_x, ap\_y, access\_point\_profile)}, which
+is \code{True} unless exactly one agent uses the access point.
+\code{env\_lib.wireless\_comm\_env.register()} is deprecated.
+
+\subsection{PistonballEnv}
+
+Module \pkg{env\_lib.pistonball\_env}; Chapter~\ref{chap:pistonball}. Requires
+the \code{pistonball} extra.
+
+\begin{pycode}
+PistonballEnv(n_pistons=20, time_penalty=-0.1, continuous=True, random_drop=True,
+              random_rotate=True, ball_mass=0.75, ball_friction=0.3,
+              ball_elasticity=1.5, max_cycles=125, render_mode=None,
+              movement_penalty=0.0, movement_penalty_threshold=0.01, kappa=1,
+              terminated_condition=True, leftmost_piston_reward=0.0,
+              termination_reward=0.5)
+
+ManualPolicy(env, agent_id=0, show_obs=False)
+\end{pycode}
+
+\begin{center}
+  \small
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{6.9cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Member & Description \\
+    \midrule
+    \code{observable\_mask(ball\_x=None) -> np.ndarray} & Boolean \code{(n\_pistons,)} mask of the pistons within \code{kappa} of the piston under the ball. \\
+    \code{get\_local\_reward\_for\_piston(i, prev\_x, curr\_x)} & Reference implementation of one piston's local reward. \\
+    \code{get\_local\_reward(prev\_position, curr\_position)} & The ball term of the local reward. \\
+    \code{renderer} & The \code{PistonballRenderer}, or \code{None} before the first \code{render()}. \\
+    \code{seed(seed=None)} & Deprecated; use \code{reset(seed=...)}. \\
+    \code{draw()}, \code{draw\_background()}, \code{draw\_pistons()}, \code{enable\_render()} & Deprecated no-ops kept for compatibility; use \code{render()}. \\
+    \bottomrule
+  \end{tabularx}
+\end{center}
+
+\code{ManualPolicy} is a keyboard controller for \code{"human"} mode: calling
+it returns a joint action in which the selected piston follows the keys
+(W/S or Up/Down move it, A/D or Left/Right select another piston); its
+\code{running} attribute becomes \code{False} when the user presses Escape
+or closes the window. The module also exports \code{PistonballLayout} (screen
+geometry) and \code{PistonballRenderer} (the pygame renderer).
+
+\subsection{ConsensusEnv}
+
+Module \pkg{env\_lib.consensus\_env}; Chapter~\ref{chap:consensus}.
+
+\begin{pycode}
+ConsensusEnv(*, n_agents=8, task='consensus', topology='ring', dynamics='single',
+             dt=0.1, max_steps=200, arena_size=10.0, max_control=1.0,
+             control_cost=0.01, noise_std=0.0, tolerance=0.05, success_bonus=10.0,
+             formation_shape='circle', formation_radius=3.0, comm_radius=4.0,
+             edge_probability=0.3, graph_seed=None, max_neighbors=None,
+             damping=0.5, render_mode=None)
+\end{pycode}
+
+\begin{center}
+  \small
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{6.9cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Member & Description \\
+    \midrule
+    \code{laplacian\_policy(gain=1.0, velocity\_gain=None)} & Distributed feedback $u = -\text{gain}\,L(x - d)$ (plus velocity feedback for double integrators), clipped to the action bounds. \\
+    \code{positions}, \code{velocities} & Copies of the current states, \code{(n\_agents, 2)}. \\
+    \code{formation\_offsets} & Offsets $d_i$, \code{(n\_agents, 2)} (zeros for consensus). \\
+    \code{adjacency}, \code{laplacian} & Current communication graph and its Laplacian $L = D - A$. \\
+    \code{algebraic\_connectivity} & Fiedler value of the current Laplacian. \\
+    \code{task\_error}, \code{step\_count} & Current task error and step within the episode. \\
+    \code{observation\_layout} & Column slices of one observation row. \\
+    \bottomrule
+  \end{tabularx}
+\end{center}
+
+Module-level helpers and constants:
+
+\begin{pycode}
+make_topology(topology, n_agents, *, edge_probability=0.3, rng=None,
+              max_attempts=1000) -> np.ndarray       # adjacency of a static graph
+proximity_adjacency(positions, comm_radius) -> np.ndarray   # disk graph
+make_formation(shape, n_agents, radius=1.0) -> np.ndarray    # offsets d_i
+algebraic_connectivity(adjacency) -> float   # second smallest eigenvalue of L
+is_connected(adjacency) -> bool
+
+TOPOLOGIES = ('ring', 'line', 'star', 'complete', 'erdos_renyi', 'proximity')
+TASKS = ('consensus', 'formation')
+DYNAMICS = ('single', 'double')
+FORMATION_SHAPES = ('circle', 'line', 'grid', 'wedge')
+\end{pycode}
+
+\subsection{AJLATTEnv and AJLATTConfig}
+
+Module \pkg{env\_lib.ajlatt\_env}; Chapter~\ref{chap:ajlatt}.
+
+\begin{pycode}
+AJLATTEnv(config=None, render_mode=None, **overrides)
+AJLATTConfig(map_name='obstacles04', num_robots=4, num_targets=1,
+             max_episode_steps=120, sampling_period=0.5, ..., ci_solver='newton',
+             target_policy='auto', ..., seed=None)   # dataclass, about 50 fields
+TeamRewardWrapper(env)                # gymnasium.Wrapper
+make(figID=0, *, render_mode=None, **kwargs) -> AJLATTEnv   # legacy factory
+available_maps() -> list[str]
+load_grid_map(map_name, margin2wall=0.5) -> GridMap
+load_map(map_name) -> tuple[np.ndarray, list[float], list[float]]
+\end{pycode}
+
+\code{AJLATTEnv} is configured by an \code{AJLATTConfig} and/or keyword
+overrides of its fields. \code{TeamRewardWrapper} returns the summed team
+reward and a scalar \code{terminated} flag and keeps the per-robot values in
+\code{info["agent\_rewards"]} and \code{info["agent\_terminated"]}.
+\code{make} (also callable as \code{env\_lib.ajlatt\_env(...)}) accepts the
+legacy parameter names with a \code{DeprecationWarning} and ignores unknown
+names with a warning.
+
+\begin{center}
+  \small
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{6.9cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Member & Description \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{AJLATTEnv}} \\
+    \code{single\_action\_space}, \code{single\_observation\_space} & Per-robot spaces; the joint spaces have a leading \code{num\_robots} axis. \\
+    \code{observation\_layout() -> dict[str, slice]} & Slices of the per-robot observation vector. \\
+    \code{episode\_statistics() -> dict[str, np.ndarray]} & Per-step traces of the current episode (\code{robot\_cov\_trace}, \code{target\_cov\_trace}, \code{robot\_error}, \code{target\_error}, \code{reward}), each \code{(steps + 1, num\_robots)}. \\
+    \code{config}, \code{MAP} & The configuration and the loaded \code{GridMap}. \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{AJLATTConfig}} \\
+    \code{from\_kwargs(strict=True, **kwargs)} & Build from keyword arguments, translating legacy names. \\
+    \code{add\_arguments(parser, prefix="")} & Register every scalar field as \code{--<prefix><name>} on an \pkg{argparse} parser. \\
+    \code{from\_namespace(namespace, prefix="", strict=False)} & Build from parsed arguments. \\
+    \code{to\_dict()}, \code{from\_dict(data, strict=True)} & Plain-dictionary round trip. \\
+    \code{replace(**changes)} & Validated copy with some fields replaced. \\
+    \code{validate()}, \code{observation\_dim}, \code{field\_names()} & Range checks, per-robot observation size $7 + 4(n_R - 1) + 5$, field list. \\
+    \bottomrule
+  \end{tabularx}
+\end{center}
+
+\subsection{AJLATT maps}
+
+Module \pkg{env\_lib.ajlatt\_env.maps}; Chapter~\ref{chap:ajlatt}.
+
+\begin{pycode}
+GridMap(map_path, margin2wall=0.5)
+GridMap.from_array(occupancy, *, mapmin=(0.0, 0.0), mapres=0.4, margin2wall=0.5,
+                   name='custom') -> GridMap
+DynamicMap(map_dir_path, map_name, map_path=None, margin2wall=0.5)
+DynamicMap.generate_map(chosen_idx=None, rot_angs=None, rng=None) -> np.ndarray
+resolve_map_path(map_name) -> Path
+MAP_DIR                                   # directory of the bundled maps
+\end{pycode}
+
+\begin{center}
+  \small
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{6.9cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    \code{GridMap} method & Description \\
+    \midrule
+    \code{is\_blocked(start\_pos, end\_pos) -> bool} & Whether the straight line between two positions crosses an obstacle. \\
+    \code{is\_blocked\_batch(start\_pos, end\_pos)} & Vectorised \code{is\_blocked} for arrays of shape \code{(n, 2)} or \code{(n, 3)}. \\
+    \code{get\_closest\_obstacle(odom, ang\_res=0.05, fov=pi, r\_max=3.0, return\_pt=False)} & Range and bearing of the closest obstacle cell in a field of view. \\
+    \code{get\_front\_obstacle(odom, r\_max=3.0)} & Range to the first obstacle straight ahead, or \code{None}. \\
+    \code{is\_collision(pos, margin=None) -> bool} & Out of bounds or within \code{margin} of an occupied cell. \\
+    \code{in\_bound(pos) -> bool} & At least \code{margin2wall} inside the map boundary. \\
+    \code{se2\_to\_cell(pos)}, \code{cell\_to\_se2(cell)} & Conversions between positions and cell indices. \\
+    \bottomrule
+  \end{tabularx}
+\end{center}
+
+The submodules \pkg{maps.builder} (\code{build\_map}, \code{rasterize},
+\code{load\_spec}, \code{save\_map}) and \pkg{maps.plotting}
+(\code{plot\_map}) implement the console scripts \code{ajlatt-build-map} and
+\code{ajlatt-plot-map}. The geometry helpers \code{bresenham2D},
+\code{bresenham\_batch}, \code{se2\_to\_cell}, \code{cell\_to\_se2} and
+\code{coord\_change2g} are exported as well.
+
+\section{env\_lib.utils}\label{sec:api-utils}
+
+\begin{pycode}
+record_episode(env, policy=None, path=None, *, max_steps=None, seed=None,
+               fps=None, render_every=1) -> list[np.ndarray]
+save_animation(frames, path, fps=30.0, *, loop=0) -> Path
+set_theme(theme)                          # "dark" (default) or "light"
+get_theme(theme=None) -> Theme
+register_theme(theme)
+Theme(name, background, panel, grid, text, muted, accent, positive, negative,
+      warning, categorical, sequential_cmap='viridis', diverging_cmap='RdBu_r')
+DARK, LIGHT                               # the built-in themes
+FigureWindow(render_mode, *, figsize=(8.0, 6.0), dpi=100, fps=30.0, title=None,
+             theme=None)
+MatplotlibRenderer(render_mode, *, figsize=(8.0, 6.0), dpi=100, fps=30.0,
+                   title=None, theme=None, blit=True)
+figure_to_rgb(fig) -> np.ndarray
+style_axes(ax, theme, *, title=None, xlabel=None, ylabel=None, grid=True,
+           show_spines=False, fontsize=9.0) -> Axes
+with_alpha(color, alpha) -> tuple[float, float, float, float]
+\end{pycode}
+
+\code{record\_episode} and \code{save\_animation} are described in
+Section~\ref{sec:examples-recording}. \code{Theme} is a dataclass of colours
+with \code{color(index)} for the cycled categorical colours;
+\code{set\_theme} affects renderers created afterwards. \code{FigureWindow}
+owns one matplotlib figure (off-screen Agg canvas in \code{"rgb\_array"} mode,
+a window in \code{"human"} mode) with \code{draw()}, \code{close()} and
+\code{is\_open}. \code{MatplotlibRenderer} is the base class of the
+environment renderers: subclasses implement \code{\_build(fig)} (create the
+artists once) and \code{\_update(...)} (update their data), and users call
+\code{render(...)}, \code{reset()} and \code{close()}.
+\code{figure\_to\_rgb}, \code{style\_axes} and \code{with\_alpha} are helpers
+for custom renderers.
+
+\section{toolkit.plotkit}\label{sec:api-plotkit}
+
+Chapter~\ref{chap:plotkit}. All plot functions return the
+\code{matplotlib.axes.Axes} they drew on.
+
+\begin{pycode}
+plot_shadow_curve(y, x=None, y_std=None, labels=None, colors=None, alpha=0.2,
+                  ax=None, axis=0, figsize=(10, 6), title=None, xlabel=None,
+                  ylabel=None, legend=True, grid=True, style='research',
+                  legend_labels=None, x_tick_labels=None, y_tick_labels=None,
+                  *, band='std', smoothing=None, **kwargs)
+plot_learning_curves(runs, x=None, *, band='ci95', smoothing=None, colors=None,
+                     alpha=0.2, ax=None, figsize=(10, 6), title=None,
+                     xlabel='Step', ylabel='Return', legend=True, grid=True,
+                     style='research', **kwargs)
+plot_line(x, y, labels=None, colors=None, ax=None, figsize=(10, 6), title=None,
+          xlabel=None, ylabel=None, legend=True, grid=True, style='research',
+          **kwargs)
+plot_scatter(x, y, ...same arguments as plot_line...)
+plot_bar(x, height, labels=None, colors=None, ax=None, figsize=(10, 6),
+         title=None, xlabel=None, ylabel=None, legend=True, grid=True,
+         style='research', *, width=0.8, yerr=None, value_labels=False,
+         horizontal=False, capsize=3.0, **kwargs)
+plot_histogram(data, bins='auto', labels=None, colors=None, ax=None,
+               figsize=(10, 6), title=None, xlabel=None, ylabel=None,
+               legend=True, grid=True, style='research', *, density=False,
+               alpha=0.45, histtype='stepfilled', **kwargs)
+plot_heatmap(data, xlabels=None, ylabels=None, cmap='viridis', annot=False,
+             ax=None, figsize=(8, 6), title=None, xlabel=None, ylabel=None,
+             cbar=True, cbar_label=None, style='research', *, fmt=None,
+             vmin=None, vmax=None, center=None, robust=False, mask=None,
+             nan_color=None, aspect='auto', square=False, linewidths=None,
+             linecolor='white', annot_kws=None, cbar_kws=None, **kwargs)
+plot_gray_scale(data, xlabels=None, ylabels=None, ax=None, figsize=(8, 6),
+                title=None, xlabel=None, ylabel=None, style='research',
+                **kwargs)
+
+save_figure(fig_or_ax, path, formats=None, dpi=300, transparent=False,
+            **savefig_kwargs) -> list[Path]
+style_context(style='research')           # context manager
+set_research_style()
+reset_style()
+get_palette(name='research', n=None) -> list[str]
+
+STYLE_PRESETS                  # read-only: 'research', 'presentation', 'minimal', 'default'
+RESEARCH_COLORS, RESEARCH_COLOR_LIST          # tab10, dict and list
+OKABE_ITO_COLORS, OKABE_ITO_COLOR_LIST        # colour-blind-safe, dict and list
+\end{pycode}
+
+\code{python -m toolkit.plotkit} and the console script
+\code{plotkit-gallery} run the gallery (Section~\ref{sec:plotkit-cli}). The
+module \pkg{toolkit.plotkit.core} re-exports the same names for code written
+against earlier versions.
+
+\section{toolkit.neural\_toolkit}\label{sec:api-neural}
+
+Chapter~\ref{chap:neural}. Requires PyTorch. All networks are
+\code{torch.nn.Module} subclasses; the shapes are given in
+Table~\ref{tab:neural-shapes}.
+
+\subsection{Layers}
+
+\begin{pycode}
+get_activation(name) -> nn.Module
+build_mlp(input_dim, hidden_dims, output_dim=None, activation='relu',
+          dropout=0.0, layer_norm=False, output_activation=None,
+          bias=True) -> nn.Sequential
+PositionalEncoding(d_model, dropout=0.1, max_len=5000)
+ACTIVATION_NAMES          # ('elu', 'gelu', 'identity', 'leaky_relu', 'mish', 'relu',
+                          #  'sigmoid', 'silu', 'softplus', 'swish', 'tanh')
+\end{pycode}
+
+\subsection{Policy and value networks}
+
+\begin{pycode}
+MLPPolicyNetwork(input_dim, output_dim, hidden_dims=(256, 256),
+                 activation='relu', dropout=0.0, layer_norm=False, device='cpu')
+CNPolicyNetwork(input_channels, output_dim, conv_dims=(32, 64, 128),
+                fc_dims=(256, 256), kernel_sizes=None, strides=None,
+                activation='relu', dropout=0.0, layer_norm=False, device='cpu')
+RNPolicyNetwork(input_dim, output_dim, hidden_dim=256, num_layers=2,
+                rnn_type='lstm', bidirectional=False, fc_dims=(256,),
+                activation='relu', dropout=0.0, layer_norm=False, device='cpu')
+TransformerPolicyNetwork(input_dim, output_dim, d_model=256, nhead=8,
+                         num_layers=6, dim_feedforward=1024, dropout=0.1,
+                         fc_dims=(256,), activation='relu', layer_norm=True,
+                         device='cpu', max_len=5000)
+CNNPolicyNetwork = CNPolicyNetwork; RNNPolicyNetwork = RNPolicyNetwork
+
+MLPValueNetwork, CNNValueNetwork, RNNValueNetwork, TransformerValueNetwork
+    # same arguments as the policy networks, with output_dim=1 by default
+\end{pycode}
+
+\subsection{Q-networks}
+
+\begin{pycode}
+MLPQNetwork(state_dim, action_dim, hidden_dims=(256, 256), activation='relu',
+            dropout=0.0, layer_norm=False, device='cpu', continuous_action=False)
+DuelingQNetwork(state_dim, action_dim, hidden_dims=(256, 256),
+                activation='relu', dropout=0.0, layer_norm=False, device='cpu')
+CNQNetwork(input_channels, action_dim, conv_dims=(32, 64, 128),
+           fc_dims=(256, 256), kernel_sizes=None, strides=None,
+           activation='relu', dropout=0.0, layer_norm=False, device='cpu')
+RNQNetwork(state_dim, action_dim, hidden_dim=256, num_layers=2, rnn_type='lstm',
+           bidirectional=False, fc_dims=(256,), activation='relu', dropout=0.0,
+           layer_norm=False, device='cpu')
+TransformerQNetwork(state_dim, action_dim, d_model=256, nhead=8, num_layers=6,
+                    dim_feedforward=1024, dropout=0.1, fc_dims=(256,),
+                    activation='relu', layer_norm=True, device='cpu',
+                    max_len=5000)
+CNNQNetwork = CNQNetwork; RNNQNetwork = RNQNetwork
+# forward(state, action=None[, hidden or mask]): (B, A), or Q(s, a) of shape (B,)
+\end{pycode}
+
+\subsection{Encoders and decoders}
+
+\begin{pycode}
+MLPEncoder(input_dim, latent_dim, hidden_dims=(256, 256), activation='relu',
+           dropout=0.0, layer_norm=False, device='cpu')
+CNNEncoder(input_channels, latent_dim, conv_dims=(32, 64, 128, 256),
+           fc_dims=(512, 256), kernel_sizes=None, strides=None,
+           activation='relu', dropout=0.0, layer_norm=False, device='cpu',
+           pooled_size=4)
+RNNEncoder(input_dim, latent_dim, hidden_dim=256, num_layers=2, rnn_type='lstm',
+           bidirectional=True, fc_dims=(256,), activation='relu', dropout=0.0,
+           layer_norm=False, device='cpu')
+TransformerEncoder(input_dim, latent_dim, d_model=256, nhead=8, num_layers=6,
+                   dim_feedforward=1024, dropout=0.1, fc_dims=(256,),
+                   activation='relu', layer_norm=True, device='cpu',
+                   max_len=5000)
+VariationalEncoder(input_dim, latent_dim, hidden_dims=(256, 256),
+                   activation='relu', dropout=0.0, layer_norm=False,
+                   device='cpu')          # forward -> (z, mu, logvar)
+VariationalEncoder.kl_divergence(mu, logvar) -> Tensor   # static, shape (B,)
+
+MLPDecoder(latent_dim, output_dim, hidden_dims=(256, 256), activation='relu',
+           dropout=0.0, layer_norm=False, device='cpu')
+CNNDecoder(latent_dim, output_channels, fc_dims=(512, 256),
+           conv_dims=(256, 128, 64, 32), kernel_sizes=None, strides=None,
+           initial_size=4, activation='relu', dropout=0.0, layer_norm=False,
+           device='cpu', output_activation='sigmoid')   # property output_size
+RNNDecoder(latent_dim, output_dim, hidden_dim=256, num_layers=2,
+           rnn_type='lstm', max_seq_len=100, fc_dims=(256,), activation='relu',
+           dropout=0.0, layer_norm=False, device='cpu')
+TransformerDecoder(latent_dim, output_dim, d_model=256, nhead=8, num_layers=6,
+                   dim_feedforward=1024, max_seq_len=100, dropout=0.1,
+                   fc_dims=(256,), activation='relu', layer_norm=True,
+                   device='cpu', max_len=None)
+VariationalDecoder(latent_dim, output_dim, hidden_dims=(256, 256),
+                   activation='relu', dropout=0.0, layer_norm=False,
+                   device='cpu')
+# RNNDecoder and TransformerDecoder: forward(z, seq_len=None)
+\end{pycode}
+
+\subsection{Factories}
+
+\begin{pycode}
+PolicyFactory.create_policy(policy_type, **kwargs)            # mlp cnn rnn transformer
+ValueFactory.create_value_network(network_type, **kwargs)     # mlp cnn rnn transformer
+QNetworkFactory.create_q_network(network_type, **kwargs)      # + dueling
+EncoderFactory.create_encoder(encoder_type, **kwargs)         # + vae
+DecoderFactory.create_decoder(decoder_type, **kwargs)         # + vae
+\end{pycode}
+
+The abstract base classes \code{BasePolicyNetwork}, \code{BaseValueNetwork},
+\code{BaseQNetwork}, \code{BaseEncoder} and \code{BaseDecoder} are exported
+for subclassing and type checks.
+
+\subsection{NetworkUtils}
+
+All methods are static; Table~\ref{tab:neural-utils} describes them.
+
+\begin{pycode}
+initialize_weights(module, method='xavier_uniform', gain=1.0)
+count_parameters(model) -> int
+count_parameters_by_layer(model) -> dict[str, int]
+freeze_layers(model, layer_names)
+unfreeze_layers(model, layer_names)
+get_grad_norm(model, norm_type=2.0) -> float
+clip_grad_norm(model, max_norm, norm_type=2.0) -> float
+create_mlp_layers(input_dim, hidden_dims, output_dim, activation='relu',
+                  dropout=0.0, layer_norm=False, bias=True) -> nn.Sequential
+create_conv_layers(input_channels, conv_dims, kernel_sizes=None, strides=None,
+                   padding=None, activation='relu', dropout=0.0,
+                   layer_norm=False) -> nn.Sequential
+create_transposed_conv_layers(input_channels, conv_dims, kernel_sizes=None,
+                              strides=None, padding=None, output_padding=None,
+                              activation='relu', dropout=0.0,
+                              layer_norm=False) -> nn.Sequential
+create_attention_layer(input_dim, num_heads=8, dropout=0.1) -> nn.Module
+create_positional_encoding(d_model, max_len=5000) -> nn.Parameter
+get_activation(activation) -> nn.Module
+apply_weight_decay(model, weight_decay, skip_list=None) -> list[dict]
+create_optimizer(model, optimizer_type='adam', lr=0.001, weight_decay=0.0,
+                 skip_list=None, **kwargs) -> torch.optim.Optimizer
+create_scheduler(optimizer, scheduler_type='step', **kwargs)
+save_checkpoint(model, optimizer, epoch, loss, filepath, **extra) -> Path
+load_checkpoint(model, optimizer, filepath, map_location=None,
+                weights_only=True, strict=True) -> tuple[int, float]
+compute_output_size(input_size, kernel_size, stride=1, padding=0,
+                    dilation=1) -> int
+compute_transposed_output_size(input_size, kernel_size, stride=1, padding=0,
+                               output_padding=0, dilation=1) -> int
+compute_conv_output_size(input_size, conv_layers) -> tuple[int, int]
+\end{pycode}
+
+\subsection{Tabular tools}
+
+\begin{pycode}
+QTable(state_space_size, action_space_size=None, initial_value=0.0,
+       dtype=np.float32, rng=None)
+ValueTable(...same arguments...)
+PolicyTable(...same arguments...)          # rows start uniform
+BaseDiscreteTable                          # abstract base of the three tables
+DiscreteEnvironment(state_space_size, action_space_size, rng=None)   # abstract
+
+DiscreteTools.create_q_table(state_space_size, action_space_size,
+                             initial_value=0.0, rng=None) -> QTable
+DiscreteTools.create_value_table(state_space_size, initial_value=0.0,
+                                 rng=None) -> ValueTable
+DiscreteTools.create_policy_table(state_space_size, action_space_size,
+                                  rng=None) -> PolicyTable
+DiscreteTools.q_learning_update(q_table, state, action, reward, next_state,
+                                gamma=0.99, alpha=0.1, done=False)
+DiscreteTools.sarsa_update(q_table, state, action, reward, next_state,
+                           next_action, gamma=0.99, alpha=0.1, done=False)
+DiscreteTools.expected_sarsa_update(q_table, state, action, reward, next_state,
+                                    policy_table=None, gamma=0.99, alpha=0.1,
+                                    epsilon=0.0, done=False)
+DiscreteTools.value_iteration_update(value_table, state, q_table, gamma=0.99)
+DiscreteTools.policy_iteration_update(policy_table, state, q_table)
+DiscreteTools.epsilon_greedy_policy(q_table, state, epsilon) -> int
+DiscreteTools.softmax_policy(q_table, state, temperature) -> int
+DiscreteTools.boltzmann_policy(q_table, state, temperature) -> int
+DiscreteTools.ucb_policy(q_table, state, visit_counts,
+                         exploration_constant=1.0) -> int
+DiscreteTools.thompson_sampling_policy(q_table, state, visit_counts,
+                                       prior_alpha=1.0, prior_beta=1.0) -> int
+\end{pycode}
+
+\section{toolkit.parakit}\label{sec:api-parakit}
+
+Chapter~\ref{chap:toolkit}, Section~\ref{sec:parakit}.
+
+\begin{pycode}
+get_parameters(parser) -> dict[str, Any]
+save_parameters(values, path_or_dir) -> Path
+load_parameters(path) -> dict[str, Any]
+apply_parameters(parser, values, strict=True,
+                 validation_callbacks=None) -> argparse.ArgumentParser
+parse_value(action, text, validator=None) -> Any
+parse_bool(value) -> bool
+format_value(action, value) -> str
+describe_type(action) -> str
+tunable_actions(parser) -> dict[str, argparse.Action]
+
+ParameterTuner(parser, save_delay=30000, save_path=None, auto_save_enabled=True,
+               validation_callbacks=None, inactivity_timeout=10)
+ParameterTuner.tune() -> argparse.ArgumentParser
+ParameterTuner.tune_parameters(parser, ...same arguments...)    # class method
+ParameterAdjuster = ParameterTuner
+TK_MISSING_MESSAGE                        # str: how to install Tk
+\end{pycode}
