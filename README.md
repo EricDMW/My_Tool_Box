@@ -254,7 +254,7 @@ the learning baselines over several seeds and evaluates everything, your
 method included, on the same seeded episodes:
 
 ```python
-from marl_algorithms import compare, per_copy
+from marl_algorithms import compare
 
 report = compare(
     "PowerGrid-v0",
