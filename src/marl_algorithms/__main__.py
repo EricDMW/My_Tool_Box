@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import os
 import sys
 import time
 from typing import Any
@@ -181,7 +182,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     """Entry point of ``marl-train``."""
     args = build_parser().parse_args(argv)
-    return int(args.func(args) or 0)
+    try:
+        return int(args.func(args) or 0)
+    except BrokenPipeError:  # output piped into a command that exited (e.g. `| head`)
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 0
 
 
 if __name__ == "__main__":
