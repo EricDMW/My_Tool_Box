@@ -46,7 +46,7 @@ from env_lib.ajlatt_env.estimation import (
 from env_lib.ajlatt_env.maps import DynamicMap, GridMap, load_grid_map
 from env_lib.utils.rendering import validate_render_mode
 
-__all__ = ["AJLATTEnv"]
+__all__ = ["AJLATTEnv", "make"]
 
 
 class AJLATTEnv(gym.Env):
@@ -80,6 +80,15 @@ class AJLATTEnv(gym.Env):
         **overrides: Any,
     ):
         super().__init__()
+        legacy_render = overrides.pop("render", None)
+        if legacy_render is not None:
+            warnings.warn(
+                "The 'render' flag is deprecated; pass render_mode='human' or 'rgb_array'",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if render_mode is None and legacy_render:
+                render_mode = "human"
         validate_render_mode(render_mode)
         if config is None:
             config = AJLATTConfig.from_kwargs(**overrides)
@@ -273,6 +282,8 @@ class AJLATTEnv(gym.Env):
                 "render() called without a render_mode; pass render_mode='rgb_array' or 'human'"
             )
             return None
+        if self._needs_reset:
+            raise RuntimeError("AJLATTEnv.render() called before reset()")
         if self._renderer is None:
             from env_lib.ajlatt_env.rendering import AJLATTRenderer
 
@@ -335,7 +346,7 @@ class AJLATTEnv(gym.Env):
 
     def _info(self, reward: np.ndarray, collided: np.ndarray) -> dict[str, Any]:
         return {
-            "agent_rewards": np.asarray(reward, dtype=np.float64),
+            "agent_rewards": np.array(reward, dtype=np.float64),
             "team_reward": float(np.sum(reward)),
             "collisions": np.asarray(collided, dtype=bool),
             "episode_collisions": self._episode_collisions.copy(),
@@ -576,3 +587,10 @@ class AJLATTEnv(gym.Env):
         reward[close] -= cfg.mutual_collision_penalty
         self._episode_collisions[close] += 1
         return reward, collided
+
+
+def make(*args: Any, **kwargs: Any) -> AJLATTEnv:
+    """Deprecated location of :func:`env_lib.ajlatt_env.make` (kept for old imports)."""
+    from env_lib.ajlatt_env import make as _make
+
+    return _make(*args, **kwargs)

@@ -35,6 +35,7 @@ __all__ = [
     "AJLATTConfig",
     "AJLATTEnv",
     "TeamRewardWrapper",
+    "ajlatt_env",
     "available_maps",
     "load_grid_map",
     "load_map",
@@ -93,5 +94,8 @@ class _CallableModule(types.ModuleType):
     def __call__(self, *args: Any, **kwargs: Any) -> AJLATTEnv:
         return make(*args, **kwargs)
 
+
+#: Deprecated alias kept for ``from env_lib.ajlatt_env import ajlatt_env``.
+ajlatt_env = make
 
 sys.modules[__name__].__class__ = _CallableModule

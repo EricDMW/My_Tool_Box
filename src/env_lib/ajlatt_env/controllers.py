@@ -28,6 +28,7 @@ Available policies (``AJLATTConfig.target_policy``):
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 
 import numpy as np
 
@@ -187,7 +188,17 @@ def make_target_policy(
     k_theta: float = 0.5,
     omega_max: float = np.pi / 4,
 ) -> TargetPolicy:
-    """Create a target policy by name (see the module docstring)."""
+    """Create a target policy by name (see the module docstring).
+
+    A :class:`TargetPolicy` instance is returned unchanged, so custom policies
+    (e.g. a :class:`WaypointPolicy` with your own route) can be passed as
+    ``AJLATTConfig.target_policy``.
+    """
+    if isinstance(name, TargetPolicy):
+        return name
+    map_name = Path(str(map_name)).name
+    for suffix in (".yaml", ".cfg"):
+        map_name = map_name[: -len(suffix)] if map_name.endswith(suffix) else map_name
     if name == "auto":
         if map_name == "empty":
             name = "sine"

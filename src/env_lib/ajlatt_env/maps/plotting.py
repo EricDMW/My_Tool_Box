@@ -19,7 +19,7 @@ from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 
-from env_lib.ajlatt_env.maps import GridMap, available_maps, load_grid_map
+from env_lib.ajlatt_env.maps import DynamicMap, GridMap, available_maps, load_grid_map
 from env_lib.utils.rendering import Theme, get_theme, style_axes
 
 __all__ = ["main", "plot_map"]
@@ -57,11 +57,7 @@ def plot_map(
     """
     theme = get_theme(theme)
     grid = map_or_name if isinstance(map_or_name, GridMap) else load_grid_map(map_or_name)
-    if (
-        getattr(grid, "map", None) is None
-        and hasattr(grid, "generate_map")
-        and not isinstance(map_or_name, GridMap)
-    ):
+    if isinstance(grid, DynamicMap) and grid.chosen_idx is None:
         grid.generate_map(rng=np.random.default_rng(0))
     if ax is None:
         fig = Figure(figsize=(6.4, 6.4), facecolor=theme.background)

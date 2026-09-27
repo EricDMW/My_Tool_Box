@@ -68,8 +68,8 @@ class LineMsgEnv(Env, EzPickle):
     Parameters
     ----------
     num_agents : int, default 10
-        Number of agents on the line (at least 3: a sink, a source and one
-        relay).
+        Number of agents on the line (at least 2: a sink and a source; the
+        agents in between relay).
     n_obs_neighbors : int, default 1
         Each agent observes the states of the ``n_obs_neighbors`` agents on
         either side of it. ``0`` is treated as ``1`` (the dynamics need one
@@ -132,7 +132,7 @@ class LineMsgEnv(Env, EzPickle):
             render_mode=render_mode,
             action_space_type=action_space_type,
         )
-        self.num_agents = _check_int("num_agents", num_agents, 3)
+        self.num_agents = _check_int("num_agents", num_agents, 2)
         n_obs_neighbors = _check_int("n_obs_neighbors", n_obs_neighbors, 0)
         if n_obs_neighbors == 0:
             warnings.warn(

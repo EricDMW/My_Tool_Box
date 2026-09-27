@@ -39,26 +39,34 @@ _logger = logging.getLogger(__name__)
 
 RGB = tuple[int, int, int]
 _WHITE: RGB = (255, 255, 255)
+_OPEN_WINDOWS = 0  # number of renderers currently holding the shared pygame display
 _BLACK: RGB = (0, 0, 0)
 
 
 def hex_to_rgb(color: str) -> RGB:
-    """Convert ``"#RRGGBB"`` (or ``"#RGB"``, ``"#RRGGBBAA"``) to an ``(r, g, b)`` tuple.
+    """Convert a colour to an 8-bit ``(r, g, b)`` tuple.
+
+    Accepts hex strings (``"#RRGGBB"``, ``"#RGB"``, ``"#RRGGBBAA"``) and any
+    other matplotlib colour specification (``"white"``, ``"tab:blue"``, RGB
+    tuples in ``[0, 1]``).
 
     Examples
     --------
     >>> hex_to_rgb("#4C9AFF")
     (76, 154, 255)
+    >>> hex_to_rgb("white")
+    (255, 255, 255)
     """
-    value = color.strip().lstrip("#")
-    if len(value) == 3:
-        value = "".join(ch * 2 for ch in value)
-    if len(value) not in (6, 8):
-        raise ValueError(f"Expected a hex colour like '#RRGGBB', got {color!r}")
+    from matplotlib import colors as mcolors
+
     try:
-        return (int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16))
+        rgb = mcolors.to_rgb(color.strip() if isinstance(color, str) else color)
     except ValueError:
-        raise ValueError(f"Expected a hex colour like '#RRGGBB', got {color!r}") from None
+        if isinstance(color, str) and len(color.strip().lstrip("#")) == 3:
+            value = "".join(ch * 2 for ch in color.strip().lstrip("#"))
+            return (int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16))
+        raise ValueError(f"Invalid colour {color!r}") from None
+    return tuple(int(round(255 * channel)) for channel in rgb)  # type: ignore[return-value]
 
 
 def _mix(a: Sequence[float], b: Sequence[float], t: float) -> RGB:
@@ -447,9 +455,16 @@ class PistonballRenderer:
         return frame
 
     def close(self) -> None:
-        """Close the window (``"human"``) and release the drawing surfaces. Idempotent."""
+        """Close the window (``"human"``) and release the drawing surfaces. Idempotent.
+
+        The pygame display is shared by every renderer in the process; it is
+        only shut down when the last open window is closed.
+        """
+        global _OPEN_WINDOWS
         if self._window is not None and self._pg is not None:
-            self._pg.display.quit()
+            _OPEN_WINDOWS = max(0, _OPEN_WINDOWS - 1)
+            if _OPEN_WINDOWS == 0:
+                self._pg.display.quit()
         self._window = None
         self._canvas = None
         self._static = None
@@ -474,8 +489,10 @@ class PistonballRenderer:
             pg.font.init()
         size = (self.layout.screen_width, self.layout.screen_height)
         if self.render_mode == "human" and self._window is None:
+            global _OPEN_WINDOWS
             pg.display.init()
             self._window = pg.display.set_mode(size)
+            _OPEN_WINDOWS += 1
             pg.display.set_caption("Pistonball")
             self._clock = pg.time.Clock()
             self._static = None  # rebuild and convert for the display format

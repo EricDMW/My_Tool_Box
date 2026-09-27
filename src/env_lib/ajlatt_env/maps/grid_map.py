@@ -186,8 +186,9 @@ class GridMap:
     ----------
     map_path:
         Path of the map **without extension**; ``<map_path>.yaml`` holds the
-        header and ``<map_path>.cfg`` the occupancy grid. Maps whose name
-        contains ``"empty"`` have no obstacles (only the boundary).
+        header and ``<map_path>.cfg`` the occupancy grid. An empty (zero-byte)
+        grid file denotes an obstacle-free map in which only the boundary
+        blocks rays.
     margin2wall:
         Safety margin (metres) used by :meth:`in_bound` and :meth:`is_collision`.
 
@@ -204,9 +205,12 @@ class GridMap:
         header_path = map_path.with_name(map_path.name + ".yaml")
         with open(header_path, encoding="utf-8") as handle:
             header = yaml.safe_load(handle)
-        occupancy = None
-        if "empty" not in map_path.name:
-            occupancy = np.loadtxt(map_path.with_name(map_path.name + ".cfg"))
+        grid_path = map_path.with_name(map_path.name + ".cfg")
+        occupancy = None  # obstacle-free map: only the boundary blocks rays
+        if grid_path.exists() and grid_path.stat().st_size > 0:
+            occupancy = np.loadtxt(grid_path)
+        elif not grid_path.exists() and "empty" not in map_path.name:
+            raise FileNotFoundError(f"Occupancy grid {grid_path} not found")
         self._init_from_header(header, occupancy, margin2wall, name=map_path.name)
 
     @classmethod

@@ -71,7 +71,7 @@ def test_default_spaces():
     assert info["agent_rewards"].shape == (10,)
 
 
-@pytest.mark.parametrize("num_agents, n_nb", [(3, 1), (7, 2), (12, 3)])
+@pytest.mark.parametrize("num_agents, n_nb", [(2, 1), (3, 1), (7, 2), (12, 3)])
 def test_observation_window_matches_reference(num_agents, n_nb):
     env = LineMsgEnv(num_agents=num_agents, n_obs_neighbors=n_nb)
     assert env.observation_space.shape == (num_agents, 2 * n_nb + 1)
@@ -103,7 +103,7 @@ def test_state_and_action_layout():
 # ---------------------------------------------------------------------------
 # Dynamics
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("num_agents, n_nb", [(3, 1), (10, 1), (9, 3)])
+@pytest.mark.parametrize("num_agents, n_nb", [(2, 1), (2, 2), (3, 1), (10, 1), (9, 3)])
 def test_trajectory_matches_loop_reference(num_agents, n_nb):
     env = LineMsgEnv(num_agents=num_agents, n_obs_neighbors=n_nb, max_iter=40)
     action_rng = np.random.default_rng(42)
@@ -233,7 +233,7 @@ def test_step_and_render_require_reset():
 @pytest.mark.parametrize(
     "kwargs, error",
     [
-        ({"num_agents": 2}, ValueError),
+        ({"num_agents": 1}, ValueError),
         ({"num_agents": 4.0}, TypeError),
         ({"n_obs_neighbors": -1}, ValueError),
         ({"max_iter": 0}, ValueError),

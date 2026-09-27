@@ -426,7 +426,7 @@ class WirelessCommEnv(Env, EzPickle):
         info = {
             "agent_rewards": agent_rewards,
             "outcomes": outcomes,
-            "ap_load": self.last_ap_load,
+            "ap_load": self.last_ap_load.copy(),
         }
         if self.render_mode == "human":
             self.render()
@@ -503,7 +503,10 @@ class WirelessCommEnv(Env, EzPickle):
     # Helpers
     # ------------------------------------------------------------------
     def _validate_action(self, action: Any) -> np.ndarray:
-        act = np.array(action, dtype=np.int64)  # private copy (kept as last_action)
+        raw = np.asarray(action)
+        if raw.dtype.kind == "f" and not np.all(np.isfinite(raw) & (raw == np.round(raw))):
+            raise ValueError(f"agent actions must be integers in 0..4, got {raw!r}")
+        act = np.array(raw, dtype=np.int64)  # private copy (kept as last_action)
         if act.shape != (self.n_agents,):
             if act.shape != (self.grid_x, self.grid_y):
                 raise ValueError(

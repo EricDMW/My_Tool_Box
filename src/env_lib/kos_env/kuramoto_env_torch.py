@@ -467,6 +467,8 @@ class KuramotoOscillatorEnvTorch(KuramotoEnvBase):
 
     # ------------------------------------------------------------------ internals
     def _action_to_tensor(self, action: ArrayLike) -> torch.Tensor:
+        if isinstance(action, torch.Tensor):
+            action = action.detach()  # never carry a caller's autograd graph into the state
         action_t = torch.as_tensor(action, dtype=self._dtype, device=self.device)
         action_dim = self.action_space.shape[0]
         if action_t.ndim == 1:

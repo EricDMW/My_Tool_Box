@@ -748,6 +748,10 @@ class PistonballEnv(Env, EzPickle):
         self._check_action_shape(values)
         if values.dtype.kind not in "biuf":
             raise ValueError(f"Discrete actions must be numeric, got dtype {values.dtype}")
+        if values.dtype.kind == "f" and not np.all(
+            np.isfinite(values) & (values == np.round(values))
+        ):
+            raise ValueError(f"Discrete actions must be integers in {{0, 1, 2}}, got {values}")
         if np.any((values < 0) | (values > 2)):
             raise ValueError(
                 f"Discrete actions must be in {{0, 1, 2}} (down, stay, up), got {values}"
