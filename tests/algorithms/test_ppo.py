@@ -305,11 +305,16 @@ def test_train_entry_point_and_presets():
 # Learning sanity
 # ---------------------------------------------------------------------------
 def test_mappo_learns_to_relay_messages():
-    """MAPPO learns the LineMsg relay (all agents keep their link) within a few thousand steps."""
+    """MAPPO learns the LineMsg relay (all agents keep their link) within 12,000 steps.
+
+    With this budget every one of ten seeds reaches the optimum (65); at 6,000
+    steps two of ten stopped just short of the threshold, too close for a test
+    that runs on different PyTorch builds.
+    """
     envs = _envs("LineMsg-v0", {"num_agents": 4}, num_envs=16)
     algo = MAPPO(envs, seed=0, rollout_length=16, lr=3e-3, ent_coef=0.0, hidden_sizes=(32,))
     random_return = env_lib.evaluate(envs, None, n_episodes=16, seed=1).mean_return
-    algo.learn(envs, 6_000, seed=0)
+    algo.learn(envs, 12_000, seed=0)
     trained = algo.evaluate(envs, n_episodes=16, seed=1).mean_return
     baseline = env_lib.evaluate(envs, env_lib.baseline_policy(envs), n_episodes=16, seed=1)
     assert trained > random_return + 0.8 * (baseline.mean_return - random_return)

@@ -273,11 +273,13 @@ def test_observation_statistics_are_frozen_after_warmup():
 def test_maddpg_learns_a_tiny_rendezvous_task():
     # Three fully connected agents in a small arena: moving towards the others
     # pays off within a few steps. Zero actions score about -79, uniformly
-    # random ones about -92, the Laplacian controller about +0.2.
+    # random ones about -92, the Laplacian controller about +0.2. With 9,000
+    # steps the worst of ten seeds scores -26 (at 3,000 steps one of ten fell
+    # below -60), a safe margin across PyTorch builds.
     kwargs = {"n_agents": 3, "topology": "complete", "arena_size": 2.0, "max_steps": 25}
     envs = make_vector_env("Consensus-v0", 8, **kwargs)
     algo = MADDPG(envs, seed=0, hidden_sizes=(32, 32), batch_size=64, warmup_steps=400, gamma=0.8)
-    algo.learn(envs, 3000, seed=0)
+    algo.learn(envs, 9000, seed=0)
     result = algo.evaluate(env_lib.make_vec("Consensus-v0", 16, **kwargs), n_episodes=32, seed=1)
     assert result.mean_return > -60.0
     envs.close()
