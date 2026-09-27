@@ -75,6 +75,7 @@ options=None)} returns \code{(observation, info)}, and
 \code{step(action)} returns \code{(observation, reward, terminated,
 truncated, info)}. The \code{seed} argument must be passed by keyword.
 
+% norun
 \begin{pycode}
 # Before (AJLATT and old-style loops)
 # obs = env.reset()
@@ -175,8 +176,8 @@ obs, info = env.reset(seed=0)
 # Before: one integer for all pistons (base-3 encoding)
 code = 13
 # After: one value per piston; decode an old integer action like this
-action = np.array([(code // 3**i) % 3 for i in range(env.n_pistons)])
-obs, reward, terminated, truncated, info = env.step(action)     # [1 1 1 0 0]
+action = np.array([(code // 3**i) % 3 for i in range(env.n_pistons)])  # [1 1 1 0 0]
+obs, reward, terminated, truncated, info = env.step(action)
 \end{pycode}
 
 \paragraph{Other changes.}
@@ -378,9 +379,9 @@ corrected:
 \begin{itemize}
   \item \code{tune()} installs the accepted values as the parser's defaults, as
     it was documented to do; previously the returned parser was unchanged.
-  \item Boolean strings (\code{"False"} used to become \code{True}), lists
-    (\code{nargs}), \code{None} values and \code{store\_true} options are
-    parsed correctly.
+  \item Boolean strings (the text \code{"False"} used to be stored as a
+    string, which is true in a boolean context), lists (\code{nargs}),
+    \code{None} values and \code{store\_true} options are parsed correctly.
   \item Validation callbacks receive the \emph{converted} value. Callbacks
     written for the old convention, which received text and returned
     \code{(is\_valid, converted\_value, message)}, keep working as long as they
