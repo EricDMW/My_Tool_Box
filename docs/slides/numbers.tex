@@ -6,7 +6,7 @@
 \newcommand{\NumContinuous}{6}
 \newcommand{\NumAlgorithms}{7}
 \newcommand{\NumThroughput}{2--3\,M}
-\newcommand{\NumTests}{1\,140}
+\newcommand{\NumTests}{1\,316}
 \newcommand{\NumHandbookPages}{187}
 \newcommand{\NumEvalEpisodes}{64}
 \newcommand{\FigTitleA}{power_grid.png}
@@ -37,4 +37,9 @@
   WirelessComm & collision-free access schedule & $388$ & $924$\\}
 % marl_algorithms presets: benchmarks/benchmark_marl.py (train seed 0, evaluation seed 1).
 \newcommand{\MarlRows}{%
-  MAPPO & PowerGrid & TBD & TBD & TBD & TBD\\}
+  MAPPO & PowerGrid & 106\,s & $-629$ & $-0.89$ & $-0.79$\\
+  MAPPO & Platoon & 102\,s & $-5350$ & $-65$ & $-46$\\
+  IPPO & Consensus & 83\,s & $-18041$ & $-1550$ & $-1518$\\
+  MADDPG & Consensus & 72\,s & $-18041$ & $-1681$ & $-1518$\\
+  VDN & Wireless & 74\,s & $139$ & $338$ & $340$\\
+  QMIX & LineMsg & 16\,s & $43$ & $95$ & $95$\\}

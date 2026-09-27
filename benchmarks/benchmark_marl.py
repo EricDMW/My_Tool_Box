@@ -79,7 +79,13 @@ def report(path: Path, markdown: bool) -> None:
     order = [pair for pair in list_presets() if pair in records]
 
     def fmt(value):
-        return "-" if value is None else f"{value:.4g}"
+        if value is None:
+            return "-"
+        if abs(value) >= 1000:
+            return f"{value:,.0f}"
+        if abs(value) >= 10:
+            return f"{value:.1f}"
+        return f"{value:.2f}"
 
     if markdown:
         print("| Algorithm | Environment | Env steps | Time [s] | Random | Trained | Baseline |")

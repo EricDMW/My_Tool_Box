@@ -194,11 +194,42 @@ through `env_lib.evaluate`.
 | VDN | value-based | discrete | team value as the sum of agent utilities | Sunehag et al., 2018 |
 | QMIX | value-based | discrete | monotonic, state-conditioned mixing of agent utilities | Rashid et al., 2018 |
 
-Every preset trained on one CPU core and then evaluated on 64 seeded episodes
-against uniformly random actions and the environment's classical controller
-(higher is better; reproduce with `benchmarks/benchmark_marl.py`):
+Every preset trained on one CPU core and was then evaluated, with its
+deterministic policy, on 64 seeded episodes against uniformly random actions
+and the environment's classical controller (mean return, higher is better;
+time is CPU seconds of training; reproduce with `benchmarks/benchmark_marl.py`):
 
-MARL_RESULTS_TABLE
+| Algorithm | Environment | Env steps | Time [s] | Random | Trained | Baseline |
+|---|---|---:|---:|---:|---:|---:|
+| IPPO | `PowerGrid-v0` | 200,704 | 69 | -629.3 | -2.37 | -0.79 |
+| IPPO | `Platoon-v0` | 450,560 | 88 | -5,350 | -84.8 | -46.4 |
+| IPPO | `Consensus-v0` | 401,408 | 83 | -18,041 | -1,550 | -1,518 |
+| IPPO | `LineMsg-v0` | 100,800 | 26 | 43.2 | 95.0 | 95.0 |
+| MAPPO | `PowerGrid-v0` | 251,904 | 106 | -629.3 | -0.89 | -0.79 |
+| MAPPO | `Platoon-v0` | 450,560 | 102 | -5,350 | -65.0 | -46.4 |
+| MAPPO | `Consensus-v0` | 401,408 | 96 | -18,041 | -1,586 | -1,518 |
+| MAPPO | `LineMsg-v0` | 100,800 | 26 | 43.2 | 95.0 | 95.0 |
+| MADDPG | `PowerGrid-v0` | 64,000 | 70 | -629.3 | -5.69 | -0.79 |
+| MADDPG | `Consensus-v0` | 96,000 | 72 | -18,041 | -1,681 | -1,518 |
+| MATD3 | `PowerGrid-v0` | 64,000 | 87 | -629.3 | -5.63 | -0.79 |
+| MATD3 | `Consensus-v0` | 96,000 | 83 | -18,041 | -1,737 | -1,518 |
+| IQL | `LineMsg-v0` | 25,008 | 9 | 43.2 | 95.0 | 95.0 |
+| VDN | `LineMsg-v0` | 25,008 | 10 | 43.2 | 95.0 | 95.0 |
+| VDN | `WirelessComm-v1` | 120,000 | 74 | 139.2 | 338.0 | 339.6 |
+| QMIX | `LineMsg-v0` | 25,008 | 16 | 43.2 | 95.0 | 95.0 |
+| QMIX | `WirelessComm-v1` | 100,000 | 101 | 139.2 | 319.1 | 339.6 |
+
+The learned policies are far better than random everywhere. Several match the
+classical controller (MAPPO on PowerGrid and all methods on LineMsg, and IPPO
+and MAPPO on Consensus and VDN on WirelessComm come within about 5 per cent);
+the rest stay within a small factor. The team-reward methods also show why
+credit assignment matters: on WirelessComm, independent Q-learning (IQL, not
+listed) stays near random because a collision costs the sending agent nothing,
+while VDN reaches the collision-free schedule.
+
+<p align="center">
+  <img src="docs/images/marl_training.png" width="900" alt="Learning curves of MAPPO, MADDPG, QMIX and VDN">
+</p>
 
 ## Design
 

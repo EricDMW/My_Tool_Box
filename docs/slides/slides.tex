@@ -440,13 +440,14 @@ $ marl-train run mappo PowerGrid-v0
     \footnotesize
     \textbf{Tuned presets, one CPU core, 64 seeded episodes}\\[3pt]
     \renewcommand{\arraystretch}{1.15}
-    \begin{tabularx}{\linewidth}{@{}l>{\raggedright\arraybackslash}Xrrrr@{}}
+    \setlength{\tabcolsep}{4.5pt}
+    \begin{tabular}{@{}llrrrr@{}}
       \toprule
       Algorithm & Environment & Time & Random & Trained & Baseline\\
       \midrule
       \MarlRows
       \bottomrule
-    \end{tabularx}\\[4pt]
+    \end{tabular}\\[4pt]
     \muted{Mean return, higher is better; the baseline is the environment's
     classical controller.}
   \end{columns}
