@@ -1,0 +1,250 @@
+% ---------------------------------------------------------------------------
+% Chapter: Installation
+% ---------------------------------------------------------------------------
+\chapter{Installation}\label{chap:install}
+% Long monospaced identifiers leave little room for line breaking; allow some
+% extra inter-word stretch in this chapter (the group keeps it local).
+\begingroup\setlength{\emergencystretch}{3em}% chapter-local
+
+My Tool Box is a standard Python project described by a single
+\code{pyproject.toml} file. It is installed from its source repository with
+\code{pip}; heavy dependencies are optional and grouped into \emph{extras}.
+
+\section{Requirements}\label{sec:install-requirements}
+
+\begin{itemize}
+  \item Python 3.9 or newer. The package is tested with CPython 3.9 to 3.13;
+    continuous integration runs the test suite on 3.9, 3.10, 3.11 and 3.12.
+  \item Any operating system supported by the dependencies (Linux, macOS and
+    Windows). Development and continuous integration use Linux.
+  \item The core dependencies below, installed automatically by \code{pip}.
+\end{itemize}
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Core dependencies (always installed).}
+  \label{tab:install-core}
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    Package & Minimum version & Used for \\
+    \midrule
+    \pkg{numpy}      & 1.23 & all numerical code \\
+    \pkg{scipy}      & 1.9  & AJLATT estimation, plotkit smoothing \\
+    \pkg{matplotlib} & 3.6  & environment renderers, plotkit \\
+    \pkg{gymnasium}  & 0.29 & environment API and registration \\
+    \pkg{pyyaml}     & 6.0  & AJLATT map files and map specifications \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Installing from the repository}\label{sec:install-pip}
+
+The recommended procedure creates a virtual environment, clones the
+repository and installs the package with all optional features:
+
+\begin{shellcode}
+git clone https://github.com/EricDMW/My_Tool_Box.git
+cd My_Tool_Box
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+python -m pip install --upgrade pip
+pip install ".[all]"
+\end{shellcode}
+
+\code{pip} can also install directly from the Git URL without a local clone,
+which is convenient for a project that only uses the package:
+
+\begin{shellcode}
+pip install "my-tool-box[all] @ git+https://github.com/EricDMW/My_Tool_Box.git"
+\end{shellcode}
+
+With conda, create the environment first and then use \code{pip} inside it:
+
+\begin{shellcode}
+conda create -n mytoolbox python=3.11
+conda activate mytoolbox
+conda install tk                   # only for Tk windows (see below)
+pip install ".[all]"
+\end{shellcode}
+
+\subsection{Optional extras}\label{sec:install-extras}
+
+The extras of Table~\ref{tab:install-extras} are selected in square brackets
+and can be combined, for example \code{pip install ".[pistonball,video]"}. The
+quotes prevent shells such as \code{zsh} from interpreting the brackets.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Optional extras defined in \code{pyproject.toml}.}
+  \label{tab:install-extras}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}p{4.3cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Extra & Installs & Enables \\
+    \midrule
+    \code{pistonball} & \pkg{pygame} $\geq$ 2.1, \pkg{pymunk} $\geq$ 6.4 &
+      \code{PistonballEnv} (\pkg{pymunk} for the physics, \pkg{pygame} for
+      rendering and keyboard control) \\
+    \code{torch} & \pkg{torch} $\geq$ 2.0 &
+      \code{KuramotoOscillatorEnvTorch}, \pkg{toolkit.neural\_toolkit} \\
+    \code{video} & \pkg{imageio} $\geq$ 2.20, \pkg{imageio-ffmpeg} $\geq$ 0.4 &
+      MP4, WebM, AVI, MOV and MKV export in \code{save\_animation} and
+      \code{record\_episode} (GIF export needs no extra) \\
+    \code{all} & the three extras above & every feature of the package \\
+    \code{dev} & \pkg{pytest} $\geq$ 7, \pkg{pytest-cov} $\geq$ 4, \pkg{ruff} $\geq$ 0.5 &
+      running the test suite and the linter; combine with \code{all} \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\subsection{PyTorch}\label{sec:install-torch}
+
+The \code{torch} extra installs the default PyTorch wheel for the platform.
+To choose a specific build, install PyTorch first, following the selector at
+\url{https://pytorch.org/get-started/}, and then install the package; \code{pip}
+keeps the PyTorch that is already present. For example, a CPU-only build
+(much smaller, and the one used in continuous integration) is obtained with
+
+\begin{shellcode}
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install ".[all]"
+\end{shellcode}
+
+GPU use is covered in Section~\ref{sec:trouble-torch}.
+
+\subsection{Tk}\label{sec:install-tk}
+
+Tk is not installable with \code{pip}. It is needed only for the
+\pkg{parakit} editor window (Section~\ref{sec:parakit-gui}) and for
+\code{render\_mode="human"} with matplotlib's TkAgg backend; everything else,
+including off-screen rendering, works without it. Install it with the system
+package manager (\code{sudo apt-get install python3-tk} on Debian and Ubuntu,
+\code{sudo dnf install python3-tkinter} on Fedora, \code{brew install
+python-tk} with Homebrew on macOS) or with \code{conda install tk}. The
+official Python installers for Windows and macOS already include Tk.
+
+\section{Development installation}\label{sec:install-dev}
+
+Contributors install the package in \emph{editable} mode, so that changes to
+the sources under \code{src/} take effect without reinstalling, together with
+the development tools:
+
+\begin{shellcode}
+git clone https://github.com/EricDMW/My_Tool_Box.git
+cd My_Tool_Box
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[all,dev]"
+\end{shellcode}
+
+The console scripts and the version number are generated at installation
+time; after changing \code{pyproject.toml} (for example adding an entry
+point), run the \code{pip install -e} command again. The testing and linting
+workflow is described in Section~\ref{sec:examples-contributing}.
+
+\section{Verifying the installation}\label{sec:install-verify}
+
+The following commands check, from quickest to most thorough, that the
+package is installed correctly:
+
+\begin{shellcode}
+# 1. Versions of both import packages
+python -c "import env_lib, toolkit; print(env_lib.__version__, toolkit.__version__)"
+
+# 2. Registered environment ids
+python -c "import env_lib; print(env_lib.list_envs())"
+
+# 3. Create every environment and take a few random steps
+python examples/quickstart.py --steps 5
+
+# 4. Full test suite (requires the dev extra)
+pytest -q
+\end{shellcode}
+
+The first command prints \code{1.0.0 1.0.0}. The quick-start script prints one
+line per environment and skips, with a message, environments whose optional
+dependencies are missing. The test suite skips tests of missing optional
+dependencies in the same way.
+
+The installation also provides three console scripts:
+
+\begin{center}
+  \small
+  \begin{tabular}{@{}ll@{}}
+    \toprule
+    Command & Purpose \\
+    \midrule
+    \code{ajlatt-build-map} & build an AJLATT map from a YAML specification (Chapter~\ref{chap:ajlatt}) \\
+    \code{ajlatt-plot-map}  & list and plot the bundled AJLATT maps (Chapter~\ref{chap:ajlatt}) \\
+    \code{plotkit-gallery}  & gallery of plotkit figures (Section~\ref{sec:plotkit-cli}) \\
+    \bottomrule
+  \end{tabular}
+\end{center}
+
+\section{Optional dependency matrix}\label{sec:install-matrix}
+
+Table~\ref{tab:install-matrix} summarises which features need which optional
+packages. Because the package imports optional dependencies lazily, a missing
+dependency only affects the feature that needs it; the error message names the
+extra to install.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Features and their optional requirements.}
+  \label{tab:install-matrix}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{3.8cm}>{\raggedright\arraybackslash}p{2.5cm}@{}}
+    \toprule
+    Feature & Requires & Provided by \\
+    \midrule
+    NumPy environments (Kuramoto, LineMsg, WirelessComm, Consensus, AJLATT),
+      \code{rgb\_array} rendering, GIF export & core only & core \\
+    \code{PistonballEnv} & \pkg{pymunk} & \code{pistonball} \\
+    Pistonball rendering and \code{ManualPolicy} & \pkg{pygame} & \code{pistonball} \\
+    \code{KuramotoOscillatorEnvTorch} & \pkg{torch} & \code{torch} \\
+    \pkg{toolkit.neural\_toolkit} & \pkg{torch} & \code{torch} \\
+    MP4 and other video formats & \pkg{imageio}, \pkg{imageio-ffmpeg} & \code{video} \\
+    \pkg{toolkit.plotkit} & core only & core \\
+    Plotting pandas, PyTorch, TensorFlow or JAX data & the respective library & not required \\
+    \pkg{toolkit.parakit} headless API & standard library & core \\
+    \pkg{parakit} editor window & Tk and a display & system package \\
+    \code{render\_mode="human"} (matplotlib environments) &
+      an interactive backend (TkAgg, QtAgg, \ldots) and a display & system package or \pkg{PyQt}/\pkg{PySide} \\
+    Test suite and linting & \pkg{pytest}, \pkg{pytest-cov}, \pkg{ruff} & \code{dev} \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\section{Upgrading and uninstalling}\label{sec:install-upgrade}
+
+To upgrade a clone, pull the latest sources and reinstall:
+\code{git pull} followed by \code{pip install ".[all]"} (or
+\code{pip install -e ".[all,dev]"} for an editable installation).
+\code{pip uninstall my-tool-box} removes the package. Users of versions before
+1.0, which were installed from two separate project folders, should first
+uninstall the old distributions and then follow Appendix~\ref{app:migration}.
+
+\section{Building this manual}\label{sec:install-manual}
+
+The manual is written in LaTeX and lives in \code{docs/manual/}. Building it
+requires a TeX distribution that provides \code{pdflatex} and \code{latexmk},
+such as TeX Live or MacTeX. On Debian and Ubuntu the packages
+\code{latexmk}, \code{texlive-latex-extra}, \code{texlive-fonts-recommended}
+and \code{lmodern} are sufficient. The
+document uses only standard packages (\pkg{listings}, \pkg{booktabs},
+\pkg{tabularx}, \pkg{hyperref}, \pkg{fancyhdr} and similar).
+
+\begin{shellcode}
+cd docs/manual
+./build.sh                                   # writes output/main.pdf
+# equivalently:
+latexmk -pdf -interaction=nonstopmode -halt-on-error -outdir=output main.tex
+latexmk -C -outdir=output                    # remove build products
+\end{shellcode}
+
+\code{latexmk} runs \code{pdflatex} as often as needed to resolve cross
+references. All build products are written to \code{docs/manual/output/},
+which is ignored by Git. The file \code{docs/manual/README.md} describes the
+source layout of the manual.
+
+\par\endgroup

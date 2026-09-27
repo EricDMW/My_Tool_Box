@@ -1,0 +1,440 @@
+% ---------------------------------------------------------------------------
+% Environment library overview
+% ---------------------------------------------------------------------------
+\begingroup
+% Line breaking for paragraphs with long, unbreakable identifiers (local to
+% this chapter): allow looser lines instead of overfull ones.
+\setlength{\emergencystretch}{3em}\tolerance=1000
+\chapter{Environment Library Overview}\label{chap:envlib}
+
+The \pkg{env\_lib} package provides multi-agent environments for research on
+cooperative control, networked decision making and multi-robot estimation. All
+environments implement the Gymnasium API, are registered with Gymnasium when
+\pkg{env\_lib} is imported, and share one rendering and recording layer. This
+chapter describes what the environments have in common; the following chapters
+document each environment in detail:
+
+\begin{itemize}
+  \item Kuramoto oscillator networks, NumPy and batched PyTorch backends
+        (Chapter~\ref{chap:kuramoto});
+  \item LineMsg and WirelessComm, two discrete networked communication
+        benchmarks (Chapter~\ref{chap:networked});
+  \item Pistonball, a cooperative physics game (Chapter~\ref{chap:pistonball});
+  \item Consensus and formation control on communication graphs
+        (Chapter~\ref{chap:consensus});
+  \item AJLATT, active joint localisation and target tracking with a robot
+        team, including its map tools (Chapter~\ref{chap:ajlatt}).
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Environments at a glance}\label{sec:envlib-comparison}
+
+Table~\ref{tab:envlib-comparison} summarises the environments in their default
+configuration. $N$ is the number of oscillators, $M$ the number of coupling
+edges and $n$ the number of agents.
+
+\begin{table}[htbp]
+  \centering\footnotesize
+  \setlength{\tabcolsep}{4pt}
+  \caption{Environments in their default configuration.}
+  \label{tab:envlib-comparison}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{2.2cm}>{\raggedright\arraybackslash}p{1.9cm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{2.0cm}>{\raggedright\arraybackslash}p{2.6cm}>{\raggedright\arraybackslash}p{1.5cm}@{}}
+    \toprule
+    Environment & Agents & Action space & Observation & Reward & Requires \\
+    \midrule
+    Kuramoto (NumPy) & 1 controller, $N = 10$ oscillators &
+      continuous \code{Box((N+M,))}, $N + M = 55$ & \code{(75,)}, i.e.\ $3N + M$ &
+      scalar synchronisation measure, bonus on synchronisation & none \\
+    Kuramoto (PyTorch) & \code{n\_agents} parallel systems (1) &
+      as NumPy; batched \code{(n\_agents, N+M)} accepted & \code{(75,)} of system 0 &
+      per system in \code{info} & \pkg{torch} \\
+    LineMsg & $n = 10$ & \code{Discrete(2**n)} or \code{MultiBinary(n)} &
+      \code{(10, 3)} & sum of per-agent rewards & none \\
+    WirelessComm & $n = 36$ ($6 \times 6$) & \code{MultiDiscrete([5]*n)} &
+      \code{(36, 18)} & packets delivered (sum) & none \\
+    Pistonball & $n = 20$ pistons & \code{Box(-1, 1, (n,))} or \code{MultiDiscrete([3]*n)} &
+      \code{(20, 7)} & sum of local rewards & \pkg{pymunk}, \pkg{pygame} \\
+    Consensus / Formation & $n = 8$ & \code{Box(-1, 1, (n, 2))} &
+      \code{(8, 16)} & mean of local rewards, success bonus & none \\
+    AJLATT & $n = 4$ robots & \code{Box((n, 2))}: $v \in [0, 2]$, $\omega \in [-\pi/4, \pi/4]$ &
+      \code{(4, 24)} & per-robot array & none \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Package structure}\label{sec:envlib-structure}
+
+The package lives in \code{src/env\_lib} of the repository:
+
+\begin{textcode}
+src/env_lib/
+  __init__.py           make(), list_envs(), lazily imported environment classes
+  registration.py       Gymnasium registration of every id (ENV_SPECS)
+  utils/                themes, renderers, record_episode, save_animation
+  kos_env/              Kuramoto oscillators (NumPy and PyTorch backends)
+  linemsg_env/          LineMsg: message relay along a line of agents
+  wireless_comm_env/    WirelessComm: random access to shared access points
+  pistonball_env/       Pistonball: cooperative physics game (pymunk, pygame)
+  consensus_env/        consensus and formation control on graphs
+  ajlatt_env/           AJLATT: multi-robot localisation and target tracking
+    maps/               occupancy maps, map builder and map plotting
+\end{textcode}
+
+Every environment subpackage contains the environment module and a
+\code{rendering} module. The renderer is imported on the first call to
+\code{render()}, so an environment that is never rendered does not create any
+figure or window.
+
+\paragraph{Lazy imports.} \code{import env\_lib} imports neither PyTorch nor
+pygame, pymunk or tkinter. The environment classes of
+Table~\ref{tab:envlib-classes} are attributes of the package that are imported
+on first access, for example \code{env\_lib.ConsensusEnv}. An optional
+dependency is therefore only needed when the environment that uses it is
+created (Table~\ref{tab:envlib-optional}).
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Environment classes exported by \pkg{env\_lib}.}
+  \label{tab:envlib-classes}
+  \begin{tabularx}{\textwidth}{@{}ll>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Class & Module & Chapter \\
+    \midrule
+    \code{KuramotoOscillatorEnv} & \code{env\_lib.kos\_env.kuramoto\_env} & \ref{chap:kuramoto} \\
+    \code{KuramotoOscillatorEnvTorch} & \code{env\_lib.kos\_env.kuramoto\_env\_torch} & \ref{chap:kuramoto} \\
+    \code{LineMsgEnv} & \code{env\_lib.linemsg\_env.linemsg\_env} & \ref{chap:networked} \\
+    \code{WirelessCommEnv} & \code{env\_lib.wireless\_comm\_env.wireless\_comm\_env} & \ref{chap:networked} \\
+    \code{PistonballEnv} & \code{env\_lib.pistonball\_env.pistonball\_env} & \ref{chap:pistonball} \\
+    \code{ConsensusEnv} & \code{env\_lib.consensus\_env.consensus\_env} & \ref{chap:consensus} \\
+    \code{AJLATTEnv}, \code{AJLATTConfig} & \code{env\_lib.ajlatt\_env} & \ref{chap:ajlatt} \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Optional dependencies of the environments. The extras are
+    installed with \code{pip install -e ".[extra]"} from the repository root.}
+  \label{tab:envlib-optional}
+  \begin{tabularx}{\textwidth}{@{}ll>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Extra & Packages & Needed for \\
+    \midrule
+    \code{pistonball} & \pkg{pymunk}, \pkg{pygame} & Pistonball: \pkg{pymunk} to create the
+      environment, \pkg{pygame} to render it and for keyboard control \\
+    \code{torch} & \pkg{torch} & the PyTorch backend of the Kuramoto environments \\
+    \code{video} & \pkg{imageio}, \pkg{imageio-ffmpeg} & \code{save\_animation} to \code{.mp4} and
+      other video formats (GIF export needs only Pillow) \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Creating environments}\label{sec:envlib-make}
+
+There are three equivalent ways to create an environment:
+
+\begin{pycode}
+import gymnasium as gym
+import env_lib
+
+env = env_lib.make("WirelessComm-v0")               # registered id
+env = gym.make("WirelessComm-v0")                   # after importing env_lib
+env = env_lib.WirelessCommEnv(grid_x=6, grid_y=6)   # direct construction
+
+print(env_lib.list_envs())                          # all registered ids
+\end{pycode}
+
+The function \code{env\_lib.make} registers the environments if necessary and
+calls \code{gymnasium.make} with the id and the keyword arguments, which are
+passed to the constructor and override the configuration of the id, for example
+\code{env\_lib.make("LineMsg-v0", num\_agents=20, max\_iter=100)}.
+\code{gymnasium.make} returns the environment inside Gymnasium's standard
+wrappers (order enforcement and, except for \envid{AJLATT-v0}, the passive
+environment checker). Environment-specific methods such as
+\code{laplacian\_policy()} or \code{get\_batch\_observations()} are reached
+through \code{env.unwrapped}.
+
+% ---------------------------------------------------------------------------
+\section{Common API conventions}\label{sec:envlib-api}
+
+\subsection{Gymnasium interface}
+
+Every environment implements
+\begin{itemize}
+  \item \code{reset(*, seed=None, options=None)} returning
+        \code{(observation, info)};
+  \item \code{step(action)} returning
+        \code{(observation, reward, terminated, truncated, info)};
+  \item \code{render()} and \code{close()}; \code{close()} may be called
+        several times.
+\end{itemize}
+Observations are \code{float32} NumPy arrays contained in
+\code{observation\_space}. Calling \code{step()} before the first
+\code{reset()} raises \code{env\_lib.ResetNeededError}, which derives from
+both \code{RuntimeError} and \code{gymnasium.error.ResetNeeded}, so either can
+be caught. Invalid
+actions (wrong shape, values outside a discrete range, NaN or infinite values)
+raise \code{ValueError}, and continuous actions are clipped to the action
+bounds. AJLATT is the exception: it only checks the action shape, and clipping
+is opt-in (\code{clip\_actions=True}, Section~\ref{sec:ajlatt-spaces}).
+
+\subsection{Joint multi-agent spaces}\label{sec:envlib-joint}
+
+Each environment exposes the whole team through a single Gymnasium interface.
+The action space covers all agents at once (for example
+\code{Box(-1, 1, (8, 2))} for eight planar agents, or
+\code{MultiDiscrete([5] * 36)} for 36 wireless agents), and observations have
+one row per agent. A multi-agent algorithm splits the joint arrays along the
+first axis; a centralised algorithm uses them directly.
+
+The scalar \code{reward} returned by \code{step()} is the team reward. The
+per-agent rewards are always available as \code{info["agent\_rewards"]}, a
+\code{float64} array of shape \code{(n\_agents,)}, which every \code{step()}
+returns. How the team reward is formed from the per-agent rewards depends on the
+environment (Table~\ref{tab:envlib-comparison}): it is their sum for LineMsg,
+WirelessComm, Pistonball and AJLATT and their mean (plus a success bonus) for
+Consensus. The Kuramoto environments control one or several complete oscillator
+networks, so their ``agents'' are systems: the NumPy backend reports
+\code{n\_agents} copies of its reward and the PyTorch backend one reward per
+simulated system. AJLATT returns the per-robot rewards and per-robot collision
+flags directly as arrays; \code{TeamRewardWrapper} converts them to a scalar
+reward and a scalar \code{terminated} flag (Section~\ref{sec:ajlatt-wrapper}).
+
+The info dictionary returned by \code{reset()} contains
+\code{"agent\_rewards"} (all zeros) for LineMsg, WirelessComm, Consensus and
+AJLATT. The Kuramoto and Pistonball environments do not include the key in
+their reset info.
+
+\subsection{Termination and truncation}\label{sec:envlib-episodes}
+
+\code{terminated} signals a task-specific terminal state; \code{truncated}
+signals the end of the time budget. Every environment enforces its own episode
+limit through a constructor argument (Table~\ref{tab:envlib-limits}). The
+registrations do not add a \code{TimeLimit} wrapper (\code{env.spec.max\_episode\_steps}
+is \code{None}), so a limit passed to the constructor is never overridden by the
+registry. To change the episode length pass the constructor argument, for
+example \code{env\_lib.make("Consensus-v0", max\_steps=400)}; passing
+\code{max\_episode\_steps} to \code{gymnasium.make} would add a second,
+independent limit.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Episode limits and termination conditions.}
+  \label{tab:envlib-limits}
+  \begin{tabularx}{\textwidth}{@{}lll>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Environment & Limit argument & Default & \code{terminated} is set when \\
+    \midrule
+    Kuramoto & \code{max\_steps} & 1000 & the order parameter exceeds \code{sync\_threshold} \\
+    LineMsg & \code{max\_iter} & 50 & never (always \code{False}) \\
+    WirelessComm & \code{max\_iter} & 50 & never (always \code{False}) \\
+    Pistonball & \code{max\_cycles} & 125 & the ball reaches the left wall \\
+    Consensus & \code{max\_steps} & 200 & the task error drops below \code{tolerance} \\
+    AJLATT & \code{max\_episode\_steps} & 120 & per robot: an obstacle is closer than
+      \code{obstacle\_collision\_distance} (array of flags) \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\subsection{Seeding and reproducibility}\label{sec:envlib-seeding}
+
+\begin{itemize}
+  \item \code{reset(seed=s)} seeds the environment's generator
+        \code{self.np\_random}. All randomness of an episode (initial state,
+        stochastic transitions, noise) is drawn from this generator, and
+        \code{reset()} without a seed continues its stream. With the same seed,
+        the same actions and the same library versions an episode is
+        reproduced exactly.
+  \item No environment reads or modifies the global NumPy or PyTorch random
+        state. The PyTorch Kuramoto backend owns a \code{torch.Generator} that
+        is seeded from \code{self.np\_random} at every reset.
+  \item \code{env.action\_space.sample()} uses the space's own generator; seed
+        it separately with \code{env.action\_space.seed(s)}.
+  \item Some structure is fixed at construction and has its own seed:
+        \code{topology\_seed} (random Kuramoto topology, default 42),
+        \code{graph\_seed} (Erd\H{o}s--R\'enyi graph of the consensus
+        environment) and \code{AJLATTConfig.seed} (seed of the first AJLATT
+        reset when none is given).
+  \item The legacy \code{env.seed()} methods of LineMsg, WirelessComm and
+        Pistonball still work but emit a \code{DeprecationWarning}; use
+        \code{reset(seed=...)} instead.
+\end{itemize}
+
+\subsection{Reset options}
+
+\code{reset(options=...)} can override parts of the sampled initial state in
+the Kuramoto environments (\code{"phases"}, \code{"natural\_frequencies"},
+\code{"coupling\_strengths"}) and in the consensus environment
+(\code{"positions"}, \code{"velocities"}). Unknown keys raise
+\code{ValueError}. The other environments accept and ignore \code{options}.
+
+% ---------------------------------------------------------------------------
+\section{Rendering}\label{sec:envlib-rendering}
+
+The render mode is chosen at construction with the \code{render\_mode}
+argument:
+
+\begin{description}[style=nextline,leftmargin=2.8cm]
+  \item[\code{None}] (default) No rendering. \code{render()} returns
+    \code{None} and warns once.
+  \item[\code{"rgb\_array"}] \code{render()} returns the current frame as a
+    \code{(H, W, 3)} \code{uint8} array. Frames are drawn off-screen and need
+    no display.
+  \item[\code{"human"}] A window is opened on the first frame and updated
+    automatically at the end of every \code{reset()} and \code{step()},
+    following the Gymnasium convention; do not call \code{render()} yourself
+    in this mode. The frame rate is capped at \code{metadata["render\_fps"]}.
+  \item[\code{"ansi"}] (LineMsg and WirelessComm) \code{render()} returns a
+    plain-text summary of the agents' actions and states.
+\end{description}
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Render modes and frame sizes (width $\times$ height in pixels).}
+  \label{tab:envlib-render}
+  \begin{tabularx}{\textwidth}{@{}lll>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Environment & Modes & Frame size & Drawing backend, \code{render\_fps} \\
+    \midrule
+    Kuramoto & human, rgb\_array & $1000 \times 560$ & matplotlib, 30 \\
+    LineMsg & human, rgb\_array, ansi & $1000 \times 560$ & matplotlib, 10 \\
+    WirelessComm & human, rgb\_array, ansi & $1000 \times 560$ & matplotlib, 10 \\
+    Pistonball & human, rgb\_array & $(160 + 40n) \times 560$ & pygame, 20 \\
+    Consensus / Formation & human, rgb\_array & $1000 \times 560$ & matplotlib, 20 \\
+    AJLATT & human, rgb\_array & $1100 \times 620$ & matplotlib, 8 \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\paragraph{Renderer design.} The matplotlib renderers are subclasses of
+\code{MatplotlibRenderer} from \code{env\_lib.utils}. They create their axes and artists
+once and only update the artists' data on later frames. In
+\code{"rgb\_array"} mode the static part of the figure (axes, ticks, labels,
+legends) is rasterised once and cached, and each frame redraws only the
+registered dynamic artists (blitting), which is typically three to six times
+faster than a full redraw. The renderers never modify
+\code{matplotlib.rcParams}. Pistonball draws with pygame surfaces.
+
+\paragraph{Human mode and headless machines.} Human mode needs an interactive
+matplotlib backend (for example TkAgg or QtAgg) or, for Pistonball, a display
+for pygame. With a non-interactive backend the environment issues a
+\code{RuntimeWarning} and shows no window. On servers and in continuous
+integration set
+\begin{shellcode}
+export MPLBACKEND=Agg SDL_VIDEODRIVER=dummy
+\end{shellcode}
+and use \code{render\_mode="rgb\_array"}.
+
+\paragraph{Themes.} Two colour themes ship with the package: \code{"dark"}
+(the default) and \code{"light"}, which is intended for papers and slides and
+was used for all figures in this manual. Select a theme with
+\code{env\_lib.utils.set\_theme}. The theme is read when a renderer is created,
+that is at the first \code{render()} call of an environment, so set it before
+rendering starts. Custom palettes are \code{env\_lib.utils.Theme} instances
+registered with \code{register\_theme}.
+
+\begin{pycode}
+import env_lib
+from env_lib.utils import set_theme
+
+set_theme("light")          # renderers created from now on use the light theme
+env = env_lib.make("Consensus-v0", render_mode="rgb_array")
+obs, info = env.reset(seed=0)
+for _ in range(100):
+    action = env.action_space.sample()
+    obs, reward, terminated, truncated, info = env.step(action)
+    if terminated or truncated:
+        break
+frame = env.render()        # numpy array of shape (560, 1000, 3), dtype uint8
+env.close()
+\end{pycode}
+
+% ---------------------------------------------------------------------------
+\section{Recording episodes}\label{sec:envlib-recording}
+
+\code{env\_lib.utils} provides two functions to turn rollouts into animations:
+
+\begin{pycode}
+record_episode(env, policy=None, path=None, *, max_steps=None, seed=None,
+               fps=None, render_every=1) -> list[numpy.ndarray]
+save_animation(frames, path, fps=30.0, *, loop=0) -> pathlib.Path
+\end{pycode}
+
+\code{record\_episode} resets the environment with \code{seed}, renders the
+initial state and then steps the environment with \code{policy} (a callable
+mapping an observation to an action; uniformly random actions from
+\code{env.action\_space} if omitted), rendering one frame every
+\code{render\_every} steps. The rollout stops when any entry of
+\code{terminated} or \code{truncated} is true or after \code{max\_steps}
+steps. The function returns the list of frames and, when \code{path} is given,
+writes them with \code{save\_animation} at \code{fps} frames per second (default
+\code{env.metadata["render\_fps"]}). The environment must use
+\code{render\_mode="rgb\_array"}.
+
+\code{save\_animation} writes a sequence of equally sized RGB frames and
+returns the path. The format follows the file suffix: \code{.gif} is written
+with Pillow (always available); \code{.mp4}, \code{.webm}, \code{.avi},
+\code{.mov} and \code{.mkv} are written with \pkg{imageio} and
+\pkg{imageio-ffmpeg} (extra \code{video}); frames are cropped to even
+dimensions for video codecs. \code{loop} is the GIF loop count
+(0 loops forever). Missing parent directories are created.
+
+\begin{pycode}
+import env_lib
+from env_lib.utils import record_episode, save_animation
+
+env = env_lib.make("Formation-v0", render_mode="rgb_array")
+policy = lambda obs: env.unwrapped.laplacian_policy()     # baseline controller
+frames = record_episode(env, policy, "renders/formation.gif",
+                        max_steps=150, seed=0, render_every=2)
+save_animation(frames[::2], "renders/formation_fast.gif", fps=20)
+env.close()
+\end{pycode}
+
+% ---------------------------------------------------------------------------
+\section{Registered environments}\label{sec:envlib-ids}
+
+Table~\ref{tab:envlib-ids} lists all ids returned by \code{env\_lib.list\_envs()}
+with the constructor arguments each registration sets; all other arguments keep
+their defaults. The version suffixes follow the historical ids of the project and
+denote preset configurations, not revisions: \envid{WirelessComm-v1}, for
+example, is the $4 \times 4$ grid and not a newer version of
+\envid{WirelessComm-v0}. Gymnasium may therefore emit an ``out of date''
+\code{DeprecationWarning} when a \code{-v0} id is created; the warning is
+harmless.
+
+\begingroup\small
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.52\textwidth}>{\raggedright\arraybackslash}p{0.44\textwidth}@{}}
+  \caption{Registered Gymnasium ids and their configuration.}\label{tab:envlib-ids}\\
+  \toprule
+  Id & Class and configuration \\
+  \midrule
+  \endfirsthead
+  \toprule
+  Id & Class and configuration \\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  \envid{KuramotoOscillator-v0} & \code{KuramotoOscillatorEnv}; defaults (10 oscillators, dynamic coupling) \\
+  \envid{KuramotoOscillator-v1} & \code{KuramotoOscillatorEnv}; \code{n\_oscillators=5} \\
+  \envid{KuramotoOscillator-Constant-v0} & \code{KuramotoOscillatorEnv}; \code{n\_oscillators=6}, \code{coupling\_mode="constant"} \\
+  \envid{KuramotoOscillator-FreqSync-Constant-v0} & \code{KuramotoOscillatorEnv}; \code{n\_oscillators=6}, \code{coupling\_mode="constant"}, \code{reward\_type=}\allowbreak\code{"frequency\_synchronization"}, \code{target\_frequency=2.0} \\
+  \envid{KuramotoOscillatorTorch-v0} & \code{KuramotoOscillatorEnvTorch}; defaults (10 oscillators, one system) \\
+  \envid{KuramotoOscillatorTorch-v1} & \code{KuramotoOscillatorEnvTorch}; \code{n\_oscillators=8}, \code{n\_agents=4}, \code{device="cpu"} \\
+  \envid{KuramotoOscillatorTorch-v2} & \code{KuramotoOscillatorEnvTorch}; \code{n\_oscillators=10}, \code{n\_agents=1}, \code{device="auto"}, \code{integration\_method="rk4"} \\
+  \envid{KuramotoOscillatorTorch-Constant-v0} & \code{KuramotoOscillatorEnvTorch}; \code{n\_oscillators=6}, \code{coupling\_mode="constant"} \\
+  \envid{KuramotoOscillatorTorch-FreqSync-Constant-v0} & \code{KuramotoOscillatorEnvTorch}; \code{n\_oscillators=6}, \code{coupling\_mode="constant"}, \code{reward\_type=}\allowbreak\code{"frequency\_synchronization"}, \code{target\_frequency=2.0} \\
+  \envid{LineMsg-v0} & \code{LineMsgEnv}; defaults (10 agents) \\
+  \envid{WirelessComm-v0} & \code{WirelessCommEnv}; defaults ($6 \times 6$ grid) \\
+  \envid{WirelessComm-v1} & \code{WirelessCommEnv}; \code{grid\_x=4}, \code{grid\_y=4} \\
+  \envid{Pistonball-v0} & \code{PistonballEnv}; defaults (20 pistons); needs \pkg{pymunk} (and \pkg{pygame} to render) \\
+  \envid{Consensus-v0} & \code{ConsensusEnv}; defaults (8 agents, rendezvous on a ring) \\
+  \envid{Formation-v0} & \code{ConsensusEnv}; \code{task="formation"} (circle formation) \\
+  \envid{AJLATT-v0} & \code{AJLATTEnv}; defaults (4 robots on \code{obstacles04}); passive environment checker disabled because rewards and \code{terminated} are per-robot arrays \\
+\end{longtable}
+\endgroup
+
+\endgroup

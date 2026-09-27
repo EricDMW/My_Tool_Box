@@ -1,0 +1,372 @@
+% ---------------------------------------------------------------------------
+% Chapter: Troubleshooting
+% ---------------------------------------------------------------------------
+\chapter{Troubleshooting}\label{chap:troubleshooting}
+% Long monospaced identifiers leave little room for line breaking; allow some
+% extra inter-word stretch in this chapter (the group keeps it local).
+\begingroup\setlength{\emergencystretch}{3em}% chapter-local
+
+This chapter collects the problems that users most often run into, grouped by
+symptom, together with their causes and solutions. If a problem is not
+covered here, run the failing code with warnings enabled
+(\code{python -W default ...}), check the installation with the commands of
+Section~\ref{sec:install-verify}, and report the issue with the full error
+message and the output of \code{pip list} at
+\url{https://github.com/EricDMW/My_Tool_Box/issues}.
+
+\section{Rendering on machines without a display}\label{sec:trouble-headless}
+
+\paragraph{Symptom.} Rendering fails or hangs on a compute cluster, in a
+container, over SSH or in continuous integration, often with messages such as
+\code{cannot connect to X server}, \code{no display name} or
+\code{TclError}.
+
+\paragraph{Solution.} Use \code{render\_mode="rgb\_array"}, which draws
+off-screen and never needs a display: the matplotlib renderers draw on an Agg
+canvas that is independent of the active matplotlib backend, and the
+Pistonball renderer draws on pygame surfaces without initialising the display.
+In addition, select non-interactive back ends for any other plotting code:
+
+\begin{shellcode}
+export MPLBACKEND=Agg            # matplotlib: off-screen rendering
+export SDL_VIDEODRIVER=dummy     # pygame: no window system
+python train.py
+\end{shellcode}
+
+The same settings can be made at the top of a script, before matplotlib or
+pygame is imported:
+
+\begin{pycode}
+import os
+
+os.environ.setdefault("MPLBACKEND", "Agg")
+os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+\end{pycode}
+
+Frames returned by \code{env.render()} can then be recorded to GIF or MP4
+(Section~\ref{sec:examples-recording}) and inspected later. The test suite,
+the benchmark script and the CI workflow use exactly these settings.
+
+\section{No window appears in human mode}\label{sec:trouble-human}
+
+\paragraph{Symptom.} With \code{render\_mode="human"} nothing is shown, and
+a \code{RuntimeWarning} states that the active matplotlib backend is
+non-interactive.
+
+\paragraph{Cause.} \code{"human"} mode opens a window through matplotlib,
+which needs an interactive backend such as TkAgg or QtAgg and a display.
+When matplotlib falls back to Agg (because no GUI toolkit is installed, no
+display is available, or \code{MPLBACKEND=Agg} is set), the environment warns
+once and renders nothing. Pistonball's window is opened by pygame and needs a
+display, but no matplotlib backend.
+
+\paragraph{Solution.} Check which backend is active:
+
+\begin{shellcode}
+python -c "import matplotlib; print(matplotlib.get_backend())"
+\end{shellcode}
+
+If it prints \code{agg} (any case), install a GUI toolkit and select it:
+
+\begin{itemize}
+  \item TkAgg needs Tk: \code{sudo apt-get install python3-tk} (Debian,
+    Ubuntu), \code{sudo dnf install python3-tkinter} (Fedora),
+    \code{brew install python-tk} (Homebrew) or \code{conda install tk}.
+  \item QtAgg needs a Qt binding: \code{pip install PyQt6} (or \code{PySide6}).
+\end{itemize}
+
+Then unset \code{MPLBACKEND} or set it explicitly, for example
+\code{export MPLBACKEND=TkAgg}. In a Jupyter notebook, \code{"human"} mode is
+not the right tool: render with \code{"rgb\_array"} and display the frames
+with \code{matplotlib.pyplot.imshow} or save an animation. Over SSH, either
+enable X forwarding (\code{ssh -X}) or record the episode and copy the file.
+
+\section{Missing optional dependencies}\label{sec:trouble-deps}
+
+Optional dependencies are imported only when a feature needs them, and the
+resulting error names the extra that provides them
+(Table~\ref{tab:trouble-deps}).
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Errors caused by missing optional dependencies.}
+  \label{tab:trouble-deps}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{4.4cm}@{}}
+    \toprule
+    Error message (abbreviated) & Fix \\
+    \midrule
+    \code{PistonballEnv requires pymunk (and pygame for rendering)} &
+      \code{pip install ".[pistonball]"} \\
+    \code{Pistonball rendering requires pygame} & \code{pip install ".[pistonball]"} \\
+    \code{toolkit.neural\_toolkit requires PyTorch} & \code{pip install ".[torch]"} \\
+    \code{No module named 'torch'} when creating \code{KuramotoOscillatorEnvTorch}
+      or a \envid{KuramotoOscillatorTorch-*} id & \code{pip install ".[torch]"} \\
+    \code{Video export requires imageio and imageio-ffmpeg} & \code{pip install ".[video]"} \\
+    \code{The parakit GUI requires Tk (the 'tkinter' module)} &
+      system package \code{python3-tk} or \code{conda install tk}
+      (Section~\ref{sec:install-tk}) \\
+    \code{No module named 'pytest'} or \code{'ruff'} & \code{pip install -e ".[all,dev]"} \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Note that \code{pip install ".[dev]"} installs only the development tools; the
+test suite skips the tests of optional features that are not installed, so a
+complete test run needs \code{".[all,dev]"}. If an extra is installed but the
+error persists, the package was probably installed into a different Python
+environment than the one running the code; compare \code{which python} with
+\code{pip -V}, and use \code{python -m pip install ...} to be sure.
+
+\section{``Out of date'' warnings for -v0 environment ids}\label{sec:trouble-outofdate}
+
+\paragraph{Symptom.} Creating \envid{WirelessComm-v0} or
+\envid{KuramotoOscillator-v0} with \code{gymnasium.make} prints
+
+\begin{textcode}
+DeprecationWarning: WARN: The environment WirelessComm-v0 is out of date.
+You should consider upgrading to version `v1`.
+\end{textcode}
+
+\paragraph{Cause and solution.} Gymnasium assumes that a higher version
+suffix is a newer revision of the same environment. In \pkg{env\_lib} the
+suffixes denote preset configurations: \envid{WirelessComm-v1} is the
+$4 \times 4$ grid, not an improved \envid{WirelessComm-v0}. The warning is
+harmless and can be ignored. \code{env\_lib.make}, which otherwise behaves
+like \code{gymnasium.make}, suppresses it. To silence it when calling
+\code{gymnasium.make} directly:
+
+\begin{pycode}
+import warnings
+import gymnasium as gym
+import env_lib  # registers the ids
+
+warnings.filterwarnings("ignore", message=r".*is out of date",
+                        category=DeprecationWarning)
+env = gym.make("WirelessComm-v0")
+\end{pycode}
+
+\section{AJLATT deprecation warnings}\label{sec:trouble-ajlatt}
+
+\paragraph{Symptom.} Creating an AJLATT environment prints warnings such as
+\code{AJLATT parameter 'num\_Robot' is deprecated; use 'num\_robots'} or
+\code{parameter 'figID' no longer has any effect and is ignored}.
+
+\paragraph{Cause.} The environment is configured by the \code{AJLATTConfig}
+dataclass since version 1.0. The legacy keyword names of the former
+\pkg{argparse}-based configuration are still accepted by
+\code{AJLATTEnv(...)}, \code{env\_lib.ajlatt\_env(...)},
+\code{env\_lib.ajlatt\_env.make(...)} and \code{AJLATTConfig.from\_kwargs},
+but translated with a \code{DeprecationWarning}.
+
+\paragraph{Solution.} Rename the arguments as in
+Table~\ref{tab:trouble-ajlatt}; Appendix~\ref{app:migration} shows complete
+before-and-after examples.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Legacy AJLATT parameters and their replacements.}
+  \label{tab:trouble-ajlatt}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.8cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Legacy argument & Replacement \\
+    \midrule
+    \code{num\_Robot}, \code{num\_Target} & \code{num\_robots}, \code{num\_targets} \\
+    \code{T\_steps} & \code{max\_episode\_steps} \\
+    \code{maxmum\_run} & \code{max\_episode\_steps}; the episode is limited to \code{maxmum\_run + 1} steps \\
+    \code{SIGPERCENT} & \code{range\_noise\_proportional} \\
+    \code{useupdate} & \code{use\_update} \\
+    \code{fix\_seed} & \code{seed=<int>} in the configuration, or \code{env.reset(seed=...)} \\
+    \code{render=True} & \code{render\_mode="human"} (or \code{"rgb\_array"}) \\
+    \code{figID}, \code{record}, \code{ros}, \code{log\_dir}, \code{episode\_num}, \code{env\_name}, \ldots &
+      no effect; remove them \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Unknown names raise a \code{TypeError} in \code{AJLATTEnv(...)} and
+\code{AJLATTConfig.from\_kwargs}, and are ignored with a warning by the
+backward-compatible factory \code{make}. Python hides
+\code{DeprecationWarning} outside the \code{\_\_main\_\_} module by default;
+run \code{python -W default::DeprecationWarning script.py} to see every
+translation when migrating a code base.
+
+\section{PyTorch, GPUs and devices}\label{sec:trouble-torch}
+
+\paragraph{Installing a CPU or a CUDA build.}
+The \code{torch} extra installs the default PyTorch wheel of the platform,
+which on Linux is a large CUDA build. For CPU-only machines install the CPU
+wheel first (\code{pip install torch -{}-index-url
+https://download.pytorch.org/whl/cpu}); for a specific CUDA version use the
+command shown at \url{https://pytorch.org/get-started/}. Check the result
+with
+
+\begin{shellcode}
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+\end{shellcode}
+
+\paragraph{The Kuramoto PyTorch backend.}
+\code{KuramotoOscillatorEnvTorch} accepts \code{device="cpu"},
+\code{"cuda"}, \code{"cuda:<index>"}, a \code{torch.device}, or
+\code{"auto"}, which selects the first GPU when CUDA is available and the CPU
+otherwise (the registered id \envid{KuramotoOscillatorTorch-v2} uses
+\code{"auto"}). Requesting \code{"cuda"} on a machine without CUDA raises a
+\code{ValueError} that suggests \code{"auto"} or \code{"cpu"}. Observations
+returned by \code{reset} and \code{step} are always NumPy arrays; the batched
+accessors \code{get\_batch\_observations()} and \code{get\_batch\_rewards()}
+return tensors on the environment's device. A GPU pays off for large batches
+of systems; for a single small system the CPU is faster because of the
+transfer and launch overhead.
+
+\paragraph{neural\_toolkit devices.}
+The networks take a \code{device} argument (default \code{"cpu"}) that is
+passed to \code{Module.to}; \code{"auto"} is not accepted there. Choose the
+device explicitly and move the inputs to it:
+
+\begin{pycode}
+import torch
+from toolkit.neural_toolkit import MLPPolicyNetwork
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+policy = MLPPolicyNetwork(8, 4, device=device)
+logits = policy(torch.randn(32, 8, device=device))
+\end{pycode}
+
+\code{NetworkUtils.load\_checkpoint} loads tensors onto the device of the
+model by default, so checkpoints written on a GPU load on a CPU-only machine.
+Checkpoints written before version 1.0 cannot be loaded
+(Section~\ref{sec:neural-changes}).
+
+\section{Video export}\label{sec:trouble-video}
+
+\paragraph{Symptom.} Saving a \code{.mp4} (or \code{.webm}, \code{.avi},
+\code{.mov}, \code{.mkv}) file fails with \code{Video export requires imageio
+and imageio-ffmpeg}, or \pkg{imageio} reports that it cannot find an
+\code{ffmpeg} executable.
+
+\paragraph{Solution.} Install the \code{video} extra,
+\code{pip install ".[video]"}. The \pkg{imageio-ffmpeg} package ships its own
+\code{ffmpeg} binary, so no system installation is needed. GIF export uses
+Pillow, which is always installed with matplotlib, and is the fallback when a
+video codec is unavailable. \code{save\_animation} rejects other suffixes with
+a \code{ValueError}; frames must all have the same shape
+\code{(H, W, 3)} or \code{(H, W, 4)}.
+
+\section{Reproducibility and seeding}\label{sec:trouble-seeding}
+
+The environments are deterministic given their seeds and never use global
+random state, but a complete experiment contains several independent sources
+of randomness. Seed each of them:
+
+\begin{itemize}
+  \item \emph{Environment.} Call \code{env.reset(seed=s)} once at the start of
+    a run; later calls to \code{env.reset()} without a seed continue the same
+    random stream, so a whole sequence of episodes is reproducible. Resetting
+    with the same seed every episode repeats the same initial state.
+  \item \emph{Action sampling.} \code{env.action\_space.sample()} uses the
+    space's own generator, which \code{reset} does not seed. Call
+    \code{env.action\_space.seed(s)}. This also applies to
+    \code{record\_episode} without a policy.
+  \item \emph{Construction-time randomness.} Some environments draw random
+    structure in the constructor, independent of \code{reset}: the
+    Erd\H{o}s-R\'enyi graph of \code{ConsensusEnv} (\code{graph\_seed}; with
+    the default \code{None} two instances may differ, even in their
+    observation size) and the random topology of the Kuramoto environments
+    (\code{topology\_seed=42}). AJLATT accepts a default seed in its
+    configuration (\code{seed=...}), used by the first \code{reset()} without
+    a seed.
+  \item \emph{Networks.} Call \code{torch.manual\_seed(s)} before creating
+    networks and before training. \code{VariationalEncoder} samples its noise
+    from PyTorch's default generator. On GPUs some operations are
+    non-deterministic; see the PyTorch documentation on reproducibility
+    (\code{torch.use\_deterministic\_algorithms}).
+  \item \emph{Tabular tools.} Pass \code{rng=s} to the tables; each table
+    owns its generator.
+  \item \emph{Your own code.} Use a \code{numpy.random.default\_rng(s)}
+    generator instead of the global \code{np.random} functions.
+\end{itemize}
+
+Seeded trajectories are reproducible for a fixed version of the package and
+its dependencies. Across versions, results can change where bugs were fixed;
+Appendix~\ref{app:migration} lists these changes. The AJLATT environment can
+reproduce its behaviour before version 1.0 closely with
+\code{ci\_solver="slsqp"}.
+
+\section{Performance}\label{sec:trouble-performance}
+
+\begin{itemize}
+  \item \emph{Render only when needed.} Rendering a frame costs 3 to 36\,ms,
+    which is far more than a simulation step (Table~\ref{tab:examples-bench}).
+    Train with \code{render\_mode=None}, and record evaluation episodes
+    separately, with \code{render\_every} greater than one for long episodes.
+    \code{"human"} mode additionally limits the frame rate, so never train in
+    \code{"human"} mode.
+  \item \emph{Create environments once.} Construction loads maps, builds
+    graphs and allocates buffers; reuse an environment across episodes with
+    \code{reset()} instead of creating a new one per episode. The first
+    \code{render()} call builds the figure and is slower than later calls.
+  \item \emph{Choose the integrator.} For the Kuramoto environments, Euler
+    integration is about twice as fast as RK4; use RK4 when accuracy at large
+    \code{dt} matters.
+  \item \emph{Batch on the GPU.} The PyTorch Kuramoto environment simulates
+    \code{n\_agents} systems per step. One batched environment is much
+    cheaper than many separate ones, especially on a GPU.
+  \item \emph{AJLATT.} Keep the default \code{ci\_solver="newton"}, which is
+    several times faster than \code{"slsqp"}; the cost per step grows with the
+    number of robots because every robot fuses its neighbours' estimates.
+  \item \emph{Small networks on the CPU.} PyTorch uses several threads by
+    default. For the small networks typical of these environments, and when
+    several training processes share a machine, thread contention can make
+    training much slower; limit the threads with \code{torch.set\_num\_threads(1)}
+    or the environment variable \code{OMP\_NUM\_THREADS=1} and compare.
+  \item \emph{Measure.} \code{benchmarks/benchmark\_envs.py}
+    (Section~\ref{sec:examples-benchmarks}) measures step and frame times on
+    your machine; \code{python -m cProfile -s cumtime script.py} shows where
+    time goes in your own code.
+\end{itemize}
+
+\section{Other common errors}\label{sec:trouble-other}
+
+\begin{description}[leftmargin=0.6cm,style=nextline]
+  \item[\code{step()} raises before the first \code{reset()}]
+    Every environment requires \code{reset()} before the first
+    \code{step()}. Otherwise it raises \code{env\_lib.ResetNeededError},
+    which can be caught either as a \code{RuntimeError} or as Gymnasium's
+    \code{ResetNeeded} error. Environments created with
+    \code{gymnasium.make} raise Gymnasium's own \code{ResetNeeded} from the
+    \code{OrderEnforcing} wrapper.
+  \item[An episode is longer or shorter than expected]
+    Each environment enforces its own episode limit through a constructor
+    argument (\code{max\_steps}, \code{max\_iter}, \code{max\_cycles} or
+    \code{max\_episode\_steps}); pass it to the constructor or to
+    \code{env\_lib.make}. Passing \code{max\_episode\_steps} to
+    \code{gymnasium.make} adds a second \code{TimeLimit} wrapper, and the
+    shorter of the two limits applies.
+  \item[\code{AttributeError} for an environment method]
+    \code{gymnasium.make} and \code{env\_lib.make} return a wrapped
+    environment. Methods and attributes that only the environment class
+    defines are reached through \code{env.unwrapped}; for example, the
+    consensus controller is \code{env.unwrapped.laplacian\_policy()}.
+  \item[\code{render()} returns \code{None} with a warning]
+    The environment was created without a render mode. Pass
+    \code{render\_mode="rgb\_array"} (or \code{"human"}) to the constructor or
+    to \code{make}.
+  \item[Actions are rejected]
+    Actions must match \code{env.action\_space} in shape. Pistonball in
+    discrete mode expects one value in $\{0, 1, 2\}$ per piston, not a single
+    integer; AJLATT expects an array of shape \code{(num\_robots, 2)}.
+    Appendix~\ref{app:migration} describes the changes from earlier versions.
+  \item[The \pkg{parakit} window does not open]
+    \code{ParameterTuner.tune()} raises \code{ImportError} without Tk and
+    \code{RuntimeError} without a display; use the headless API
+    (Section~\ref{sec:parakit-gui}).
+  \item[Figures look different from the examples]
+    \pkg{plotkit} applies its style locally and does not change global
+    settings. If other code changed \code{matplotlib.rcParams} (or called
+    \code{set\_research\_style} without \code{reset\_style}), the preset is
+    applied on top of those settings; call \code{matplotlib.rcdefaults()} to
+    start from the matplotlib defaults.
+\end{description}
+
+\par\endgroup

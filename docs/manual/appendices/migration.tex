@@ -1,0 +1,432 @@
+% ---------------------------------------------------------------------------
+% Appendix: Migration from pre-1.0 versions
+% ---------------------------------------------------------------------------
+\chapter{Migration from pre-1.0 versions}\label{app:migration}
+% Long monospaced identifiers leave little room for line breaking; allow some
+% extra inter-word stretch in this chapter (the group keeps it local).
+\begingroup\setlength{\emergencystretch}{3em}% chapter-local
+
+Before version 1.0 the code lived in two separate projects,
+\code{envlib\_project/env\_lib} and \code{toolkit\_project/toolkit}, each with
+its own \code{setup.py}, and several environments had their own installation
+files. Version 1.0 turns them into one distribution with a stable API, fixes a
+number of bugs and changes some behaviour. This appendix explains, module by
+module, what code written for the earlier versions has to change. The complete
+list of changes is in \code{CHANGELOG.md}.
+
+Most user code keeps working: class names, module paths, constructor
+arguments and their defaults are unchanged, and deprecated arguments are
+translated with a \code{DeprecationWarning}. Python shows these warnings only
+for code in \code{\_\_main\_\_} by default; run your scripts once with
+\code{python -W default::DeprecationWarning} to list everything that needs
+attention.
+
+\section{Checklist}\label{sec:migration-checklist}
+
+\begin{enumerate}
+  \item Uninstall the old distributions and install \pkg{my-tool-box}
+    (Section~\ref{sec:migration-install}).
+  \item Unpack \code{(observation, info)} from every \code{reset()} call and use
+    the five-tuple of \code{step()}, including for AJLATT.
+  \item Create AJLATT through \code{env\_lib.AJLATTEnv} with the new parameter
+    names and adapt to the joint action and observation spaces
+    (Section~\ref{sec:migration-ajlatt}).
+  \item For Pistonball in discrete mode, pass one value in $\{0, 1, 2\}$ per
+    piston (Section~\ref{sec:migration-pistonball}).
+  \item Treat \code{terminated} and \code{truncated} separately, and set episode
+    limits through the constructor arguments
+    (Section~\ref{sec:migration-common}).
+  \item Retrain \pkg{neural\_toolkit} models; old checkpoints cannot be loaded
+    (Section~\ref{sec:migration-neural}).
+  \item If your figures relied on side effects of \pkg{plotkit} on the global
+    matplotlib configuration, call \code{set\_research\_style()} explicitly
+    (Section~\ref{sec:migration-plotkit}).
+\end{enumerate}
+
+\section{Installation}\label{sec:migration-install}
+
+\textbf{Before}, each project (and optionally each environment) was installed
+from its own folder:
+
+\begin{shellcode}
+cd envlib_project && pip install -e .
+cd ../toolkit_project && pip install -e .
+cd ../envlib_project/env_lib/pistonball_env && pip install -e .   # and similar
+\end{shellcode}
+
+\textbf{After}, one installation from the repository root provides both
+import packages; optional features are selected with extras
+(Chapter~\ref{chap:install}):
+
+\begin{shellcode}
+pip uninstall -y env_lib toolkit
+pip uninstall -y ttenv kos_env linemsg_env pistonball_env wireless_comm_env
+pip install -e ".[all]"            # or ".[all,dev]" for development
+\end{shellcode}
+
+The import names \pkg{env\_lib} and \pkg{toolkit} are unchanged. TensorFlow,
+seaborn, pandas and scikit-learn are no longer required. Importing
+\pkg{env\_lib} or \pkg{toolkit} no longer imports PyTorch, pygame, pymunk or
+Tk; the subpackages and environment classes are loaded on first use, so
+\code{import toolkit; toolkit.plotkit.plot\_line(...)} and
+\code{from env\_lib import PistonballEnv} continue to work.
+
+\section{Changes common to all environments}\label{sec:migration-common}
+
+\paragraph{Reset and step.}
+All environments follow the Gymnasium API. \code{reset(*, seed=None,
+options=None)} returns \code{(observation, info)}, and
+\code{step(action)} returns \code{(observation, reward, terminated,
+truncated, info)}. The \code{seed} argument must be passed by keyword.
+
+% norun
+\begin{pycode}
+# Before (AJLATT and old-style loops)
+# obs = env.reset()
+# obs, reward, done, info = env.step(action)
+
+# After
+obs, info = env.reset(seed=0)
+obs, reward, terminated, truncated, info = env.step(env.action_space.sample())
+done = bool(np.any(terminated)) or truncated
+\end{pycode}
+
+\paragraph{Seeding.}
+\code{env.seed(s)} is deprecated where it existed (LineMsg, WirelessComm,
+Pistonball) and emits a \code{DeprecationWarning}; use
+\code{env.reset(seed=s)}. No environment seeds the global NumPy or PyTorch
+generators any more (the Kuramoto environments used to call
+\code{np.random.seed(42)} and \code{torch.manual\_seed(42)}); code that relied
+on these side effects for its own random numbers must seed its own generator.
+
+\paragraph{Episode limits and termination.}
+The registered ids no longer add a \code{TimeLimit} wrapper. Previously, for
+example, \envid{KuramotoOscillator-v0} was truncated after 1000 steps by the
+wrapper even if a larger \code{max\_steps} was passed to \code{gym.make}; now
+the constructor argument (\code{max\_steps}, \code{max\_iter},
+\code{max\_cycles} or \code{max\_episode\_steps}) is the only limit, and
+reaching it sets \code{truncated=True}. Task success (for example
+synchronisation of the oscillators) sets \code{terminated=True}; previously
+some environments reported both cases as \code{terminated}.
+
+\paragraph{Registration.}
+Environments are registered when \pkg{env\_lib} is imported; the
+\code{register()} functions of \pkg{env\_lib.kos\_env} and
+\pkg{env\_lib.wireless\_comm\_env} are deprecated no-ops that call the central
+registration. \code{env\_lib.make(id)} and \code{env\_lib.list\_envs()} are
+new. The id \envid{AJLATT-v1}, an unusable alias of \envid{AJLATT-v0}, was
+removed.
+
+\paragraph{Observations, rewards and rendering.}
+Observations are \code{float32} and lie in \code{observation\_space};
+per-agent rewards are available in \code{info["agent\_rewards"]}. Rendering
+happens only on request: in \code{"human"} mode the environment renders
+itself in \code{reset()} and \code{step()}, so explicit \code{env.render()}
+calls in \code{"human"} loops are no longer needed, and \code{"rgb\_array"}
+works without a display. \code{step()} before the first \code{reset()} now
+raises an error instead of resetting implicitly.
+
+\section{Kuramoto oscillators}\label{sec:migration-kuramoto}
+
+\begin{itemize}
+  \item \emph{PyTorch backend.} A sign error made the coupling repulsive
+    ($\sin(\theta_i - \theta_j)$ instead of $\sin(\theta_j - \theta_i)$).
+    Results obtained with \code{KuramotoOscillatorEnvTorch} before 1.0 are
+    therefore not comparable with new ones. Both backends now produce the same
+    trajectories.
+  \item \emph{Normalisation.} Division of the coupling sum by $N$ is opt-in
+    for both backends (\code{normalize\_coupling=True}). Code that relied on
+    the normalisation of the old PyTorch backend must set this flag.
+  \item \emph{Coupling matrix.} The NumPy backend used to skip entries
+    $K_{ij} \le 0$; the full matrix is used now. Default settings are not
+    affected.
+  \item \emph{Constant coupling.} \code{coupling\_mode="constant"} without a
+    matrix now uses \code{coupling\_strength * adjacency}, which makes the
+    registered \envid{*-Constant-v0} ids usable (they raised before).
+  \item \emph{Episode end.} Synchronisation ($r >$ \code{sync\_threshold})
+    sets \code{terminated}; \code{sync\_threshold} and \code{sync\_bonus} are
+    constructor arguments. The PyTorch backend accepts \code{device="auto"},
+    and its phase coherence and bonus rules now match the NumPy backend.
+\end{itemize}
+
+\section{LineMsg and WirelessComm}\label{sec:migration-networked}
+
+Seeded trajectories are bit-identical to the previous implementations, so
+existing results remain valid. The text output of the old renderers is
+available as \code{render\_mode="ansi"}; \code{"human"} and \code{"rgb\_array"}
+show the new dashboards. LineMsg accepts actions either as an integer in
+\code{Discrete(2**N)} or as an array of $N$ bits, and
+\code{action\_space\_type="multibinary"} supports more than 62 agents.
+WirelessComm validates its arguments and actions and reports per-agent
+outcomes (idle, success, collision, lost) in \code{info["outcomes"]}.
+
+\section{Pistonball}\label{sec:migration-pistonball}
+
+\paragraph{Discrete actions.}
+The discrete action space is \code{MultiDiscrete([3] * n\_pistons)}: one
+value per piston, 0 moves the piston down, 1 keeps it still and 2 moves it up.
+Earlier versions declared the same array format as
+\code{Box(0, 2, (n\_pistons,), int32)}, and some earlier documentation used a
+single base-3 integer in \code{Discrete(3**n\_pistons)}. Code that sends
+arrays keeps working; code that encodes a single integer must decode it:
+
+\begin{pycode}
+import numpy as np
+import env_lib
+
+env = env_lib.PistonballEnv(n_pistons=5, continuous=False)
+obs, info = env.reset(seed=0)
+
+# Before: one integer for all pistons (base-3 encoding)
+code = 13
+# After: one value per piston; decode an old integer action like this
+action = np.array([(code // 3**i) % 3 for i in range(env.n_pistons)])  # [1 1 1 0 0]
+obs, reward, terminated, truncated, info = env.step(action)
+\end{pycode}
+
+\paragraph{Other changes.}
+Actions are validated (shape, range, NaN). The screen is only drawn when
+rendering is requested; the methods \code{draw()}, \code{draw\_background()},
+\code{draw\_pistons()} and \code{enable\_render()} are deprecated no-ops, and
+the PNG sprites were replaced by a vector renderer. The environment works with
+pymunk 6 and 7.
+
+\section{AJLATT}\label{sec:migration-ajlatt}
+
+AJLATT was rewritten as a Gymnasium environment configured by a dataclass.
+The old factory called \code{argparse.parse\_args()} internally, which failed
+in any script with its own command-line arguments.
+
+\paragraph{Creating the environment.} The legacy factory still works; the
+class and the configuration dataclass are the preferred interface:
+
+\begin{pycode}
+import env_lib
+from env_lib import AJLATTConfig, AJLATTEnv
+
+# Before (still works, with DeprecationWarnings for the legacy names)
+env = env_lib.ajlatt_env(map_name="obstacles04", num_Robot=4, T_steps=100)
+
+# After
+env = AJLATTEnv(map_name="obstacles04", num_robots=4, max_episode_steps=100)
+
+# Or with an explicit configuration object
+config = AJLATTConfig(map_name="obstacles05", num_robots=3)
+env = AJLATTEnv(config, render_mode="rgb_array")
+\end{pycode}
+
+Table~\ref{tab:trouble-ajlatt} lists the renamed parameters. Rendering is off
+by default; the old \code{render=True} flag becomes
+\code{render\_mode="human"}, and \code{render\_mode="rgb\_array"} records
+frames without a display.
+
+\paragraph{Spaces, rewards and termination.}
+The spaces are \emph{joint}: \code{action\_space} has shape
+\code{(num\_robots, 2)} (linear and angular velocity of each robot) and
+\code{observation\_space} shape \code{(num\_robots, obs\_dim)}, both
+\code{float32}. The per-robot spaces used by the old version are available as
+\code{single\_action\_space} and \code{single\_observation\_space}. The reward
+and \code{terminated} are per-robot arrays; wrap the environment in
+\code{TeamRewardWrapper} for a scalar team reward and termination flag.
+
+\begin{pycode}
+import numpy as np
+from env_lib.ajlatt_env import TeamRewardWrapper
+
+env = AJLATTEnv(num_robots=4)
+print(env.single_action_space.shape, env.action_space.shape)   # (2,) (4, 2)
+
+obs, info = env.reset(seed=0)                    # before: obs = env.reset()
+actions = np.stack([env.single_action_space.sample() for _ in range(4)])
+obs, reward, terminated, truncated, info = env.step(actions)
+print(reward.shape, terminated.shape)            # (4,) (4,)
+
+team_env = TeamRewardWrapper(AJLATTEnv(num_robots=4))
+obs, info = team_env.reset(seed=0)
+obs, team_reward, done, truncated, info = team_env.step(actions)   # float, bool
+\end{pycode}
+
+\paragraph{Behaviour changes.} The following changes affect results:
+\begin{itemize}
+  \item The target-velocity entries of the observation contain the commanded
+    target velocity instead of the configured constant.
+  \item Covariance intersection uses a Newton solver by default; its objective
+    is never worse than that of the previous SLSQP solver. Pass
+    \code{ci\_solver="slsqp"} to reproduce results of earlier versions (to
+    about $10^{-6}$).
+  \item Target policies are per environment instance and selected with
+    \code{target\_policy}; they used to be shared class attributes that were
+    not reset between episodes. Unknown map names raise an error instead of
+    prompting with \code{input()}.
+  \item Covariance traces were appended to lists that were never cleared (a
+    memory leak). Per-episode traces are returned by
+    \code{env.episode\_statistics()}.
+  \item Dynamic maps are regenerated at every \code{reset()} and no longer
+    need scikit-image.
+\end{itemize}
+
+\paragraph{Training scripts.}
+The PPO, LLM and debugging options that used to live in the AJLATT parameter
+module were removed from the environment package. To expose the environment
+options on a script's own parser, use \code{AJLATTConfig.add\_arguments}:
+
+\begin{pycode}
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--lr", type=float, default=3e-4)       # your own options
+AJLATTConfig.add_arguments(parser, prefix="env.")           # --env.num_robots, ...
+args = parser.parse_args(["--env.num_robots", "3"])
+config = AJLATTConfig.from_namespace(args, prefix="env.")
+env = AJLATTEnv(config)
+\end{pycode}
+
+\paragraph{Maps.}
+The map tools moved to \pkg{env\_lib.ajlatt\_env.maps} and are available as
+the console scripts \code{ajlatt-build-map} and \code{ajlatt-plot-map}
+instead of the scripts \code{build\_map.py} and \code{plot\_map.py}. The old
+builder wrote transposed grids; rebuild custom maps from their specification
+with the new builder. Maps whose grid is one row shorter than the header
+declares are padded with a wall row and a warning (three bundled maps had this
+problem and were fixed).
+
+\section{plotkit}\label{sec:migration-plotkit}
+
+The function names and positional arguments are unchanged; new options are
+keyword-only arguments appended to the signatures.
+
+\begin{itemize}
+  \item \emph{No global side effects.} The plot functions used to call
+    \code{plt.style.use("default")} and change \code{rcParams}, which also
+    affected later, unrelated figures. They now apply their style locally.
+    Code that relied on the side effect should call \code{set\_research\_style()}
+    once (and \code{reset\_style()} to undo it). \code{set\_research\_style} no
+    longer sets \code{figure.dpi=300}, which made on-screen figures very large;
+    it still sets \code{savefig.dpi=300}.
+  \item \emph{Fixed input handling.} \code{plot\_line(x, [y1, y2])} plots both
+    series (it plotted only the first), and a flat list of numbers is one
+    series (it was treated as several). Several bar series are grouped side by
+    side instead of overlapping.
+  \item \emph{New features.} \code{band} and \code{smoothing} in
+    \code{plot\_shadow\_curve}, NaN-robust statistics,
+    \code{plot\_learning\_curves}, \code{plot\_histogram}, \code{save\_figure},
+    style presets, the Okabe-Ito palette and the gallery command. The heatmap
+    functions no longer need seaborn.
+\end{itemize}
+
+\begin{pycode}
+from toolkit.plotkit import plot_line, reset_style, set_research_style
+
+# Before: calling any plotkit function changed the global style as a side effect.
+# After: opt in explicitly when plain matplotlib code should use the research style.
+set_research_style()
+ax = plot_line([0, 1, 2], [[0, 1, 4], [0, 2, 3]], labels=["a", "b"])   # two series
+reset_style()
+\end{pycode}
+
+\section{neural\_toolkit}\label{sec:migration-neural}
+
+\paragraph{Retrain models.}
+Earlier MLP stacks applied no activation between hidden layers, and several
+other defects changed the computed functions (Section~\ref{sec:neural-changes}).
+The layer structure of every network changed, so checkpoints written before
+1.0 cannot be loaded; retrain and save new checkpoints.
+
+\paragraph{API differences.} Besides the fixes, the following details changed:
+\begin{itemize}
+  \item Unknown activation names raise \code{ValueError} instead of silently
+    falling back to a default, and the \code{device} argument is honoured
+    (modules are moved to it at construction).
+  \item Q-networks honour the \code{action} argument: \code{q(s, a)} returns
+    $Q(s, a)$ with shape \code{(B,)} for integer actions.
+  \item \code{NetworkUtils.load\_checkpoint} loads with
+    \code{weights\_only=True} and maps tensors to the model's device by
+    default. Checkpoints that contain arbitrary Python objects in the extra
+    entries need \code{weights\_only=False} (only for trusted files).
+    \code{save\_checkpoint} accepts \code{optimizer=None} and extra keyword
+    entries, and returns the path.
+  \item The method \code{create\_positional\_encoding} of \code{NetworkUtils}
+    returns the frozen table as an \code{nn.Parameter} of shape
+    \code{(1, max\_len, d\_model)};
+    use \code{PositionalEncoding} for a module that adds it to its input.
+  \item The tabular tools draw random numbers from a per-table generator
+    (\code{rng} argument) instead of the global NumPy state.
+\end{itemize}
+
+\paragraph{Names from earlier documentation.}
+The documentation of earlier versions described some names that never existed
+in the code. Table~\ref{tab:migration-neural-names} lists the actual
+equivalents.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Names used in pre-1.0 documentation and their actual equivalents.}
+  \label{tab:migration-neural-names}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{5.6cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Documented before 1.0 & Use \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{Static methods of} \code{NetworkUtils}} \\
+    \code{count\_trainable\_parameters} & \code{count\_parameters} (counts trainable parameters) \\
+    \code{init\_weights} & \code{initialize\_weights} \\
+    \code{clip\_gradients} & \code{clip\_grad\_norm} \\
+    \code{get\_device}, \code{to\_device} & plain PyTorch: \code{torch.device(...)}, \code{module.to(device)} \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{Encoder arguments}} \\
+    \code{output\_dim} of \code{CNNEncoder} and \code{RNNEncoder} & \code{latent\_dim} \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\section{parakit}\label{sec:migration-parakit}
+
+\code{ParameterTuner} (and its alias \code{ParameterAdjuster}) keeps its
+constructor and \code{tune\_parameters} class method, but its behaviour was
+corrected:
+
+\begin{itemize}
+  \item \code{tune()} installs the accepted values as the parser's defaults, as
+    it was documented to do; previously the returned parser was unchanged.
+  \item Boolean strings (the text \code{"False"} used to be stored as a
+    string, which is true in a boolean context), lists (\code{nargs}),
+    \code{None} values and \code{store\_true} options are parsed correctly.
+  \item Validation callbacks receive the \emph{converted} value. Callbacks
+    written for the old convention, which received text and returned
+    \code{(is\_valid, converted\_value, message)}, keep working as long as they
+    also accept an already converted value (for example \code{float(value)} of
+    a float); their converted value is ignored.
+  \item \code{import toolkit.parakit} works without Tk; the window imports Tk
+    only when it opens. The library no longer calls
+    \code{logging.basicConfig}, so configure logging in your script if you want
+    to see its log messages.
+  \item New headless functions (\code{get\_parameters},
+    \code{save\_parameters}, \code{load\_parameters}, \code{apply\_parameters},
+    \code{parse\_value}) make the GUI optional
+    (Section~\ref{sec:parakit}).
+\end{itemize}
+
+\begin{pycode}
+import argparse
+from toolkit.parakit import apply_parameters, load_parameters, save_parameters
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--learning_rate", type=float, default=1e-3)
+
+# Before: validators received text and returned a 3-tuple
+def validate_lr_old(value):
+    lr = float(value)
+    return (0 < lr <= 1), lr, "learning rate must be in (0, 1]"
+
+# After: validators receive the converted value; a bool or (ok, message) suffices
+def validate_lr(value):
+    return 0 < value <= 1, "learning rate must be in (0, 1]"
+
+path = save_parameters({"learning_rate": 0.01}, "runs/params")
+apply_parameters(parser, load_parameters(path),
+                 validation_callbacks={"learning_rate": validate_lr_old})
+apply_parameters(parser, {"learning_rate": "0.02"},
+                 validation_callbacks={"learning_rate": validate_lr})
+\end{pycode}
+
+\par\endgroup

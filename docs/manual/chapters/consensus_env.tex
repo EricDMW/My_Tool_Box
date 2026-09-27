@@ -1,0 +1,425 @@
+% ---------------------------------------------------------------------------
+% Consensus and formation control environment
+% ---------------------------------------------------------------------------
+\begingroup
+% Line breaking for paragraphs with long, unbreakable identifiers (local to
+% this chapter): allow looser lines instead of overfull ones.
+\setlength{\emergencystretch}{3em}\tolerance=1000
+\chapter{Consensus and Formation Control}\label{chap:consensus}
+
+\code{env\_lib.consensus\_env.ConsensusEnv} is a networked multi-agent control
+benchmark, new in version 1.0. $N$ agents move in a bounded plane and must
+either agree on a common position (\emph{consensus} or rendezvous) or assume a
+geometric formation up to translation (\emph{formation control}). Every agent
+only sees the agents it is connected to in a communication graph, which is
+either fixed or rebuilt every step from the agents' distances. The environment
+connects multi-agent reinforcement learning with the classical theory of
+distributed control: the Laplacian consensus protocol is included as a baseline
+controller, the algebraic connectivity of the graph is reported at every step,
+and the difficulty can be tuned through the topology, the dynamics (single or
+double integrators), noise and the formation shape. Typical research uses are
+learning distributed controllers from local observations, studying the effect of
+graph connectivity and time-varying graphs on learning, and comparing learned
+policies with model-based protocols.
+
+% ---------------------------------------------------------------------------
+\section{Model}\label{sec:consensus-model}
+
+Agent $i$ has position $x_i \in \mathbb{R}^2$, velocity $v_i \in \mathbb{R}^2$
+and a formation offset $d_i$. The offsets are zero for consensus and the slots
+of the chosen formation shape, centred at the origin, for formation control.
+The task is solved when the shifted positions $y_i = x_i - d_i$ agree. The
+task error
+\begin{equation}
+  e = \frac{1}{N} \sum_{i=1}^{N} \lVert y_i - \bar y \rVert^2,
+  \qquad \bar y = \frac{1}{N} \sum_{j=1}^{N} y_j,
+  \label{eq:consensus-error}
+\end{equation}
+measures the disagreement; the task is solved when $e <$ \code{tolerance}.
+
+\paragraph{Dynamics.} The action $u_i$ of agent $i$ is clipped to
+$[-u_{\max}, u_{\max}]^2$ with $u_{\max}$ = \code{max\_control}. With time step
+$\Delta t$ = \code{dt}, noise intensity $\sigma$ = \code{noise\_std},
+$w_i \sim \mathcal{N}(0, I_2)$ and the arena
+$[-a, a]^2$ ($a$ = \code{arena\_size}):
+\begin{itemize}
+  \item single integrator (\code{dynamics="single"}, the action is a velocity):
+    \begin{equation}
+      x_i \leftarrow \operatorname{clip}_{[-a, a]}\bigl(x_i + \Delta t\, u_i
+        + \sigma \sqrt{\Delta t}\, w_i\bigr);
+    \end{equation}
+    the reported velocity is the realised one, $v_i = (x_i^{+} - x_i)/\Delta t$;
+  \item double integrator (\code{dynamics="double"}, the action is an
+    acceleration, damping $c$ = \code{damping}):
+    \begin{equation}
+      v_i \leftarrow v_i + \Delta t\,(u_i - c\, v_i) + \sigma \sqrt{\Delta t}\, w_i,
+      \qquad
+      x_i \leftarrow \operatorname{clip}_{[-a, a]}\bigl(x_i + \Delta t\, v_i\bigr)
+    \end{equation}
+    (semi-implicit Euler); a velocity component is set to zero when the arena
+    wall stops the agent.
+\end{itemize}
+
+\paragraph{Communication graph.} The agents communicate over an undirected graph
+with adjacency matrix $A$ and neighbour sets $\mathcal{N}_i$
+(Table~\ref{tab:consensus-topologies}). Static graphs are built once at
+construction; the proximity graph is rebuilt after every step. The
+environment reports the algebraic connectivity $\lambda_2(L)$, the second
+smallest eigenvalue of the graph Laplacian $L = D - A$ ($D$ the diagonal degree
+matrix). It is positive exactly when the graph is connected and bounds the
+convergence rate of linear consensus.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Communication topologies.}
+  \label{tab:consensus-topologies}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    \code{topology} & Graph \\
+    \midrule
+    \code{"ring"} & $i$ is connected to $i \pm 1 \bmod N$ \\
+    \code{"line"} & $i$ is connected to $i \pm 1$ (a path) \\
+    \code{"star"} & agent 0 is the hub connected to all others \\
+    \code{"complete"} & all pairs are connected \\
+    \code{"erdos\_renyi"} & every pair is connected independently with probability
+      \code{edge\_probability}; the graph is resampled (up to 1000 times) until it is
+      connected, using a generator seeded with \code{graph\_seed} \\
+    \code{"proximity"} & disk graph: $i$ and $j$ are connected when
+      $\lVert x_i - x_j \rVert \le$ \code{comm\_radius}; rebuilt after every step and
+      may disconnect during an episode \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\paragraph{Formation shapes.} \code{make\_formation(shape, n\_agents, radius)}
+returns the offsets $d_i$, centred at the origin; all shapes have a
+characteristic extent of $2R$ with $R$ = \code{formation\_radius}:
+\begin{itemize}
+  \item \code{"circle"}: regular polygon of radius $R$, agent 0 at the top;
+  \item \code{"line"}: evenly spaced on a horizontal segment of length $2R$;
+  \item \code{"grid"}: row-major grid with $\lceil\sqrt{N}\,\rceil$ columns whose
+        longer side spans $2R$;
+  \item \code{"wedge"}: V shape pointing up, agent 0 at the apex and the others
+        alternating between the two arms (half opening angle 35 degrees, arm
+        length $2R$).
+\end{itemize}
+A formation that does not fit into the arena raises \code{ValueError}.
+
+\paragraph{Initial state.} Positions are drawn uniformly from
+$[-0.8a, 0.8a]^2$ and velocities are zero. For the proximity topology the draw
+is conditioned on a connected initial graph (rejection sampling in vectorised
+batches); if \code{comm\_radius} is so small that no connected placement is
+found, the agents are placed sequentially, each within $0.95$\,\code{comm\_radius}
+of a previously placed agent, and a warning is issued once.
+\code{reset(options=\{"positions": ..., "velocities": ...\})} starts from a
+given state (arrays of shape \code{(N, 2)}; positions are clipped to the
+arena).
+
+% ---------------------------------------------------------------------------
+\section{Spaces}\label{sec:consensus-spaces}
+
+\paragraph{Action.} \code{Box(-max\_control, max\_control, (N, 2), float32)}:
+one velocity command (single integrator) or acceleration (double integrator) per
+agent. Any array with $2N$ entries is reshaped to \code{(N, 2)}; values are
+clipped, and NaN or infinite values raise \code{ValueError}.
+
+\paragraph{Observation.} An unbounded \code{Box} of shape \code{(N, 6 + 5K)},
+\code{float32}, where $K$ = \code{max\_neighbors} is the number of neighbour
+slots. Row $i$ has the layout of Table~\ref{tab:consensus-obs}. The slots hold
+the neighbours $j \in \mathcal{N}_i$ sorted by physical distance
+$\lVert x_j - x_i \rVert$ (ties by index); unused slots are zero with mask 0.
+If an agent has more neighbours than slots, the farthest ones are left out of
+the observation; they still count in the reward and in the baseline controller.
+The property \code{env.observation\_layout} returns the column slices
+(\code{"position"}, \code{"velocity"}, \code{"offset"}, \code{"neighbors"}), and
+\code{obs[:, layout["neighbors"]].reshape(N, K, 5)} gives the slots, whose
+columns are described by \code{ConsensusEnv.neighbor\_slot\_layout}.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Consensus observation (row $i$; slot $s = 0, \dots, K-1$).}
+  \label{tab:consensus-obs}
+  \begin{tabularx}{\textwidth}{@{}ll>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Columns & Layout key & Content \\
+    \midrule
+    \code{0:2} & \code{position} & $x_i$ \\
+    \code{2:4} & \code{velocity} & $v_i$ \\
+    \code{4:6} & \code{offset} & $d_i$ (zeros for consensus) \\
+    \code{6+5s : 6+5s+2} & \code{neighbors} & slot $s$: $(x_j - d_j) - (x_i - d_i) = y_j - y_i$ \\
+    \code{6+5s+2 : 6+5s+4} & \code{neighbors} & slot $s$: $v_j - v_i$ \\
+    \code{6+5s+4} & \code{neighbors} & slot $s$: valid mask (1 or 0) \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+$K$ defaults to the maximum degree of a static graph (2 for the default ring, so
+the default observation has shape \code{(8, 16)}) and to $\min(6, N - 1)$ for the
+proximity graph.
+
+% ---------------------------------------------------------------------------
+\section{Reward and episode end}\label{sec:consensus-reward}
+
+Agent $i$ receives the negative mean squared disagreement with its neighbours
+and a quadratic control cost,
+\begin{equation}
+  r_i = -\frac{1}{\max(|\mathcal{N}_i|, 1)} \sum_{j \in \mathcal{N}_i}
+        \lVert y_i - y_j \rVert^2 \;-\; c_u \lVert u_i \rVert^2,
+  \label{eq:consensus-reward}
+\end{equation}
+with $c_u$ = \code{control\_cost} and the clipped action $u_i$, evaluated after
+the step on the new graph (isolated agents only pay the control cost). The team
+reward is $R = \frac{1}{N} \sum_i r_i$, plus \code{success\_bonus} on the step on
+which the task error first drops below \code{tolerance}.
+
+\code{terminated} is \code{True} when $e <$ \code{tolerance};
+\code{truncated} is \code{True} once \code{max\_steps} steps were taken. Both
+can be \code{True} on the last step.
+
+% ---------------------------------------------------------------------------
+\section{Parameters}\label{sec:consensus-params}
+
+All constructor arguments are keyword-only.
+
+\begingroup\small
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.24\textwidth}>{\raggedright\arraybackslash}p{0.17\textwidth}>{\raggedright\arraybackslash}p{0.53\textwidth}@{}}
+  \caption{Constructor parameters of \code{ConsensusEnv}.}\label{tab:consensus-params}\\
+  \toprule
+  Parameter & Default & Description \\
+  \midrule
+  \endfirsthead
+  \toprule
+  Parameter & Default & Description \\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  \code{n\_agents} & \code{8} & Number of agents $N$ ($\ge 2$). \\
+  \code{task} & \code{"consensus"} & \code{"consensus"} (rendezvous) or \code{"formation"}. \\
+  \code{topology} & \code{"ring"} & \code{"ring"}, \code{"line"}, \code{"star"}, \code{"complete"}, \code{"erdos\_renyi"} or \code{"proximity"}. \\
+  \code{dynamics} & \code{"single"} & \code{"single"} (velocity input) or \code{"double"} (acceleration input with damping). \\
+  \code{dt} & \code{0.1} & Integration time step ($> 0$). \\
+  \code{max\_steps} & \code{200} & Episode length before truncation. \\
+  \code{arena\_size} & \code{10.0} & Positions are clipped to $[-a, a]^2$ ($> 0$). \\
+  \code{max\_control} & \code{1.0} & Bound of every action component ($> 0$). \\
+  \code{control\_cost} & \code{0.01} & Weight $c_u$ of the control penalty ($\ge 0$). \\
+  \code{noise\_std} & \code{0.0} & Noise intensity $\sigma$; each step adds noise with standard deviation $\sigma\sqrt{\Delta t}$ to the positions (single) or velocities (double). \\
+  \code{tolerance} & \code{0.05} & Success threshold on the task error ($> 0$, squared distance units). \\
+  \code{success\_bonus} & \code{10.0} & Team-reward bonus paid once, on the step the task is solved. \\
+  \code{formation\_shape} & \code{"circle"} & \code{"circle"}, \code{"line"}, \code{"grid"} or \code{"wedge"} (formation task only). \\
+  \code{formation\_radius} & \code{3.0} & Scale $R$ of the formation ($> 0$). \\
+  \code{comm\_radius} & \code{4.0} & Communication range of the proximity topology (inclusive, $> 0$). \\
+  \code{edge\_probability} & \code{0.3} & Edge probability of the Erd\H{o}s--R\'enyi topology, in $(0, 1]$. \\
+  \code{graph\_seed} & \code{None} & Seed of the Erd\H{o}s--R\'enyi graph, sampled once at construction; \code{None} uses fresh entropy, so two instances may differ in graph and observation size. \\
+  \code{max\_neighbors} & \code{None} & Number of neighbour slots $K$ ($\ge 1$); defaults to the maximum degree of a static graph and to $\min(6, N-1)$ for the proximity graph. \\
+  \code{damping} & \code{0.5} & Linear velocity damping $c$ of the double integrator ($\ge 0$). \\
+  \code{render\_mode} & \code{None} & \code{None}, \code{"human"} or \code{"rgb\_array"}. \\
+\end{longtable}
+\endgroup
+
+% ---------------------------------------------------------------------------
+\section{Info dictionary and properties}\label{sec:consensus-info}
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Consensus info dictionary (returned by \code{reset()} and \code{step()}).}
+  \label{tab:consensus-info}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Key & Content \\
+    \midrule
+    \code{agent\_rewards} & \code{float64} array \code{(N,)} of the rewards $r_i$ (zeros at reset) \\
+    \code{error} & task error $e$ \eqref{eq:consensus-error} \\
+    \code{algebraic\_connectivity} & $\lambda_2(L)$ of the current graph \\
+    \code{adjacency} & boolean adjacency matrix \code{(N, N)} of the current graph \\
+    \code{success} & \code{True} once the task has been solved in the episode (sticky) \\
+    \code{step} & number of steps taken in the episode \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+The state is available through read-only properties
+(Table~\ref{tab:consensus-properties}); \code{obs\_dim} and
+\code{max\_neighbors} are plain attributes.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Read-only properties of \code{ConsensusEnv} (arrays are copies).}
+  \label{tab:consensus-properties}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Property & Content \\
+    \midrule
+    \code{positions}, \code{velocities} & $x_i$ and $v_i$, shape \code{(N, 2)} \\
+    \code{formation\_offsets} & offsets $d_i$, shape \code{(N, 2)} (zeros for consensus) \\
+    \code{adjacency}, \code{laplacian} & adjacency matrix $A$ and Laplacian $L = D - A$ of the current graph \\
+    \code{algebraic\_connectivity} & $\lambda_2(L)$ of the current graph \\
+    \code{task\_error} & task error $e$ \\
+    \code{step\_count} & number of steps taken in the episode \\
+    \code{observation\_layout} & column slices of an observation row \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+The module
+\code{env\_lib.consensus\_env} also exports the helpers used by the
+environment, which are useful for analysis and for reference controllers:
+\begin{itemize}
+  \item \code{make\_topology(topology, n\_agents, *, edge\_probability=0.3, rng=None)}:
+        adjacency matrix of a static graph;
+  \item \code{proximity\_adjacency(positions, comm\_radius)}: disk-graph adjacency;
+  \item \code{make\_formation(shape, n\_agents, radius=1.0)}: formation offsets;
+  \item \code{algebraic\_connectivity(adjacency)} and \code{is\_connected(adjacency)};
+  \item the tuples \code{TASKS}, \code{TOPOLOGIES}, \code{DYNAMICS} and
+        \code{FORMATION\_SHAPES} of valid option values.
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Baseline controller}\label{sec:consensus-baseline}
+
+\code{env.laplacian\_policy(gain=1.0, velocity\_gain=None)} returns the
+classical distributed consensus and formation feedback
+\begin{equation}
+  u_i = -k \sum_{j \in \mathcal{N}_i} \bigl((x_i - d_i) - (x_j - d_j)\bigr),
+  \qquad\text{that is}\qquad u = -k\, L\,(x - d),
+  \label{eq:laplacian-policy}
+\end{equation}
+with gain $k$, clipped to the action bounds. For the double integrator the
+velocity feedback $-k_v v_i$ is added; the default
+$k_v = \max(0, \sqrt{k} - c)$ makes the total damping $c + k_v$ equal to
+$\sqrt{k}$. The feedback uses the full neighbour sets, even when the
+observation is truncated by \code{max\_neighbors}. The discrete-time
+single-integrator loop is stable when $k\, \Delta t\, \lambda_{\max}(L) < 2$;
+the method warns once otherwise.
+
+Table~\ref{tab:consensus-baseline} reports the success rate of the controller
+with gain 1 for all topologies and task/dynamics combinations (default
+parameters otherwise; 100 episodes with reset seeds 0--99 and
+\code{graph\_seed} equal to the reset seed). The controller solves every
+episode on connected static graphs. On the line, the slowest graph, some
+episodes run out of time, and on the proximity graph agents can lose contact.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Success rate of \code{laplacian\_policy(gain=1.0)} over 100 episodes,
+    with the mean episode length in steps (truncated episodes count 200).}
+  \label{tab:consensus-baseline}
+  \begin{tabular}{@{}lcccc@{}}
+    \toprule
+    & \multicolumn{2}{c}{Consensus} & \multicolumn{2}{c}{Formation (circle)} \\
+    \cmidrule(lr){2-3}\cmidrule(l){4-5}
+    Topology & single & double & single & double \\
+    \midrule
+    ring        & 1.00 (84)  & 1.00 (81)  & 1.00 (97)  & 1.00 (86)  \\
+    line        & 0.82 (160) & 0.94 (154) & 0.53 (183) & 0.72 (174) \\
+    star        & 1.00 (73)  & 1.00 (80)  & 1.00 (85)  & 1.00 (85)  \\
+    complete    & 1.00 (65)  & 1.00 (81)  & 1.00 (78)  & 1.00 (87)  \\
+    Erd\H{o}s--R\'enyi & 1.00 (90) & 1.00 (90) & 1.00 (104) & 1.00 (97) \\
+    proximity   & 0.83 (72)  & 0.70 (109) & 0.55 (135) & 0.12 (190) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Rendering}\label{sec:consensus-render}
+
+The dashboard ($1000 \times 560$ pixels, Figures~\ref{fig:consensus} and
+\ref{fig:formation}) shows the arena on the left: agents as coloured markers
+with halos, communication links whose opacity decreases with their length,
+fading trails of the recent positions, the formation slots around the current
+centroid (hollow markers, formation task only) and the centroid (cross). On the
+right, the task error is plotted on a logarithmic scale with the tolerance as a
+dashed line over a shaded success band, and below it the algebraic connectivity
+$\lambda_2$. The header reports the task, the team size, the step, the error,
+$\lambda_2$ and a status badge.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\figwidth]{consensus.png}
+  \caption{Consensus (rendezvous) of 8 single integrators on a ring, solved at
+    step 64 by the Laplacian controller. The agents have gathered at the
+    centroid; the task error has fallen below the tolerance and $\lambda_2$ of
+    the static ring is constant.}
+  \label{fig:consensus}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\figwidth]{formation.png}
+  \caption{Wedge formation of 8 agents on a proximity graph, solved at step 68.
+    Hollow markers are the formation slots around the centroid; $\lambda_2$
+    changes as links appear and disappear and drops to zero while the graph is
+    disconnected.}
+  \label{fig:formation}
+\end{figure}
+
+% ---------------------------------------------------------------------------
+\section{Registered ids}\label{sec:consensus-ids}
+
+\begin{table}[!htbp]
+  \centering\small
+  \caption{Registered ids of the consensus environment.}
+  \label{tab:consensus-ids}
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    Id & Class & Configuration \\
+    \midrule
+    \envid{Consensus-v0} & \code{ConsensusEnv} & defaults (rendezvous, 8 agents on a ring) \\
+    \envid{Formation-v0} & \code{ConsensusEnv} & \code{task="formation"} (circle of radius 3) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Table~\ref{tab:consensus-ids} lists the two ids. Keyword arguments of
+\code{env\_lib.make} override the registered configuration, for example \code{env\_lib.make("Formation-v0", formation\_shape="wedge",
+topology="proximity")}.
+
+% ---------------------------------------------------------------------------
+\section{Usage}\label{sec:consensus-usage}
+
+\begin{pycode}
+import env_lib
+
+env = env_lib.make("Formation-v0", formation_shape="wedge",
+                   topology="proximity", dynamics="double")
+core = env.unwrapped
+obs, info = env.reset(seed=0)                 # obs: (8, 36), K = 6 slots
+layout = core.observation_layout
+n, k = core.n_agents, core.max_neighbors
+slots = obs[:, layout["neighbors"]].reshape(n, k, 5)   # neighbour slots
+episode_return = 0.0
+while True:
+    action = core.laplacian_policy(gain=1.0)  # u = -gain L (x - d) - k_v v
+    obs, reward, terminated, truncated, info = env.step(action)
+    episode_return += reward
+    if terminated or truncated:
+        break
+print(info["step"], info["error"], info["success"], episode_return)
+env.close()
+\end{pycode}
+
+The example script compares random actions with the Laplacian controller and
+records the controller:
+
+\begin{shellcode}
+python examples/consensus_demo.py
+python examples/consensus_demo.py --task formation --save renders/formation.gif
+python examples/consensus_demo.py --task formation --shape wedge \
+    --topology proximity --dynamics double --save renders/wedge.gif
+\end{shellcode}
+
+% ---------------------------------------------------------------------------
+\section{Reproducibility and performance}\label{sec:consensus-perf}
+
+The initial positions and the process noise are drawn from
+\code{self.np\_random}, seeded by \code{reset(seed=...)}. The Erd\H{o}s--R\'enyi
+graph is sampled once at construction from \code{graph\_seed}; pass a seed to
+obtain the same graph (and observation size) in every instance, for example in
+vectorised training environments.
+
+Measured on the development machine without rendering, a step takes about
+0.1\,ms with the default 8 agents and 0.18\,ms for a grid formation of 32
+agents on a proximity graph. Rendering an \code{"rgb\_array"} frame takes
+about 16--21\,ms.
+
+\endgroup

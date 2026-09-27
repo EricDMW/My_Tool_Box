@@ -1,0 +1,106 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "my-tool-box"
+dynamic = ["version"]
+description = "Multi-agent reinforcement learning environments (env_lib) and research utilities (toolkit)."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Dongming Wang", email = "wdong025@ucr.edu" }]
+requires-python = ">=3.9"
+keywords = [
+    "reinforcement-learning",
+    "multi-agent",
+    "gymnasium",
+    "environments",
+    "kuramoto",
+    "target-tracking",
+    "plotting",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+dependencies = [
+    "numpy>=1.23",
+    "scipy>=1.9",
+    "matplotlib>=3.6",
+    "gymnasium>=0.29",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+pistonball = ["pygame>=2.1", "pymunk>=6.4"]
+torch = ["torch>=2.0"]
+video = ["imageio>=2.20", "imageio-ffmpeg>=0.4"]
+all = ["my-tool-box[pistonball,torch,video]"]
+dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.5"]
+
+[project.urls]
+Repository = "https://github.com/EricDMW/My_Tool_Box"
+Issues = "https://github.com/EricDMW/My_Tool_Box/issues"
+
+[project.scripts]
+ajlatt-build-map = "env_lib.ajlatt_env.maps.builder:main"
+ajlatt-plot-map = "env_lib.ajlatt_env.maps.plotting:main"
+plotkit-gallery = "toolkit.plotkit.__main__:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "env_lib._version.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"env_lib.ajlatt_env.maps" = [
+    "data/*.yaml",
+    "data/*.cfg",
+    "data/lib_obstacles/*.npy",
+    "data/lib_obstacles_2/*.npy",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "slow: long-running tests (deselect with -m 'not slow')",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:pygame.*",
+    "ignore:pkg_resources is deprecated:UserWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "NPY", "RUF100"]
+ignore = [
+    "E501",  # line length is handled by the formatter
+    "B905",  # zip(strict=...) requires Python 3.10
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011", "B018", "E402", "NPY002"]  # tests inspect the global RNG, use importorskip
+"examples/*" = ["E402"]
+"benchmarks/*" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["env_lib", "toolkit"]
+
+[tool.coverage.run]
+source = ["env_lib", "toolkit"]

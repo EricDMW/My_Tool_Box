@@ -1,8 +1,0 @@
-include README.md
-include README_KURAMOTO_IMPLEMENTATION.md
-include requirements.txt
-include setup.py
-include MANIFEST.in
-recursive-include kos_env *.py
-recursive-include kos_env *.md
-recursive-include kos_env *.txt 

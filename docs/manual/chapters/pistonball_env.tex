@@ -1,0 +1,329 @@
+% ---------------------------------------------------------------------------
+% Pistonball environment
+% ---------------------------------------------------------------------------
+\begingroup
+% Line breaking for paragraphs with long, unbreakable identifiers (local to
+% this chapter): allow looser lines instead of overfull ones.
+\setlength{\emergencystretch}{3em}\tolerance=1000
+\chapter{Pistonball}\label{chap:pistonball}
+
+Pistonball is a cooperative physics game. A row of pistons forms the floor of a
+walled arena and a ball is dropped near the right wall; every piston is an
+agent that moves up or down, and together the pistons must roll the ball to
+the left wall. Each piston observes the ball only when it is close to it, and
+the reward of a piston depends on the ball's progress while it observes the
+ball. The environment is used to study cooperation under local observability,
+credit assignment with local rewards, scalability in the number of agents and
+the effect of the observation radius $\kappa$ on learning. The physics is
+simulated with \pkg{pymunk}; \pkg{pygame} is only needed for rendering and
+keyboard control (extra \code{pistonball}).
+
+The class is \code{env\_lib.pistonball\_env.PistonballEnv}; the package also
+exports \code{ManualPolicy}, \code{PistonballRenderer} and
+\code{PistonballLayout}.
+
+% ---------------------------------------------------------------------------
+\section{Arena and physics}\label{sec:pistonball-physics}
+
+All coordinates are pygame screen pixels with $y$ growing downwards. With $n$
+pistons the screen is $W = 160 + 40n$ pixels wide and 560 pixels high; the
+walls are 80 pixels from each screen edge, so the arena spans
+$x \in [80, W - 80]$ and $y \in [80, 480]$. The left wall is the goal.
+
+\begin{itemize}
+  \item \textbf{Pistons.} Piston $i$ is 40 pixels wide with its left edge at
+        $x = 80 + 40i$. Its height $y_i$ (the $y$ coordinate of the piston
+        head) moves by 4 pixels per unit action and is limited to
+        $y_i \in [387, 451]$, a travel of 64 pixels around the middle position
+        419. At reset every piston starts at $451 - d_i$ with $d_i$ drawn
+        uniformly from $\{0, 4, \dots, 28\}$.
+  \item \textbf{Ball.} A disc of radius 40 pixels with mass
+        \code{ball\_mass}, friction \code{ball\_friction} and elasticity
+        \code{ball\_elasticity}. It starts at
+        $x = W - 150 + \delta_x$, $y = 370 + \delta_y$, where
+        $\delta_x \in \{-30, \dots, 30\}$ and $\delta_y \in \{-15, \dots, 15\}$
+        are uniform integers when \code{random\_drop=True} and zero otherwise,
+        with an angular velocity drawn uniformly from $[-6\pi, 6\pi]$\,rad/s
+        when \code{random\_rotate=True}.
+  \item \textbf{Simulation.} Gravity is 750\,px/s$^2$ downwards, walls and
+        pistons have friction 0.64, and one environment step is one physics
+        step of $\Delta t = 1/20$\,s. The pistons are kinematic bodies that are
+        moved to their new height before the physics step; the ball speed is
+        capped at 1000\,px/s and its position is kept inside the screen.
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Spaces}\label{sec:pistonball-spaces}
+
+\paragraph{Action.} One value per piston, stacked in an array of shape
+\code{(n,)}:
+\begin{itemize}
+  \item continuous (\code{continuous=True}, default):
+        \code{Box(-1, 1, (n,), float32)}; the value is clipped to $[-1, 1]$ and
+        moves the piston by $4 a_i$ pixels, where $+1$ moves it up;
+  \item discrete (\code{continuous=False}): \code{MultiDiscrete([3] * n)} with
+        0 = down, 1 = stay and 2 = up (4 pixels).
+\end{itemize}
+Actions of the wrong shape, continuous actions with NaN or infinite values, and
+discrete values outside $\{0, 1, 2\}$ raise \code{ValueError}.
+
+\paragraph{Observation.} \code{float32} array of shape \code{(n, 7)} in an
+unbounded \code{Box}. Row $i$ is the observation of piston $i$
+(Table~\ref{tab:pistonball-obs}). The piston under the ball has index
+\begin{equation}
+  p(x) = \operatorname{clip}\bigl(\lfloor (x - 85)/40 \rfloor,\; 0,\; n - 1\bigr),
+\end{equation}
+and piston $i$ observes the ball when $|i - p(x)| \le \kappa$, where $x$ is the
+ball centre and $\kappa$ = \code{kappa}. Columns 2--6 are zero for pistons that
+do not observe the ball. The method \code{observable\_mask()} returns the
+boolean mask of the observing pistons; its optional argument \code{ball\_x}
+evaluates the mask for another ball position.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Pistonball observation (row $i$). $(x, y)$ is the ball centre,
+    $(v_x, v_y)$ its velocity in px/s and $\dot\phi$ its angular velocity.}
+  \label{tab:pistonball-obs}
+  \begin{tabularx}{\textwidth}{@{}cl>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Column & Value & Meaning \\
+    \midrule
+    0 & $(y_i - 419)/32$ & piston height in $[-1, 1]$; $+1$ is the lowest position \\
+    1 & $(5 + 40i)/(40n)$ & piston position along the arena in $[0, 1]$ \\
+    2 & $(x - 80)/(40n)$ & ball $x$ position (observers only) \\
+    3 & $(y - 80)/400$ & ball $y$ position (observers only) \\
+    4 & $v_x / 15$ & ball $x$ velocity (observers only) \\
+    5 & $v_y / 8$ & ball $y$ velocity (observers only) \\
+    6 & $\dot\phi / 8$ & ball angular velocity (observers only) \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Reward and episode end}\label{sec:pistonball-reward}
+
+Let $b_t = \lfloor x_t - 40 \rfloor$ be the $x$ coordinate of the ball's left
+edge after step $t$ and $\Delta b = b_{t-1} - b_t$ its leftward displacement.
+The ball term rewards leftward progress at half rate and penalises rightward
+motion in full:
+\begin{equation}
+  g_t =
+  \begin{cases}
+    0.5\,\Delta b, & \Delta b > 0,\\
+    \Delta b, & \text{otherwise.}
+  \end{cases}
+\end{equation}
+The local reward of piston $i$ is
+\begin{equation}
+  \begin{split}
+  r_i = \tau
+      &+ g_t\, \mathbf{1}\bigl[i \in O(b_{t-1}) \cup O(b_t)\bigr]
+       + \rho_T\, \mathbf{1}\bigl[\text{goal},\; i \in O(x_t)\bigr]
+       + \rho_L\, \mathbf{1}\bigl[\text{goal},\; i = 0\bigr] \\
+      &+ \mu\, \frac{|\Delta y_i|}{4}\, \mathbf{1}\bigl[|\Delta y_i| > \epsilon_\mu\bigr],
+  \end{split}
+  \label{eq:pistonball-reward}
+\end{equation}
+where $O(z) = \{ i : |i - p(z)| \le \kappa \}$ is the set of pistons within
+$\kappa$ hops of the piston under position $z$ (the ball term uses the left-edge
+positions $b$, the goal bonus the ball centre $x_t$), $\tau$ =
+\code{time\_penalty}, $\rho_T$ = \code{termination\_reward}, $\rho_L$ =
+\code{leftmost\_piston\_reward}, $\mu$ = \code{movement\_penalty},
+$\epsilon_\mu$ = \code{movement\_penalty\_threshold} and $\Delta y_i$ the
+movement of piston $i$ in pixels. The team reward returned by \code{step()} is
+$R = \sum_i r_i$.
+
+\paragraph{Goal and episode end.} With \code{terminated\_condition=True}
+(default) the goal is reached when the ball's left edge will reach the left wall
+within one step, $x_t - 40 + v_x \Delta t \le 80.5$; the episode then
+terminates. \code{truncated} becomes \code{True} after \code{max\_cycles}
+steps. For example, with \code{leftmost\_piston\_reward=1.0} and the default
+termination reward, piston 0 receives $0.5 + 1.0 = 1.5$ on reaching the goal,
+the other pistons that observe the ball receive 0.5, and the remaining pistons
+receive no bonus.
+
+% ---------------------------------------------------------------------------
+\section{Parameters}\label{sec:pistonball-params}
+
+\begingroup\small
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.33\textwidth}>{\raggedright\arraybackslash}p{0.1\textwidth}>{\raggedright\arraybackslash}p{0.51\textwidth}@{}}
+  \caption{Constructor parameters of \code{PistonballEnv}.}\label{tab:pistonball-params}\\
+  \toprule
+  Parameter & Default & Description \\
+  \midrule
+  \endfirsthead
+  \toprule
+  Parameter & Default & Description \\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  \code{n\_pistons} & \code{20} & Number of pistons (agents), $\ge 1$. \\
+  \code{time\_penalty} & \code{-0.1} & Reward $\tau$ added to every piston at every step. \\
+  \code{continuous} & \code{True} & Continuous actions in $[-1, 1]$; \code{False} for \code{MultiDiscrete([3] * n)}. \\
+  \code{random\_drop} & \code{True} & Randomise the initial ball position ($\pm 30$\,px horizontally, $\pm 15$\,px vertically). \\
+  \code{random\_rotate} & \code{True} & Random initial angular velocity in $[-6\pi, 6\pi]$\,rad/s. \\
+  \code{ball\_mass} & \code{0.75} & Ball mass ($> 0$). \\
+  \code{ball\_friction} & \code{0.3} & Ball friction ($\ge 0$). \\
+  \code{ball\_elasticity} & \code{1.5} & Ball elasticity ($\ge 0$). \\
+  \code{max\_cycles} & \code{125} & Episode length; reaching it sets \code{truncated}. \\
+  \code{render\_mode} & \code{None} & \code{None}, \code{"human"} (pygame window) or \code{"rgb\_array"}. \\
+  \code{movement\_penalty} & \code{0.0} & Reward $\mu$ per 4 pixels of piston movement, typically negative; 0 disables it. \\
+  \code{movement\_penalty\_threshold} & \code{0.01} & Movements of at most this many pixels are not penalised. \\
+  \code{kappa} & \code{1} & Observation radius $\kappa$ in pistons ($\ge 0$). \\
+  \code{terminated\_condition} & \code{True} & End the episode when the ball reaches the left wall. \\
+  \code{leftmost\_piston\_reward} & \code{0.0} & Bonus $\rho_L$ for piston 0 when the goal is reached. \\
+  \code{termination\_reward} & \code{0.5} & Bonus $\rho_T$ for every piston that observes the ball when the goal is reached. \\
+\end{longtable}
+\endgroup
+
+\paragraph{Physics presets.} The ball parameters change the character of the
+task considerably. A heavy, damped ball (\code{ball\_mass=2.0},
+\code{ball\_friction=0.8}, \code{ball\_elasticity=0.5}) rolls slowly and rewards
+coordinated ramps; a light, bouncy ball (\code{ball\_mass=0.5},
+\code{ball\_friction=0.1}, \code{ball\_elasticity=2.0}) is harder to control.
+
+\paragraph{Info dictionary.} \code{step()} returns \code{"local\_rewards"} and
+\code{"agent\_rewards"} (both the \code{float64} local rewards $r_i$, shape
+\code{(n,)}) and \code{"total\_reward"} (their sum, equal to the returned
+reward). The info dictionary of \code{reset()} is empty. \code{step()} before
+\code{reset()} raises \code{env\_lib.ResetNeededError}.
+
+% ---------------------------------------------------------------------------
+\section{Keyboard control}\label{sec:pistonball-manual}
+
+\code{ManualPolicy(env, agent\_id=0, show\_obs=False)} lets a person control one
+piston at a time in a window. Create the environment with
+\code{render\_mode="human"} so that the pygame window exists and receives the
+key presses, and call the policy once per step: \code{W} or \code{Up} raises
+the selected piston, \code{S} or \code{Down} lowers it (hold the key to keep
+moving), \code{A}/\code{Left} and \code{D}/\code{Right} select the previous or
+next piston, \code{Backspace} resets the environment, and \code{Esc} or closing
+the window sets \code{policy.running} to \code{False}. All other pistons stay
+in place.
+
+\begin{pycode}
+from env_lib.pistonball_env import ManualPolicy, PistonballEnv
+
+env = PistonballEnv(n_pistons=8, render_mode="human")
+policy = ManualPolicy(env)
+obs, info = env.reset(seed=0)
+while policy.running:
+    obs, reward, terminated, truncated, info = env.step(policy(obs))
+    if terminated or truncated:
+        obs, info = env.reset()
+env.close()
+\end{pycode}
+
+% ---------------------------------------------------------------------------
+\section{Rendering}\label{sec:pistonball-render}
+
+The renderer draws with pygame and needs no image assets
+(Figure~\ref{fig:pistonball}). It shows a gradient background with shaded walls
+and a highlighted goal strip on the left wall, the pistons as rounded
+rectangles (pistons that observe the ball in the accent colour with a glow),
+the ball with shading, a rotation marker and a fading motion trail, a
+heads-up display with the step counter, episode return, ball $x$ velocity and
+number of observing pistons, and a progress bar with the ball's distance to the
+goal. Frames have the screen size, $(160 + 40n) \times 560$ pixels. The
+\code{"rgb\_array"} mode never initialises the display and works on headless
+machines; \code{"human"} mode opens a window capped at 20 frames per second.
+Colours follow the active theme (Section~\ref{sec:envlib-rendering}).
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.62\textwidth]{pistonball.png}
+  \caption{Pistonball with 12 pistons (light theme) at the moment the ball
+    reaches the goal. The three pistons that observe the ball ($\kappa = 1$)
+    are highlighted; the ramp formed by the pistons rolls the ball to the
+    left wall.}
+  \label{fig:pistonball}
+\end{figure}
+
+% ---------------------------------------------------------------------------
+\section{Registered id}\label{sec:pistonball-ids}
+
+\envid{Pistonball-v0} creates \code{PistonballEnv} with its defaults (20
+pistons, continuous actions, $\kappa = 1$). Creating it requires \pkg{pymunk};
+rendering also requires \pkg{pygame}.
+
+% ---------------------------------------------------------------------------
+\section{Usage}\label{sec:pistonball-usage}
+
+The following heuristic reads the ball position from the observing pistons and
+shapes the pistons into a ramp that falls towards the left: pistons right of
+the ball move up, pistons left of it move down.
+
+\begin{pycode}
+import numpy as np
+from env_lib.pistonball_env import PistonballEnv
+
+env = PistonballEnv(n_pistons=12, kappa=1)
+obs, info = env.reset(seed=0)                     # obs: (12, 7) float32
+episode_return = 0.0
+while True:
+    action = np.zeros(env.n_pistons, dtype=np.float32)
+    observers = np.any(obs[:, 2:] != 0.0, axis=1)
+    if observers.any():
+        ball_x = obs[observers, 2].mean()          # (x - 80) / (40 n)
+        offset = (obs[:, 1] - ball_x) * env.n_pistons  # in piston widths
+        action = np.clip(2.0 * offset, -1.0, 1.0).astype(np.float32)
+    obs, reward, terminated, truncated, info = env.step(action)
+    episode_return += reward
+    if terminated or truncated:
+        break
+print(env.frames, terminated, episode_return)     # goal after 99 steps
+env.close()
+\end{pycode}
+
+The example script evaluates a similar heuristic against random actions,
+records episodes and offers keyboard control:
+
+\begin{shellcode}
+python examples/pistonball_demo.py --save renders/pistonball.gif
+python examples/pistonball_demo.py --discrete --kappa 2 --movement-penalty -0.05
+python examples/pistonball_demo.py --manual --n-pistons 8
+\end{shellcode}
+
+Over 20 episodes with the default configuration the heuristic of the script
+reaches a mean return of $857.1 \pm 254.3$ and brings the ball to the goal in
+95\,\% of the episodes, whereas random actions obtain $-290.5$ and never reach
+the goal.
+
+% ---------------------------------------------------------------------------
+\section{Reproducibility and performance}\label{sec:pistonball-perf}
+
+\code{reset(seed=...)} seeds \code{self.np\_random}, from which the initial
+piston heights, the ball position and its angular velocity are drawn; the
+physics itself is deterministic. The random draws are made in the same order as
+before version 1.0, so seeded episodes start from the same states as in earlier
+versions.
+
+Measured on the development machine with 20 pistons, a step without rendering
+takes 0.06\,ms (1.11\,ms before 1.0, when the screen was drawn at every step).
+Rendering an \code{"rgb\_array"} frame takes about 3\,ms.
+
+% ---------------------------------------------------------------------------
+\section{Changes in 1.0}\label{sec:pistonball-changes}
+
+See Appendix~\ref{app:migration} for migration advice.
+
+\begin{itemize}
+  \item Nothing is drawn unless rendering is requested; pygame is initialised
+        lazily. Together with vectorised observations and rewards this makes
+        steps 16 to 30 times faster.
+  \item In discrete mode the declared action space is
+        \code{MultiDiscrete([3] * n)}, one entry per piston. The per-piston
+        action arrays accepted by \code{step()} are unchanged; the former
+        single-integer \code{Discrete(3**n)} declaration was removed.
+  \item Actions are validated (shape, range, NaN), and \code{step()} before
+        \code{reset()} raises.
+  \item New vector renderer (shaded pistons, highlighted $\kappa$-hop
+        observers, ball trail, heads-up display, progress bar); the PNG sprites
+        were removed. The former drawing methods (\code{draw()},
+        \code{draw\_background()}, \code{draw\_pistons()},
+        \code{enable\_render()}) are deprecated no-ops.
+  \item Compatible with pymunk 6 and 7.
+\end{itemize}
+
+\endgroup

@@ -1,2 +1,0 @@
-[gymnasium.envs]
-kos_env = kos_env.__init__:register

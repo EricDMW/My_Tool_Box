@@ -1,576 +1,384 @@
-"""
-Transformer Reinforcement Learning Example
+"""Proximal Policy Optimisation (PPO) with transformer actor and critic networks.
 
-This example demonstrates how to use transformer networks for reinforcement learning
-with sequential data. The example includes:
-- Transformer policy network setup
-- Custom environment with sequential observations
-- Complete training loop with PPO-style updates
-- Performance monitoring and visualization
+A toy environment emits observation vectors; the agent sees the last
+``seq_length`` of them as a sequence ``(seq_length, obs_dim)``. Action ``k`` in
+``{0, 1, 2}`` pays ``1.0``, ``0.5`` or ``0.3`` when feature ``k`` of the current
+observation is positive and ``-0.1`` otherwise (action 3 always pays ``-0.1``),
+plus Gaussian noise. The chosen feature is then perturbed, so observations
+evolve with the agent's actions.
+
+:class:`toolkit.neural_toolkit.TransformerPolicyNetwork` (actor) and
+:class:`toolkit.neural_toolkit.TransformerValueNetwork` (critic) are trained with
+PPO: rollouts from several environments in lockstep, generalised advantage
+estimation (GAE), a clipped surrogate objective, value regression and an entropy
+bonus. Training curves are saved to ``renders/``.
+
+Usage::
+
+    python examples/transformer_rl_example.py              # full run (about a minute on CPU)
+    python examples/transformer_rl_example.py --quick      # smoke test (a few seconds)
+    python examples/transformer_rl_example.py --iterations 100 --device cuda
 """
 
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.nn.functional as F
-import numpy as np
-import matplotlib.pyplot as plt
-from typing import List, Tuple, Dict, Any
-import random
-from collections import deque
+from __future__ import annotations
+
+import argparse
 import time
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 
-# Import from our toolkit
-from toolkit.neural_toolkit import TransformerPolicyNetwork, TransformerValueNetwork
-from toolkit.neural_toolkit import NetworkUtils
+import numpy as np
+import torch
+import torch.nn.functional as F
+
+from toolkit.neural_toolkit import NetworkUtils, TransformerPolicyNetwork, TransformerValueNetwork
+
+ACTION_REWARDS = (1.0, 0.5, 0.3)  # payout of actions 0, 1, 2 when their feature is positive
 
 
 class SequentialEnvironment:
+    """Toy environment with sequential observations (see the module docstring).
+
+    Parameters
+    ----------
+    seq_length : int
+        Length of the observation history returned to the agent.
+    obs_dim : int
+        Features per observation (at least ``action_dim``).
+    action_dim : int
+        Number of discrete actions.
+    max_steps : int
+        Episode length (episodes end by time limit only).
+    seed : int, optional
+        Seed of the environment's random generator.
     """
-    A simple sequential environment that provides sequential observations
-    to test transformer-based RL agents.
-    """
-    
-    def __init__(self, seq_length: int = 10, obs_dim: int = 8, action_dim: int = 4):
+
+    def __init__(
+        self,
+        seq_length: int = 10,
+        obs_dim: int = 8,
+        action_dim: int = 4,
+        max_steps: int = 64,
+        seed: int | None = None,
+    ) -> None:
+        if obs_dim < action_dim:
+            raise ValueError("obs_dim must be at least action_dim")
         self.seq_length = seq_length
         self.obs_dim = obs_dim
         self.action_dim = action_dim
-        self.reset()
-        
-    def reset(self) -> np.ndarray:
-        """Reset environment and return initial observation sequence"""
+        self.max_steps = max_steps
+        self.rng = np.random.default_rng(seed)
+        self.history = np.zeros((seq_length, obs_dim), dtype=np.float32)
         self.step_count = 0
-        self.max_steps = 100
-        self.observation_history = deque(maxlen=self.seq_length)
-        
-        # Initialize with random observations
-        for _ in range(self.seq_length):
-            obs = np.random.randn(self.obs_dim)
-            self.observation_history.append(obs)
-            
-        return self.get_observation()
-    
-    def step(self, action: int) -> Tuple[np.ndarray, float, bool, Dict]:
-        """Take action and return (observation, reward, done, info)"""
-        self.step_count += 1
-        
-        # Simulate environment dynamics
-        # Reward depends on action consistency and observation patterns
-        current_obs = np.array(self.observation_history[-1])
-        
-        # Simple reward function: reward for taking action 0 when obs[0] > 0
-        if action == 0 and current_obs[0] > 0:
-            reward = 1.0
-        elif action == 1 and current_obs[1] > 0:
-            reward = 0.5
-        elif action == 2 and current_obs[2] > 0:
-            reward = 0.3
+
+    def reset(self) -> np.ndarray:
+        self.step_count = 0
+        self.history = self.rng.standard_normal((self.seq_length, self.obs_dim)).astype(np.float32)
+        return self.history.copy()
+
+    def step(self, action: int) -> tuple[np.ndarray, float, bool]:
+        current = self.history[-1]
+        if action < len(ACTION_REWARDS) and current[action] > 0:
+            reward = ACTION_REWARDS[action]
         else:
             reward = -0.1
-            
-        # Add some randomness to make it more interesting
-        reward += np.random.normal(0, 0.1)
-        
-        # Generate new observation based on action
-        new_obs = current_obs.copy()
-        new_obs[action] += np.random.normal(0, 0.5)
-        new_obs = np.clip(new_obs, -2, 2)  # Clip to reasonable range
-        
-        # Add to history
-        self.observation_history.append(new_obs)
-        
-        # Check if episode is done
-        done = self.step_count >= self.max_steps
-        
-        info = {
-            'step': self.step_count,
-            'action': action,
-            'reward': reward
-        }
-        
-        return self.get_observation(), reward, done, info
-    
-    def get_observation(self) -> np.ndarray:
-        """Get current observation sequence"""
-        return np.array(list(self.observation_history))
+        reward += float(self.rng.normal(0.0, 0.1))
+        new_obs = current.copy()
+        new_obs[action] += self.rng.normal(0.0, 0.5)
+        new_obs = np.clip(new_obs, -2.0, 2.0)
+        self.history = np.concatenate([self.history[1:], new_obs[None]], axis=0)
+        self.step_count += 1
+        return self.history.copy(), reward, self.step_count >= self.max_steps
 
 
-class TransformerRLAgent:
+@dataclass
+class Rollout:
+    """Transitions of ``num_envs`` environments over ``T`` steps (time-major tensors)."""
+
+    obs: torch.Tensor  # (T, N, seq_length, obs_dim)
+    actions: torch.Tensor  # (T, N)
+    log_probs: torch.Tensor  # (T, N)
+    values: torch.Tensor  # (T, N)
+    rewards: torch.Tensor  # (T, N)
+
+
+class TransformerPPOAgent:
+    """PPO agent with transformer actor and critic.
+
+    Parameters
+    ----------
+    obs_dim, action_dim : int
+        Observation features and number of actions.
+    d_model, nhead, num_layers, dim_feedforward, dropout
+        Transformer hyperparameters shared by actor and critic.
+    lr : float
+        Adam learning rate.
+    device : str
+        Torch device; the networks are created directly on it.
+    seed : int
+        Seed of the agent's minibatch shuffling generator.
     """
-    Transformer-based reinforcement learning agent using our toolkit.
-    """
-    
-    def __init__(self, 
-                 obs_dim: int,
-                 action_dim: int,
-                 seq_length: int = 10,
-                 d_model: int = 128,
-                 nhead: int = 8,
-                 num_layers: int = 4,
-                 dim_feedforward: int = 512,
-                 dropout: float = 0.1,
-                 lr: float = 3e-4,
-                 device: str = 'cuda'):
-        
-        self.obs_dim = obs_dim
-        self.action_dim = action_dim
-        self.seq_length = seq_length
-        self.device = device
-        
-        # Create transformer policy network
-        self.policy = TransformerPolicyNetwork(
+
+    def __init__(
+        self,
+        obs_dim: int,
+        action_dim: int,
+        d_model: int = 64,
+        nhead: int = 4,
+        num_layers: int = 2,
+        dim_feedforward: int = 128,
+        dropout: float = 0.0,
+        lr: float = 3e-4,
+        device: str = "cpu",
+        seed: int = 0,
+    ) -> None:
+        common = dict(
             input_dim=obs_dim,
-            output_dim=action_dim,
             d_model=d_model,
             nhead=nhead,
             num_layers=num_layers,
             dim_feedforward=dim_feedforward,
             dropout=dropout,
-            fc_dims=[d_model // 2],
-            activation='relu',
-            device=device
+            fc_dims=(d_model // 2,),
+            device=device,
         )
-        
-        # Create transformer value network
-        self.value = TransformerValueNetwork(
-            input_dim=obs_dim,
-            output_dim=1,
-            d_model=d_model,
-            nhead=nhead,
-            num_layers=num_layers,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-            fc_dims=[d_model // 2],
-            activation='relu',
-            device=device
+        self.device = torch.device(device)
+        self.policy = TransformerPolicyNetwork(output_dim=action_dim, **common)
+        self.value = TransformerValueNetwork(output_dim=1, **common)
+        for net in (self.policy, self.value):
+            NetworkUtils.initialize_weights(net, method="orthogonal", gain=np.sqrt(2.0))
+        # Small initial logits give a near-uniform starting policy.
+        NetworkUtils.initialize_weights(self.policy.output_layer, method="orthogonal", gain=0.01)
+        NetworkUtils.initialize_weights(self.value.output_layer, method="orthogonal", gain=1.0)
+        self.optimizer = torch.optim.Adam(
+            [*self.policy.parameters(), *self.value.parameters()], lr=lr, eps=1e-5
         )
-        
-        # Move networks to device
-        self.policy = self.policy.to(device)
-        self.value = self.value.to(device)
-        
-        # Verify networks are on correct device
-        print(f"🔧 Networks moved to device: {device}")
-        print(f"   Policy network device: {next(self.policy.parameters()).device}")
-        print(f"   Value network device: {next(self.value.parameters()).device}")
-        print()
-        
-        # Initialize optimizers
-        self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=lr)
-        self.value_optimizer = optim.Adam(self.value.parameters(), lr=lr)
-        
-        # Initialize weights
-        NetworkUtils.initialize_weights(self.policy, method='xavier_uniform')
-        NetworkUtils.initialize_weights(self.value, method='xavier_uniform')
-        
-        # Training parameters
+        self.generator = torch.Generator().manual_seed(seed)
         self.gamma = 0.99
         self.gae_lambda = 0.95
         self.clip_epsilon = 0.2
         self.value_loss_coef = 0.5
         self.entropy_coef = 0.01
-        
-        # Experience buffer
-        self.experience_buffer = []
-        
-    def get_action(self, obs: np.ndarray) -> Tuple[int, float, float]:
-        """
-        Get action from policy network.
-        Returns: (action, log_prob, value)
-        """
-        with torch.no_grad():
-            # Convert observation to tensor
-            obs_tensor = torch.FloatTensor(obs).unsqueeze(0).to(self.device)  # (1, seq_len, obs_dim)
-            
-            # Verify tensor is on correct device
-            if obs_tensor.device != next(self.policy.parameters()).device:
-                print(f"⚠️  Device mismatch: tensor on {obs_tensor.device}, policy on {next(self.policy.parameters()).device}")
-                obs_tensor = obs_tensor.to(next(self.policy.parameters()).device)
-            
-            # Get action probabilities
-            action_probs = self.policy(obs_tensor)  # (1, action_dim)
-            action_probs = F.softmax(action_probs, dim=-1)
-            
-            # Sample action
-            action_dist = torch.distributions.Categorical(action_probs)
-            action = action_dist.sample()
-            log_prob = action_dist.log_prob(action)
-            
-            # Get value estimate
-            value = self.value(obs_tensor)
-            
-            return int(action.item()), log_prob.item(), float(value.item())
-    
-    def collect_experience(self, env: SequentialEnvironment, num_episodes: int = 10) -> List[Dict]:
-        """Collect experience from environment"""
-        all_experiences = []
-        
-        for episode in range(num_episodes):
-            obs = env.reset()
-            episode_experiences = []
-            episode_rewards = []
-            
-            while True:
-                action, log_prob, value = self.get_action(obs)
-                next_obs, reward, done, info = env.step(action)
-                
-                experience = {
-                    'obs': obs.copy(),
-                    'action': action,
-                    'reward': reward,
-                    'log_prob': log_prob,
-                    'value': value,
-                    'done': done
-                }
-                episode_experiences.append(experience)
-                episode_rewards.append(reward)
-                
-                if done:
-                    break
-                    
-                obs = next_obs
-            
-            # Calculate returns and advantages
-            returns = self._compute_returns(episode_rewards)
-            advantages = self._compute_advantages(episode_experiences, returns)
-            
-            # Add returns and advantages to experiences
-            for i, exp in enumerate(episode_experiences):
-                exp['return'] = returns[i]
-                exp['advantage'] = advantages[i]
-                all_experiences.append(exp)
-        
-        return all_experiences
-    
-    def _compute_returns(self, rewards: List[float]) -> List[float]:
-        """Compute discounted returns"""
-        returns = []
-        R = 0
-        for reward in reversed(rewards):
-            R = reward + self.gamma * R
-            returns.insert(0, R)
-        return returns
-    
-    def _compute_advantages(self, experiences: List[Dict], returns: List[float]) -> List[float]:
-        """Compute GAE advantages"""
-        advantages = []
-        gae = 0
-        
-        for i in reversed(range(len(experiences))):
-            if i == len(experiences) - 1:
-                next_value = 0
-            else:
-                next_value = experiences[i + 1]['value']
-            
-            delta = experiences[i]['reward'] + self.gamma * next_value - experiences[i]['value']
-            gae = delta + self.gamma * self.gae_lambda * gae
-            advantages.insert(0, gae)
-        
-        return advantages
-    
-    def update_policy(self, experiences: List[Dict], num_epochs: int = 4) -> Dict[str, float]:
-        """Update policy and value networks using PPO-style updates"""
-        if not experiences:
-            return {}
-        
-        # Convert experiences to tensors
-        obs_batch = torch.FloatTensor([exp['obs'] for exp in experiences]).to(self.device)
-        action_batch = torch.LongTensor([exp['action'] for exp in experiences]).to(self.device)
-        old_log_probs = torch.FloatTensor([exp['log_prob'] for exp in experiences]).to(self.device)
-        returns_batch = torch.FloatTensor([exp['return'] for exp in experiences]).to(self.device)
-        advantages_batch = torch.FloatTensor([exp['advantage'] for exp in experiences]).to(self.device)
-        
-        # Verify all tensors are on correct device
-        policy_device = next(self.policy.parameters()).device
-        if obs_batch.device != policy_device:
-            print(f"⚠️  Device mismatch in update_policy: tensors on {obs_batch.device}, policy on {policy_device}")
-            obs_batch = obs_batch.to(policy_device)
-            action_batch = action_batch.to(policy_device)
-            old_log_probs = old_log_probs.to(policy_device)
-            returns_batch = returns_batch.to(policy_device)
-            advantages_batch = advantages_batch.to(policy_device)
-        
-        # Normalize advantages
-        advantages_batch = (advantages_batch - advantages_batch.mean()) / (advantages_batch.std() + 1e-8)
-        
-        policy_losses = []
-        value_losses = []
-        entropy_losses = []
-        
-        for epoch in range(num_epochs):
-            # Get current policy probabilities
-            action_probs = self.policy(obs_batch)
-            action_probs = F.softmax(action_probs, dim=-1)
-            action_dist = torch.distributions.Categorical(action_probs)
-            
-            # Compute new log probabilities
-            new_log_probs = action_dist.log_prob(action_batch)
-            
-            # Compute ratio
-            ratio = torch.exp(new_log_probs - old_log_probs)
-            
-            # Compute surrogate losses
-            surr1 = ratio * advantages_batch
-            surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantages_batch
-            policy_loss = -torch.min(surr1, surr2).mean()
-            
-            # Value loss
-            values = self.value(obs_batch).squeeze()
-            value_loss = F.mse_loss(values, returns_batch)
-            
-            # Entropy loss for exploration
-            entropy = action_dist.entropy().mean()
-            entropy_loss = -entropy
-            
-            # Total loss
-            total_loss = (policy_loss + 
-                         self.value_loss_coef * value_loss + 
-                         self.entropy_coef * entropy_loss)
-            
-            # Update networks
-            self.policy_optimizer.zero_grad()
-            self.value_optimizer.zero_grad()
-            total_loss.backward()
-            
-            # Clip gradients
-            torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
-            torch.nn.utils.clip_grad_norm_(self.value.parameters(), max_norm=0.5)
-            
-            self.policy_optimizer.step()
-            self.value_optimizer.step()
-            
-            policy_losses.append(policy_loss.item())
-            value_losses.append(value_loss.item())
-            entropy_losses.append(entropy.item())
-        
-        return {
-            'policy_loss': float(np.mean(policy_losses)),
-            'value_loss': float(np.mean(value_losses)),
-            'entropy': float(np.mean(entropy_losses))
-        }
-    
-    def evaluate(self, env: SequentialEnvironment, num_episodes: int = 5) -> Dict[str, float]:
-        """Evaluate agent performance"""
-        episode_rewards = []
-        episode_lengths = []
-        
-        for episode in range(num_episodes):
-            obs = env.reset()
-            total_reward = 0
-            steps = 0
-            
-            while True:
-                action, _, _ = self.get_action(obs)
-                obs, reward, done, _ = env.step(action)
-                total_reward += reward
-                steps += 1
-                
-                if done:
-                    break
-            
-            episode_rewards.append(total_reward)
-            episode_lengths.append(steps)
-        
-        return {
-            'mean_reward': float(np.mean(episode_rewards)),
-            'std_reward': float(np.std(episode_rewards)),
-            'mean_length': float(np.mean(episode_lengths)),
-            'min_reward': float(np.min(episode_rewards)),
-            'max_reward': float(np.max(episode_rewards))
-        }
+        self.max_grad_norm = 0.5
+
+    def _obs_tensor(self, obs: Sequence[np.ndarray]) -> torch.Tensor:
+        return torch.as_tensor(np.stack(obs), device=self.device)
+
+    @torch.no_grad()
+    def act(self, obs: torch.Tensor, greedy: bool = False) -> tuple[torch.Tensor, ...]:
+        """Return ``(actions, log_probs, values)`` for a batch of observation sequences."""
+        dist = torch.distributions.Categorical(logits=self.policy(obs))
+        actions = dist.probs.argmax(dim=-1) if greedy else dist.sample()
+        return actions, dist.log_prob(actions), self.value(obs).squeeze(-1)
+
+    def collect(self, envs: list[SequentialEnvironment]) -> tuple[Rollout, np.ndarray]:
+        """Run one episode in every environment (lockstep) and return the rollout and returns."""
+        self.policy.eval()
+        self.value.eval()
+        obs = [env.reset() for env in envs]
+        steps: dict[str, list[torch.Tensor]] = {k: [] for k in Rollout.__dataclass_fields__}
+        done = False
+        while not done:
+            obs_t = self._obs_tensor(obs)
+            actions, log_probs, values = self.act(obs_t)
+            results = [env.step(int(a)) for env, a in zip(envs, actions.tolist())]
+            obs = [r[0] for r in results]
+            rewards = torch.tensor([r[1] for r in results], dtype=torch.float32, device=self.device)
+            done = all(r[2] for r in results)
+            for key, value in zip(
+                ("obs", "actions", "log_probs", "values", "rewards"),
+                (obs_t, actions, log_probs, values, rewards),
+            ):
+                steps[key].append(value)
+        rollout = Rollout(**{k: torch.stack(v) for k, v in steps.items()})
+        return rollout, rollout.rewards.sum(dim=0).cpu().numpy()
+
+    def advantages(self, rollout: Rollout) -> tuple[torch.Tensor, torch.Tensor]:
+        """GAE advantages and value targets; the time limit is treated as terminal."""
+        rewards, values = rollout.rewards, rollout.values
+        advantages = torch.zeros_like(rewards)
+        running = torch.zeros_like(rewards[0])
+        for t in reversed(range(rewards.shape[0])):
+            next_value = values[t + 1] if t + 1 < rewards.shape[0] else torch.zeros_like(running)
+            delta = rewards[t] + self.gamma * next_value - values[t]
+            running = delta + self.gamma * self.gae_lambda * running
+            advantages[t] = running
+        return advantages, advantages + values
+
+    def update(
+        self, rollout: Rollout, epochs: int = 4, minibatch_size: int = 64
+    ) -> dict[str, float]:
+        """Run PPO epochs over the rollout and return mean losses."""
+        advantages, returns = self.advantages(rollout)
+        obs = rollout.obs.flatten(0, 1)
+        actions = rollout.actions.flatten()
+        old_log_probs = rollout.log_probs.flatten()
+        advantages = advantages.flatten()
+        returns = returns.flatten()
+        self.policy.train()
+        self.value.train()
+        stats: dict[str, list[float]] = {"policy_loss": [], "value_loss": [], "entropy": []}
+        n = obs.shape[0]
+        for _ in range(epochs):
+            order = torch.randperm(n, generator=self.generator).to(self.device)
+            for start in range(0, n, minibatch_size):
+                idx = order[start : start + minibatch_size]
+                adv = advantages[idx]
+                adv = (adv - adv.mean()) / (adv.std() + 1e-8) if len(idx) > 1 else adv
+                dist = torch.distributions.Categorical(logits=self.policy(obs[idx]))
+                ratio = torch.exp(dist.log_prob(actions[idx]) - old_log_probs[idx])
+                clipped = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon)
+                policy_loss = -torch.min(ratio * adv, clipped * adv).mean()
+                value_loss = F.mse_loss(self.value(obs[idx]).squeeze(-1), returns[idx])
+                entropy = dist.entropy().mean()
+                loss = policy_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy
+                self.optimizer.zero_grad()
+                loss.backward()
+                NetworkUtils.clip_grad_norm(self.policy, self.max_grad_norm)
+                NetworkUtils.clip_grad_norm(self.value, self.max_grad_norm)
+                self.optimizer.step()
+                stats["policy_loss"].append(policy_loss.item())
+                stats["value_loss"].append(value_loss.item())
+                stats["entropy"].append(entropy.item())
+        return {key: float(np.mean(values)) for key, values in stats.items()}
+
+    def evaluate(self, envs: list[SequentialEnvironment]) -> np.ndarray:
+        """Greedy episode returns, one per environment."""
+        self.policy.eval()
+        obs = [env.reset() for env in envs]
+        totals = np.zeros(len(envs))
+        done = False
+        while not done:
+            actions, _, _ = self.act(self._obs_tensor(obs), greedy=True)
+            results = [env.step(int(a)) for env, a in zip(envs, actions.tolist())]
+            obs = [r[0] for r in results]
+            totals += [r[1] for r in results]
+            done = all(r[2] for r in results)
+        return totals
 
 
-def train_transformer_agent():
-    """Main training function"""
-    print("🚀 Starting Transformer RL Training Example")
-    print("=" * 60)
-    
-    # Set random seeds for reproducibility
-    torch.manual_seed(42)
-    np.random.seed(42)
-    random.seed(42)
-    
-    # Configuration
-    config = {
-        'obs_dim': 8,
-        'action_dim': 4,
-        'seq_length': 10,
-        'd_model': 128,
-        'nhead': 8,
-        'num_layers': 4,
-        'dim_feedforward': 512,
-        'dropout': 0.1,
-        'lr': 3e-4,
-        'device': 'cuda' if torch.cuda.is_available() else 'cpu'
-    }
-    
-    print(f"📋 Configuration:")
-    for key, value in config.items():
-        print(f"   {key}: {value}")
-    print()
-    
-    if config['device'] == 'cuda':
-        print("🚀 Using CUDA for training")
-    else:
-        print("💻 Using CPU for training (CUDA not available)")
-    print()
-    
-    # Create environment and agent
-    env = SequentialEnvironment(
-        seq_length=config['seq_length'],
-        obs_dim=config['obs_dim'],
-        action_dim=config['action_dim']
+def random_policy_return(envs: list[SequentialEnvironment], rng: np.random.Generator) -> float:
+    """Mean return of a uniformly random policy (reference level)."""
+    totals = []
+    for env in envs:
+        env.reset()
+        total, done = 0.0, False
+        while not done:
+            _, reward, done = env.step(int(rng.integers(env.action_dim)))
+            total += reward
+        totals.append(total)
+    return float(np.mean(totals))
+
+
+def save_training_plots(history: dict[str, list[float]], eval_x: list[int], path: Path) -> None:
+    """Save a 2x2 panel of training curves (no GUI backend needed)."""
+    from matplotlib.figure import Figure
+
+    fig = Figure(figsize=(12, 7), dpi=100, layout="constrained")
+    fig.suptitle("Transformer PPO training")
+    axes = fig.subplots(2, 2)
+    panels = [
+        (axes[0, 0], history["train_return"], None, "Training return (mean over envs)", "tab:blue"),
+        (axes[0, 1], history["eval_return"], eval_x, "Greedy evaluation return", "tab:red"),
+        (axes[1, 0], history["policy_loss"], None, "Policy loss", "tab:green"),
+        (axes[1, 1], history["value_loss"], None, "Value loss", "tab:orange"),
+    ]
+    for ax, values, x, title, color in panels:
+        xs = x if x is not None else range(1, len(values) + 1)
+        ax.plot(xs, values, marker="o" if x is not None else None, color=color, linewidth=1.5)
+        ax.set(title=title, xlabel="Iteration")
+        ax.grid(True, alpha=0.3)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    cli = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    cli.add_argument("--iterations", type=int, default=40, help="PPO iterations")
+    cli.add_argument("--num-envs", type=int, default=8, help="parallel environments per rollout")
+    cli.add_argument("--max-steps", type=int, default=64, help="episode length")
+    cli.add_argument("--seq-length", type=int, default=10, help="observation history length")
+    cli.add_argument("--eval-every", type=int, default=5, help="evaluation interval (iterations)")
+    cli.add_argument("--lr", type=float, default=3e-4, help="Adam learning rate")
+    cli.add_argument("--seed", type=int, default=0, help="random seed")
+    cli.add_argument("--device", default="auto", help="'auto', 'cpu' or 'cuda'")
+    cli.add_argument("--quick", action="store_true", help="tiny run for smoke tests")
+    cli.add_argument(
+        "--save",
+        type=Path,
+        default=Path("renders/transformer_rl_training.png"),
+        help="training-curve image",
     )
-    
-    agent = TransformerRLAgent(**config)
-    
-    print(f"🧠 Agent created with:")
-    print(f"   Policy parameters: {NetworkUtils.count_parameters(agent.policy):,}")
-    print(f"   Value parameters: {NetworkUtils.count_parameters(agent.value):,}")
-    print(f"   Total parameters: {NetworkUtils.count_parameters(agent.policy) + NetworkUtils.count_parameters(agent.value):,}")
-    print()
-    
-    # Training loop
-    num_iterations = 50
-    episodes_per_iteration = 5
-    evaluation_interval = 5
-    
-    training_rewards = []
-    evaluation_rewards = []
-    policy_losses = []
-    value_losses = []
-    
-    print("🎯 Starting training...")
-    start_time = time.time()
-    
-    for iteration in range(num_iterations):
-        # Collect experience
-        experiences = agent.collect_experience(env, episodes_per_iteration)
-        
-        # Update policy
-        update_info = agent.update_policy(experiences)
-        
-        # Record metrics
-        if update_info:
-            policy_losses.append(update_info['policy_loss'])
-            value_losses.append(update_info['value_loss'])
-        
-        # Evaluate periodically
-        if iteration % evaluation_interval == 0:
-            eval_info = agent.evaluate(env, num_episodes=3)
-            evaluation_rewards.append(eval_info['mean_reward'])
-            
-            print(f"Iteration {iteration:3d}/{num_iterations}: "
-                  f"Reward = {eval_info['mean_reward']:6.2f} ± {eval_info['std_reward']:5.2f}, "
-                  f"Policy Loss = {update_info.get('policy_loss', 0):6.3f}, "
-                  f"Value Loss = {update_info.get('value_loss', 0):6.3f}")
-        
-        # Record training reward (average of collected episodes)
-        if experiences:
-            avg_reward = np.mean([exp['reward'] for exp in experiences])
-            training_rewards.append(avg_reward)
-    
-    training_time = time.time() - start_time
-    print(f"\n✅ Training completed in {training_time:.1f} seconds")
-    
-    # Final evaluation
-    final_eval = agent.evaluate(env, num_episodes=10)
-    print(f"\n🏆 Final Performance:")
-    print(f"   Mean Reward: {final_eval['mean_reward']:.2f} ± {final_eval['std_reward']:.2f}")
-    print(f"   Min Reward: {final_eval['min_reward']:.2f}")
-    print(f"   Max Reward: {final_eval['max_reward']:.2f}")
-    print(f"   Mean Episode Length: {final_eval['mean_length']:.1f}")
-    
-    # Plot results
-    plot_training_results(training_rewards, evaluation_rewards, policy_losses, value_losses)
-    
-    return agent, env
+    cli.add_argument("--no-plot", action="store_true", help="do not save the training curves")
+    args = cli.parse_args(argv)
+    if args.quick:
+        args.iterations, args.num_envs, args.max_steps, args.eval_every = 2, 2, 16, 1
+    device = (
+        ("cuda" if torch.cuda.is_available() else "cpu") if args.device == "auto" else args.device
+    )
 
+    torch.manual_seed(args.seed)
+    env_kwargs = dict(seq_length=args.seq_length, obs_dim=8, action_dim=4, max_steps=args.max_steps)
+    train_envs = [
+        SequentialEnvironment(**env_kwargs, seed=args.seed + i) for i in range(args.num_envs)
+    ]
+    eval_envs = [
+        SequentialEnvironment(**env_kwargs, seed=10_000 + args.seed + i)
+        for i in range(args.num_envs)
+    ]
+    agent = TransformerPPOAgent(obs_dim=8, action_dim=4, lr=args.lr, device=device, seed=args.seed)
+    baseline = random_policy_return(eval_envs, np.random.default_rng(args.seed))
+    n_params = NetworkUtils.count_parameters(agent.policy) + NetworkUtils.count_parameters(
+        agent.value
+    )
+    print(
+        f"PPO on {args.num_envs} envs x {args.max_steps} steps, {args.iterations} iterations, "
+        f"device {device}, {n_params:,} parameters"
+    )
+    print(f"Random-policy return: {baseline:.2f}")
 
-def plot_training_results(training_rewards, evaluation_rewards, policy_losses, value_losses):
-    """Plot training results"""
-    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-    fig.suptitle('Transformer RL Training Results', fontsize=16)
-    
-    # Training rewards
-    axes[0, 0].plot(training_rewards, alpha=0.7, color='blue')
-    axes[0, 0].set_title('Training Rewards')
-    axes[0, 0].set_xlabel('Iteration')
-    axes[0, 0].set_ylabel('Average Reward')
-    axes[0, 0].grid(True, alpha=0.3)
-    
-    # Evaluation rewards
-    if evaluation_rewards:
-        eval_iterations = list(range(0, len(training_rewards), 5))
-        axes[0, 1].plot(eval_iterations, evaluation_rewards, 'o-', color='red')
-        axes[0, 1].set_title('Evaluation Rewards')
-        axes[0, 1].set_xlabel('Iteration')
-        axes[0, 1].set_ylabel('Mean Reward')
-        axes[0, 1].grid(True, alpha=0.3)
-    
-    # Policy loss
-    if policy_losses:
-        axes[1, 0].plot(policy_losses, color='green')
-        axes[1, 0].set_title('Policy Loss')
-        axes[1, 0].set_xlabel('Iteration')
-        axes[1, 0].set_ylabel('Loss')
-        axes[1, 0].grid(True, alpha=0.3)
-    
-    # Value loss
-    if value_losses:
-        axes[1, 1].plot(value_losses, color='orange')
-        axes[1, 1].set_title('Value Loss')
-        axes[1, 1].set_xlabel('Iteration')
-        axes[1, 1].set_ylabel('Loss')
-        axes[1, 1].grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig('transformer_rl_training_results.png', dpi=300, bbox_inches='tight')
-    plt.show()
-    print("📊 Training plots saved as 'transformer_rl_training_results.png'")
+    history: dict[str, list[float]] = {
+        k: [] for k in ("train_return", "eval_return", "policy_loss", "value_loss")
+    }
+    eval_x: list[int] = []
+    start = time.perf_counter()
+    for iteration in range(1, args.iterations + 1):
+        rollout, returns = agent.collect(train_envs)
+        stats = agent.update(rollout)
+        history["train_return"].append(float(returns.mean()))
+        history["policy_loss"].append(stats["policy_loss"])
+        history["value_loss"].append(stats["value_loss"])
+        if iteration % args.eval_every == 0 or iteration == args.iterations:
+            scores = agent.evaluate(eval_envs)
+            history["eval_return"].append(float(scores.mean()))
+            eval_x.append(iteration)
+            print(
+                f"iter {iteration:3d}  train {returns.mean():6.2f}  eval {scores.mean():6.2f} "
+                f"+/- {scores.std():5.2f}  policy loss {stats['policy_loss']:7.4f}  "
+                f"value loss {stats['value_loss']:7.4f}  entropy {stats['entropy']:.3f}"
+            )
+    elapsed = time.perf_counter() - start
 
+    final = agent.evaluate(eval_envs)
+    print(f"Training time: {elapsed:.1f} s")
+    print(
+        f"Final greedy return: {final.mean():.2f} +/- {final.std():.2f} "
+        f"(random policy {baseline:.2f})"
+    )
+    obs = torch.as_tensor(eval_envs[0].reset()[None], device=agent.device)
+    actions = [int(agent.act(obs, greedy=True)[0])]
+    for _ in range(9):
+        next_obs, _, _ = eval_envs[0].step(actions[-1])
+        obs = torch.as_tensor(next_obs[None], device=agent.device)
+        actions.append(int(agent.act(obs, greedy=True)[0]))
+    print(f"First greedy actions of an evaluation episode: {actions}")
 
-def demonstrate_agent_behavior(agent, env, num_episodes=3):
-    """Demonstrate trained agent behavior"""
-    print(f"\n🎭 Demonstrating Agent Behavior ({num_episodes} episodes):")
-    print("-" * 50)
-    
-    for episode in range(num_episodes):
-        obs = env.reset()
-        total_reward = 0
-        steps = 0
-        actions_taken = []
-        
-        print(f"Episode {episode + 1}:")
-        
-        while True:
-            action, log_prob, value = agent.get_action(obs)
-            next_obs, reward, done, info = env.step(action)
-            
-            total_reward += reward
-            steps += 1
-            actions_taken.append(action)
-            
-            if done:
-                break
-            
-            obs = next_obs
-        
-        print(f"   Steps: {steps:3d}, Total Reward: {total_reward:6.2f}")
-        print(f"   Actions: {actions_taken[:10]}{'...' if len(actions_taken) > 10 else ''}")
-        print()
+    if not args.no_plot:
+        save_training_plots(history, eval_x, args.save)
+        print(f"Training curves saved to {args.save}")
+    return 0
 
 
 if __name__ == "__main__":
-    # Run the training example
-    agent, env = train_transformer_agent()
-    
-    # Demonstrate the trained agent
-    demonstrate_agent_behavior(agent, env)
-    
-    print("🎉 Transformer RL Example Completed!")
-    print("\n💡 Key Takeaways:")
-    print("   • Transformer networks can effectively handle sequential RL problems")
-    print("   • Attention mechanisms help capture temporal dependencies")
-    print("   • PPO-style updates work well with transformer policies")
-    print("   • The toolkit provides easy-to-use transformer implementations") 
+    raise SystemExit(main())

@@ -1,0 +1,403 @@
+% ---------------------------------------------------------------------------
+% Chapter: Examples, recording, benchmarks and development workflow
+% ---------------------------------------------------------------------------
+\chapter{Examples, Benchmarks and Development}\label{chap:examples}
+% Long monospaced identifiers leave little room for line breaking; allow some
+% extra inter-word stretch in this chapter (the group keeps it local).
+\begingroup\setlength{\emergencystretch}{3em}% chapter-local
+
+This chapter is a practical companion to the reference chapters. It lists the
+example scripts that ship with the repository, shows how to write evaluation
+loops and record episodes as GIF or MP4 files, explains the benchmark script,
+and describes the testing, linting and continuous-integration workflow for
+contributors.
+
+\section{Example scripts}\label{sec:examples-catalogue}
+
+The directory \code{examples/} contains runnable, documented scripts. Every
+script has a \code{-{}-help} option, a module docstring that explains what it
+demonstrates, and a \code{main()} function. Media files are written to
+\code{renders/} (relative to the working directory), which Git ignores. Run
+the scripts from the repository root after installing the package with the
+extras they need (\code{pip install ".[all]"} covers all of them).
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Environment examples.}
+  \label{tab:examples-envs}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.9cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Script & What it shows \\
+    \midrule
+    \code{quickstart.py} & Creates every registered environment with \code{env\_lib.make}, takes a few random steps and prints the observation shape and return; \code{-{}-render DIR} saves one PNG frame per environment. \\
+    \code{kuramoto\_demo.py} & Drives an oscillator network to synchronisation with a phase-alignment controller and a coupling ramp; NumPy or batched PyTorch backend (\code{-{}-backend}), several topologies. \\
+    \code{linemsg\_demo.py} & Compares random, duty-cycled and always-relay policies on LineMsg (\code{-{}-policy} selects the one to show or record). \\
+    \code{wireless\_comm\_demo.py} & Compares random access, slotted ALOHA and a collision-free rotating schedule on WirelessComm. \\
+    \code{pistonball\_demo.py} & Compares a hand-written heuristic with random actions; \code{-{}-manual} enables keyboard control in a window. \\
+    \code{consensus\_demo.py} & Compares random actions with the distributed Laplacian controller for consensus or formation control on any topology. \\
+    \code{ajlatt\_demo.py} & Compares random actions with an encircling heuristic for multi-robot target tracking and reports tracking error, covariance and collisions. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Toolkit examples.}
+  \label{tab:examples-toolkit}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{5.5cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Script & What it shows \\
+    \midrule
+    \code{plotkit\_gallery.py} & The three-panel paper figure of Figure~\ref{fig:plotkit-gallery}: learning curves with confidence bands, grouped bars and a sweep heatmap, saved as PDF and PNG. \\
+    \code{parakit\_demo.py} & Saving, loading and applying \pkg{argparse} parameters with validation callbacks; \code{-{}-gui} opens the Tk editor, \code{-{}-load} reads a file or directory, \code{-{}-set KEY=VALUE} overrides one value. \\
+    \code{simple\_transformer\_example.py} & A \code{TransformerPolicyNetwork} trained with REINFORCE on a small memory task (requires PyTorch). \\
+    \code{transformer\_rl\_example.py} & PPO with transformer actor and critic networks on batched environments (requires PyTorch; \code{-{}-device auto} uses a GPU when available). \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+The environment examples share a set of options: \code{-{}-seed}, \code{-{}-steps}
+(the episode length), \code{-{}-episodes} (evaluation episodes per policy),
+\code{-{}-save PATH} (record an episode; the suffix \code{.gif} or \code{.mp4}
+selects the format), \code{-{}-render-mode} (\code{human} opens a window) and
+\code{-{}-theme dark|light}. The transformer examples accept \code{-{}-quick} for
+a run of a few seconds, used as a smoke test in continuous integration.
+
+\begin{shellcode}
+python examples/quickstart.py --render renders/quickstart
+python examples/kuramoto_demo.py --topology ring --save renders/kuramoto.gif
+python examples/linemsg_demo.py --policy relay --save renders/linemsg.gif
+python examples/wireless_comm_demo.py --policy schedule --save renders/wireless.gif
+python examples/pistonball_demo.py --episodes 20 --save renders/pistonball.gif
+python examples/consensus_demo.py --task formation --save renders/formation.gif
+python examples/ajlatt_demo.py --map obstacles05 --save renders/ajlatt.gif
+python examples/plotkit_gallery.py --formats pdf png
+python examples/simple_transformer_example.py --quick
+\end{shellcode}
+
+Table~\ref{tab:examples-results} lists the results that the comparison
+scripts print with their default arguments. They are useful as sanity checks
+after modifying an environment and as simple baselines; the environment
+chapters explain the policies.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Output of the comparison scripts with default arguments (mean
+    episode return, with the standard deviation over episodes where the script
+    prints one).}
+  \label{tab:examples-results}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{4.3cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Script (setting) & Result \\
+    \midrule
+    \code{linemsg\_demo.py} (10 agents, 20 episodes) &
+      random $44.1 \pm 4.1$, duty-cycled $85.2 \pm 3.0$, always relay $95.0$ \\
+    \code{wireless\_comm\_demo.py} ($6 \times 6$, 20 episodes) &
+      random $385 \pm 12$, ALOHA $398 \pm 16$, rotating schedule $911 \pm 17$ with no collisions \\
+    \code{pistonball\_demo.py} (20 pistons, 5 episodes) &
+      heuristic $889 \pm 22$ (all episodes reach the goal), random $-342 \pm 40$ (none) \\
+    \code{consensus\_demo.py} (ring, 8 agents) &
+      Laplacian controller solves the task after 99 steps (return $-1968$); random actions do not (return $-19906$) \\
+    \code{ajlatt\_demo.py} (\code{obstacles04}, 2 episodes) &
+      heuristic about $-7300$ with no collisions and target covariance trace about 2; random actions about $-45000$ with 29 to 37 collisions \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\section{Writing an evaluation loop}\label{sec:examples-loop}
+
+All environments share the Gymnasium interface, so one evaluation function
+serves all of them. The loop below evaluates a policy over several seeded
+episodes and reports the team return and the per-agent returns from
+\code{info["agent\_rewards"]}. \code{np.sum} and \code{np.any} make it work
+also for AJLATT, whose reward and \code{terminated} are per-robot arrays.
+
+\begin{pycode}
+import numpy as np
+import env_lib
+
+def evaluate(env, policy, episodes=5, seed=0):
+    """Mean team return and mean per-agent returns over seeded episodes."""
+    team, per_agent = [], []
+    for episode in range(episodes):
+        obs, info = env.reset(seed=seed + episode)
+        total, agents = 0.0, 0.0
+        while True:
+            obs, reward, terminated, truncated, info = env.step(policy(obs))
+            total += float(np.sum(reward))
+            agents = agents + info["agent_rewards"]
+            if np.any(terminated) or truncated:
+                break
+        team.append(total)
+        per_agent.append(agents)
+    return np.mean(team), np.mean(per_agent, axis=0)
+
+env = env_lib.make("WirelessComm-v1")
+env.action_space.seed(0)                         # reproducible random actions
+mean_return, agent_returns = evaluate(env, lambda obs: env.action_space.sample())
+print(f"{mean_return:.1f}", agent_returns.shape)   # 16 agents on the 4x4 grid
+env.close()
+\end{pycode}
+
+Policies that need more than the observation, such as the controllers built
+into some environments, can close over the environment:
+\code{lambda obs: env.unwrapped.laplacian\_policy()} for the consensus
+environment. Use \code{env.unwrapped} to reach environment-specific methods
+and attributes through the wrappers that \code{gymnasium.make} adds.
+
+\section{Recording episodes}\label{sec:examples-recording}
+
+The module \pkg{env\_lib.utils} provides two functions to turn rendered
+frames into animations:
+
+% norun
+\begin{pycode}
+record_episode(env, policy=None, path=None, *, max_steps=None, seed=None,
+               fps=None, render_every=1) -> list[np.ndarray]
+save_animation(frames, path, fps=30.0, *, loop=0) -> Path
+\end{pycode}
+
+\code{record\_episode} requires an environment created with
+\code{render\_mode="rgb\_array"}. It resets the environment with \code{seed},
+renders the initial state, then steps with \code{policy(observation)} (uniform
+random actions from \code{env.action\_space} when no policy is given) until the
+episode terminates or is truncated, or \code{max\_steps} steps have been
+taken, rendering every \code{render\_every}-th step. It returns the list of
+\code{(H, W, 3)} \code{uint8} frames and, if \code{path} is given, writes them
+with \code{save\_animation} at \code{fps} frames per second (default: the
+environment's \code{metadata["render\_fps"]}).
+
+\code{save\_animation} chooses the format from the file suffix: \code{.gif} is
+written with Pillow, which is always available; \code{.mp4}, \code{.webm},
+\code{.avi}, \code{.mov} and \code{.mkv} require the \code{video} extra
+(\pkg{imageio} and \pkg{imageio-ffmpeg}). For video formats the frames are
+cropped to even width and height, which most codecs require. Parent
+directories are created. \code{loop} is the GIF loop count (0 repeats
+forever).
+
+\begin{pycode}
+import env_lib
+from env_lib.utils import record_episode, save_animation, set_theme
+
+set_theme("light")          # renderers created from now on use the light theme
+env = env_lib.ConsensusEnv(task="formation", formation_shape="wedge",
+                           render_mode="rgb_array")
+frames = record_episode(env, policy=lambda obs: env.laplacian_policy(),
+                        path="renders/formation.gif", seed=0, render_every=2)
+save_animation(frames, "renders/formation.mp4", fps=15)   # needs the video extra
+env.close()
+set_theme("dark")                   # back to the default theme
+\end{pycode}
+
+\code{set\_theme("dark"|"light")} selects the colour theme of all renderers
+created afterwards: the dark theme (default) suits screens and slides, the
+light theme suits papers and printed material. Custom themes can be added with
+\code{register\_theme}.
+
+For full control, for example to record only part of an episode or to
+annotate frames, collect the frames yourself with \code{env.render()}:
+
+\begin{pycode}
+env = env_lib.make("KuramotoOscillator-v0", render_mode="rgb_array")
+obs, info = env.reset(seed=1)
+frames = []
+for step in range(300):
+    obs, reward, terminated, truncated, info = env.step(env.action_space.sample())
+    if step % 5 == 0:                       # every fifth step
+        frames.append(env.render())
+    if terminated or truncated:
+        break
+save_animation(frames, "renders/kuramoto.gif", fps=20)
+env.close()
+\end{pycode}
+
+GIF files grow quickly with the number of frames and the frame size;
+rendering every second or fifth step and using MP4 for long episodes keeps the
+files small. The first \code{render()} call of an environment builds its
+figure and takes noticeably longer than later calls.
+
+\section{Benchmarks}\label{sec:examples-benchmarks}
+
+The script \code{benchmarks/benchmark\_envs.py} measures the mean wall-clock
+time of \code{env.step} (with pre-sampled random actions and no rendering)
+and the additional time of \code{env.render()} in \code{"rgb\_array"} mode,
+for representative configurations of every environment. Environments whose
+optional dependencies are missing are reported as skipped. The script sets
+\code{MPLBACKEND=Agg} and \code{SDL\_VIDEODRIVER=dummy} itself, so it runs
+headless.
+
+\begin{shellcode}
+python benchmarks/benchmark_envs.py                        # all environments
+python benchmarks/benchmark_envs.py --steps 500 --only kuramoto ajlatt
+python benchmarks/benchmark_envs.py --markdown > renders/benchmarks.md
+\end{shellcode}
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Options of \code{benchmarks/benchmark\_envs.py}.}
+  \label{tab:examples-bench-options}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}p{1.6cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Option & Default & Meaning \\
+    \midrule
+    \code{-{}-steps} & \code{300} & Timed steps per case. \\
+    \code{-{}-render-steps} & \code{40} & Timed rendered steps per case; \code{0} skips the rendering measurement. \\
+    \code{-{}-seed} & \code{0} & Seed of the environment and of the action space. \\
+    \code{-{}-only} & all & Subset of the groups \code{kuramoto}, \code{linemsg}, \code{wireless}, \code{pistonball}, \code{consensus}, \code{ajlatt}. \\
+    \code{-{}-markdown} & off & Print a Markdown table instead of plain text. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Table~\ref{tab:examples-bench} shows typical results. The ``before 1.0''
+column was measured with the implementations that preceded version 1.0 on the
+same machine; the version 1.0 columns are the output of the script with its
+default options (x86\_64 Linux, Python 3.11, CPU only, PyTorch restricted to
+one thread). Absolute numbers depend on the hardware; the ratios are more
+informative.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Time per step and per rendered frame in milliseconds. A dash marks
+    a configuration that did not exist before version 1.0.}
+  \label{tab:examples-bench}
+  \begin{tabular}{@{}lrrr@{}}
+    \toprule
+    Configuration & Step, before 1.0 & Step, 1.0 & Frame, 1.0 \\
+    \midrule
+    Kuramoto NumPy, $N = 10$              & 0.17  & 0.05  & 20 \\
+    Kuramoto NumPy, $N = 50$              & 2.36  & 0.05  & 36 \\
+    Kuramoto NumPy RK4, $N = 50$          & 7.1   & 0.10  & 36 \\
+    Kuramoto PyTorch, $N = 50$, 8 systems & 10.3  & 0.55  & 34 \\
+    LineMsg, 10 agents                    & 0.019 & 0.012 & 15 \\
+    WirelessComm, $6 \times 6$            & 0.154 & 0.035 & 13 \\
+    WirelessComm, $12 \times 12$          & 0.56  & 0.044 & 14 \\
+    Pistonball, 20 pistons                & 1.11  & 0.063 & 3 \\
+    Consensus, 8 agents                   & --    & 0.066 & 16 \\
+    Formation, 32 agents, proximity graph & --    & 0.20  & 20 \\
+    AJLATT, \code{obstacles04}, 4 robots  & 90    & 6.2   & 28 \\
+    AJLATT, \code{obstacles05}, 4 robots  & 67    & 6.2   & 26 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Before version 1.0 the Kuramoto \code{"rgb\_array"} renderer failed with
+matplotlib 3.10 and later, Pistonball drew its screen on every step even
+without rendering, and an AJLATT frame took about 110\,ms. Rendering now
+costs more than a simulation step in every environment, which is why it is
+performed only on request (Section~\ref{sec:trouble-performance}).
+
+\section{Testing, linting and continuous integration}\label{sec:examples-contributing}
+
+\subsection{Running the tests}
+
+The test suite lives in \code{tests/} (\code{tests/envs/} for the
+environments, \code{tests/toolkit/} for the toolkit) and uses \pkg{pytest}.
+After an editable installation with the \code{dev} extra
+(Section~\ref{sec:install-dev}):
+
+\begin{shellcode}
+pytest -q                                   # whole suite (under a minute)
+pytest tests/envs/test_consensus.py -q      # one file
+pytest -k "seed or determinism" -q          # tests whose name matches
+pytest --cov=env_lib --cov=toolkit --cov-report=term-missing
+\end{shellcode}
+
+The suite contains more than 700 tests. \code{tests/conftest.py} sets
+\code{MPLBACKEND=Agg} and \code{SDL\_VIDEODRIVER=dummy}, so rendering tests
+run without a display. Tests of optional features are skipped when the
+dependency is missing (\code{pytest.importorskip}). The marker \code{slow} is
+reserved for long-running tests and can be deselected with
+\code{-m "not slow"}.
+
+The tests check, for every environment, the shapes, dtypes and bounds of the
+spaces, that observations lie in \code{observation\_space}, determinism under
+seeding, reward and termination rules against simple reference
+implementations written in the tests, backward-compatible arguments, the
+registered ids, rendered frames and, where the multi-agent interface permits
+it, Gymnasium's \code{check\_env}. For the toolkit they cover input handling and numerical
+results of \pkg{plotkit}, network shapes and the version 1.0 fixes of
+\pkg{neural\_toolkit}, and the conversion rules of \pkg{parakit}.
+
+\subsection{Linting and formatting}
+
+The code base is formatted and linted with \pkg{ruff}; the configuration
+(line length 100, target Python 3.9, rule sets \code{E}, \code{F}, \code{W},
+\code{I}, \code{B}, \code{UP}, \code{NPY}) is in \code{pyproject.toml}.
+
+\begin{shellcode}
+ruff check src tests examples benchmarks          # lint
+ruff check --fix src tests examples benchmarks    # apply automatic fixes
+ruff format src tests examples benchmarks         # format
+ruff format --check src tests examples benchmarks # verify formatting only
+\end{shellcode}
+
+\subsection{Continuous integration}
+
+The workflow \code{.github/workflows/ci.yml} runs on pushes to the
+\code{main} and \code{development} branches and on pull requests. It has two
+jobs:
+
+\begin{description}[leftmargin=0.6cm,style=nextline]
+  \item[\code{lint}] On Python 3.11: \code{ruff check} and
+    \code{ruff format -{}-check} on \code{src}, \code{tests}, \code{examples} and
+    \code{benchmarks}.
+  \item[\code{test}] On Python 3.9, 3.10, 3.11 and 3.12 with
+    \code{MPLBACKEND=Agg} and \code{SDL\_VIDEODRIVER=dummy}: installs the CPU
+    build of PyTorch and the package with the \code{pistonball}, \code{video}
+    and \code{dev} extras, runs \code{pytest -q}, and smoke-tests the examples
+    with \code{python examples/quickstart.py -{}-steps 5},
+    \code{python examples/simple\_transformer\_example.py -{}-quick -{}-no-plot}
+    and \code{python benchmarks/benchmark\_envs.py -{}-steps 20 -{}-render-steps 2}.
+\end{description}
+
+Running the same commands locally before opening a pull request avoids
+failed CI runs.
+
+\subsection{Conventions for contributions}
+
+Contributions follow the conventions that the existing code relies on:
+
+\begin{itemize}
+  \item Python 3.9 compatible code with \code{from \_\_future\_\_ import
+    annotations}, type hints on public functions and NumPy-style docstrings
+    (Parameters, Returns, Raises, Examples).
+  \item No global side effects in library code: no \code{print}, no
+    \code{logging.basicConfig}, no calls to the global NumPy or PyTorch random
+    generators, no changes to \code{matplotlib.rcParams} and no
+    \code{matplotlib.use}. Randomness comes from \code{self.np\_random} or an
+    explicitly owned generator.
+  \item Arguments are validated early with \code{ValueError} or
+    \code{TypeError} and actionable messages; user-facing problems are
+    reported with \code{warnings.warn(..., stacklevel=2)}; diagnostics go to
+    \code{logging.getLogger(\_\_name\_\_)}.
+  \item Environments follow the contract of Chapter~\ref{chap:envlib}:
+    Gymnasium API, \code{float32} observations inside
+    \code{observation\_space}, \code{info["agent\_rewards"]}, their own episode
+    limit, and no drawing work unless a render mode is set. Renderers subclass
+    \code{env\_lib.utils.MatplotlibRenderer}, build their artists once and use
+    the colours of the active theme.
+  \item Deprecated arguments keep working and emit a
+    \code{DeprecationWarning} that names the replacement; every behavioural
+    change is recorded in \code{CHANGELOG.md}.
+  \item Plain ASCII text in code, output and documentation, without emojis or
+    decorative symbols.
+\end{itemize}
+
+A new environment needs the following additions:
+\begin{enumerate}
+  \item an entry in \code{ENV\_SPECS} in \code{src/env\_lib/registration.py},
+    with a string entry point so that registration does not import optional
+    dependencies;
+  \item a lazy export in \code{src/env\_lib/\_\_init\_\_.py};
+  \item tests in \code{tests/envs/} and an example script in
+    \code{examples/};
+  \item a chapter in this manual and an entry in \code{CHANGELOG.md}.
+\end{enumerate}
+
+\par\endgroup
