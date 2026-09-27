@@ -1,6 +1,6 @@
 # My Tool Box
 
-**Networked multi-agent control environments and research utilities for Python.**
+**Networked multi-agent control environments, classical MARL algorithms and research utilities for Python.**
 
 [![CI](https://github.com/EricDMW/My_Tool_Box/actions/workflows/ci.yml/badge.svg)](https://github.com/EricDMW/My_Tool_Box/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-2563EB)
@@ -12,9 +12,11 @@ quantities and interact through a network: generators holding the grid
 frequency, vehicles keeping a safe gap, oscillators synchronising, robots
 tracking targets as a team. Every environment speaks the Gymnasium API,
 simulates thousands of copies as one batch, and comes with a classical
-controller to compare against. The `toolkit` package covers the rest of a
-study: publication-quality plots, neural-network building blocks and
-reproducible experiment parameters.
+controller to compare against. The `marl_algorithms` package trains seven
+classical multi-agent reinforcement learning algorithms (IPPO, MAPPO, MADDPG,
+MATD3, IQL, VDN and QMIX) directly on these environments, and the `toolkit`
+package covers the rest of a study: publication-quality plots, neural-network
+building blocks and reproducible experiment parameters.
 
 <p align="center">
   <img src="docs/images/hero.gif" width="820" alt="Platoon-v0 under cooperative adaptive cruise control">
@@ -43,6 +45,15 @@ reproducible experiment parameters.
   single-agent libraries and the PettingZoo parallel API, and
   `env_lib.baseline_policy(env)`, a decentralised classical controller for
   every environment.
+- **Algorithms included.** Seven classical MARL methods share one small core
+  and train on the batched environments in one call
+  (`marl_algorithms.train("mappo", "PowerGrid-v0", 250_000)`) or one command
+  (`marl-train run mappo PowerGrid-v0`); tuned presets learn in one to two
+  minutes on one CPU core and are evaluated against the classical controller.
+  `marl_algorithms.compare` turns them into ready-made baselines for your own
+  method: one call trains them, over as many seeds as you ask for, and
+  evaluates them with the classical controller, random actions and your policy
+  on the same episodes.
 - **Reproducible.** Randomness comes only from seeded generators, rendering
   works headless in dark and light themes, and episodes export to GIF, MP4 or
   `.npz` trajectories.
@@ -65,7 +76,7 @@ Heavier dependencies are extras:
 
 | Extra | Adds | Needed for |
 |---|---|---|
-| `torch` | PyTorch | `KuramotoOscillatorTorch-*`, `toolkit.neural_toolkit` |
+| `torch` | PyTorch | `marl_algorithms`, `KuramotoOscillatorTorch-*`, `toolkit.neural_toolkit` |
 | `pistonball` | pygame, pymunk | `Pistonball-v0` |
 | `video` | imageio, imageio-ffmpeg | MP4 export (GIF export works without it) |
 | `dev` | pytest, pytest-cov, ruff | tests and linters |
@@ -97,9 +108,32 @@ flat = FlattenJointSpaces(env_lib.make("Platoon-v0"))  # 1-D spaces for single-a
 par = to_parallel("Platoon-v0")                        # PettingZoo parallel API, per-agent dicts
 ```
 
+Train a classical multi-agent algorithm on them:
+
+```python
+from marl_algorithms import train
+
+algo, log = train("mappo", "PowerGrid-v0", total_steps=250_000, num_envs=16)
+print(log.summary())
+print(algo.evaluate(env_lib.make_vec("PowerGrid-v0", 64), n_episodes=64, seed=1))
+```
+
+Compare your own method with them as baselines (every algorithm with a preset
+for the environment), the classical controller and random actions, on the same
+episodes ([details](#using-the-algorithms-as-baselines)):
+
+```python
+from marl_algorithms import compare
+
+report = compare("PowerGrid-v0", seeds=(0, 1, 2), policies={"mine": my_policy})
+print(report)        # rows: random, baseline (classical), ippo, mappo, maddpg, matd3, mine
+```
+
 Or stay in the shell:
 
 ```bash
+marl-train run mappo PowerGrid-v0                  # tuned preset, then random / trained / baseline
+marl-train compare PowerGrid-v0 --seeds 0 1 2      # every preset algorithm as a baseline
 env-lib list --continuous                          # catalogue of continuous environments
 env-lib describe Platoon-v0                        # spaces, observation layout, parameters
 env-lib run Formation-v0 --gif renders/run.gif     # roll out the baseline and record it
@@ -156,6 +190,135 @@ Every environment ships a decentralised baseline, returned by
 
 Mean return over 64 seeded episodes (8 for AJLATT, 16 for Pistonball),
 higher is better, measured with `env_lib.evaluate` on vector environments.
+
+## Multi-agent reinforcement learning algorithms
+
+`marl_algorithms` implements seven classical methods against one small core:
+a per-agent view of the joint spaces (`MultiAgentSpec`), experience collection
+on the native batched environments, rollout and replay buffers, network
+building blocks with shared or per-agent parameters, and two training loops.
+Every algorithm acts on per-agent observations, saves and loads, and evaluates
+through `env_lib.evaluate`.
+
+| Algorithm | Family | Actions | Idea | Reference |
+|---|---|---|---|---|
+| IPPO | on-policy | continuous, discrete | PPO per agent on its own observation and reward | de Witt et al., 2020 |
+| MAPPO | on-policy | continuous, discrete | decentralised actors, centralised critic V(s, i) | Yu et al., 2022 |
+| MADDPG | off-policy actor-critic | continuous | deterministic actors, centralised Q-critics on joint actions | Lowe et al., 2017 |
+| MATD3 | off-policy actor-critic | continuous | MADDPG with twin critics, target smoothing, delayed actors | Ackermann et al., 2019 |
+| IQL | value-based | discrete | independent DQN per agent | Tan, 1993 |
+| VDN | value-based | discrete | team value as the sum of agent utilities | Sunehag et al., 2018 |
+| QMIX | value-based | discrete | monotonic, state-conditioned mixing of agent utilities | Rashid et al., 2018 |
+
+Every preset trained on one CPU core and was then evaluated, with its
+deterministic policy, on 64 seeded episodes against uniformly random actions
+and the environment's classical controller (mean return, higher is better;
+time is CPU seconds of training; reproduce with `benchmarks/benchmark_marl.py`):
+
+| Algorithm | Environment | Env steps | Time [s] | Random | Trained | Baseline |
+|---|---|---:|---:|---:|---:|---:|
+| IPPO | `PowerGrid-v0` | 200,704 | 69 | -629.3 | -2.37 | -0.79 |
+| IPPO | `Platoon-v0` | 450,560 | 88 | -5,350 | -84.8 | -46.4 |
+| IPPO | `Consensus-v0` | 401,408 | 83 | -18,041 | -1,550 | -1,518 |
+| IPPO | `LineMsg-v0` | 100,800 | 26 | 43.2 | 95.0 | 95.0 |
+| MAPPO | `PowerGrid-v0` | 251,904 | 106 | -629.3 | -0.89 | -0.79 |
+| MAPPO | `Platoon-v0` | 450,560 | 102 | -5,350 | -65.0 | -46.4 |
+| MAPPO | `Consensus-v0` | 401,408 | 96 | -18,041 | -1,586 | -1,518 |
+| MAPPO | `LineMsg-v0` | 100,800 | 26 | 43.2 | 95.0 | 95.0 |
+| MADDPG | `PowerGrid-v0` | 64,000 | 70 | -629.3 | -5.69 | -0.79 |
+| MADDPG | `Consensus-v0` | 96,000 | 72 | -18,041 | -1,681 | -1,518 |
+| MATD3 | `PowerGrid-v0` | 64,000 | 87 | -629.3 | -5.63 | -0.79 |
+| MATD3 | `Consensus-v0` | 96,000 | 83 | -18,041 | -1,737 | -1,518 |
+| IQL | `LineMsg-v0` | 25,008 | 9 | 43.2 | 95.0 | 95.0 |
+| VDN | `LineMsg-v0` | 25,008 | 10 | 43.2 | 95.0 | 95.0 |
+| VDN | `WirelessComm-v1` | 120,000 | 74 | 139.2 | 338.0 | 339.6 |
+| QMIX | `LineMsg-v0` | 25,008 | 16 | 43.2 | 95.0 | 95.0 |
+| QMIX | `WirelessComm-v1` | 100,000 | 101 | 139.2 | 319.1 | 339.6 |
+
+The learned policies close at least 90 per cent of the gap between random
+actions and the classical controller on every environment, and at least 98 per
+cent outside WirelessComm. All methods match the controller on LineMsg; VDN on
+WirelessComm and IPPO and MAPPO on Consensus come within about 5 per cent of
+it, MAPPO on PowerGrid within 13 per cent, and the others stay further behind:
+a well-designed classical controller is a strong baseline on these physical
+systems. The team-reward methods also show why
+credit assignment matters: on WirelessComm, independent Q-learning (IQL, not
+listed) stays near random because a collision costs the sending agent nothing,
+while VDN reaches the collision-free schedule.
+
+<p align="center">
+  <img src="docs/images/marl_training.png" width="900" alt="Learning curves of MAPPO, MADDPG, QMIX and VDN">
+</p>
+
+### Using the algorithms as baselines
+
+A new method on these environments can be measured against three kinds of
+reference: random actions, the environment's classical controller
+(`env_lib.baseline_policy`) and the learning algorithms, which have tuned
+presets for PowerGrid, Platoon, Consensus, LineMsg and WirelessComm-v1 (on
+other environments they train with their defaults and a budget you choose).
+`marl_algorithms.compare` trains the learning baselines over one or several
+seeds and evaluates everything, your method included, on the same seeded
+episodes:
+
+```python
+from marl_algorithms import compare
+
+report = compare(
+    "PowerGrid-v0",
+    ["mappo", "ippo"],                    # default: every algorithm with a preset here
+    seeds=(0, 1),
+    policies={"my method": my_policy},    # (num_envs, n_agents, obs_dim) -> actions
+)
+print(report)
+report.to_csv("results/power_grid.csv")  # also .to_markdown() and .records()
+mappo = report.algorithms[("mappo", 0)]   # the trained baselines, ready to save or record
+```
+
+```
+PowerGrid-v0: mean return over 64 evaluation episodes (seed 1); higher is better
+
+method     kind       mean return    std  seeds  env steps  train [s]
+---------  ---------  -----------  -----  -----  ---------  ---------
+random     reference       -629.3      -      -          -          -
+baseline   reference       -0.786      -      -          -          -
+mappo      algorithm        -1.02  0.182      2    251,904      101.9
+ippo       algorithm        -2.25  0.172      2    200,704       65.2
+my method  policy          -0.675      -      -          -          -
+```
+
+`std` is the standard deviation over the training seeds. Here "my method" is a
+distributed droop controller that also reacts to the neighbours' mean
+frequency deviation ([`examples/algorithms/baseline_comparison.py`](examples/algorithms/baseline_comparison.py),
+about six minutes on one core):
+
+<p align="center">
+  <img src="docs/images/baseline_comparison.png" width="560" alt="Mean return of the proposed controller, MAPPO, IPPO and the classical controller on PowerGrid-v0">
+</p>
+
+The same from the shell, where `--csv`, `--markdown` and `--save-dir` export
+the table and the trained models:
+
+```bash
+marl-train compare PowerGrid-v0 --seeds 0 1 2                   # every preset algorithm
+marl-train compare LineMsg-v0 --algos iql qmix --markdown --csv results/linemsg.csv
+marl-train compare Formation-v0 --algos mappo --steps 200000    # no preset: give a budget
+```
+
+A few rules of thumb:
+
+- `total_steps` and `num_envs` (`--steps`, `--num-envs`) replace the presets'
+  budget, for a quick check before the full run; algorithms without a preset
+  for the environment need `total_steps`.
+- `env_kwargs={"n_buses": 32}` (`--env-kwarg n_buses=32`) trains and evaluates
+  every method on a variant of the environment with the presets'
+  hyperparameters, which may then need more steps.
+- A policy written for one environment works after `per_copy(policy)`; a
+  modified algorithm of this package is passed as the trained object.
+- With training seed 0 and the default evaluation seed 1, the numbers match
+  the results table above.
+
+The handbook section "Using the algorithms as baselines" has more recipes.
 
 ## Design
 
@@ -224,12 +387,17 @@ the AJLATT, Kuramoto and Consensus speed-ups of 1.1 are bitwise identical.
 - **Handbook** (`docs/manual/main.pdf`, built by `docs/manual/build.sh`): model
   equations, observation layouts, parameters and rendering of every
   environment, the workflow chapter (vectorised simulation, adapters,
-  baselines, evaluation), the toolkit, examples, troubleshooting, an API
-  reference and a migration guide.
+  baselines, evaluation), the multi-agent RL algorithms and their use as
+  baselines, the toolkit, examples, troubleshooting, an API reference and a
+  migration guide.
 - **Slides** (`docs/slides/my_tool_box_slides.pdf`, built by
   `docs/slides/build.sh`): a short introduction to the package.
-- **Examples** (`examples/`, see `examples/README.md`): one script per
-  environment and an end-to-end workflow.
+- **Examples** (`examples/`, see `examples/README.md`), grouped by topic:
+  `getting_started/` (every environment, the end-to-end workflow),
+  `environments/` (one script per environment with its classical controller),
+  `algorithms/` (`marl_training_demo.py` trains MAPPO, MADDPG, QMIX and VDN on
+  four environments; `baseline_comparison.py` compares a proposed controller
+  with the baselines) and `toolkit/`.
 
 ## Development
 
@@ -240,6 +408,7 @@ ruff check src tests examples benchmarks           # lint
 ruff format src tests examples benchmarks          # format
 python benchmarks/benchmark_envs.py                # single-environment timings
 python benchmarks/benchmark_vector.py              # batched throughput
+python benchmarks/benchmark_marl.py                # train and evaluate every MARL preset
 ```
 
 Tests run headless (`tests/conftest.py` selects matplotlib's Agg backend and

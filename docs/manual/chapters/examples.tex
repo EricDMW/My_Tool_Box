@@ -14,9 +14,13 @@ continuous-integration workflow for contributors.
 
 \section{Example scripts}\label{sec:examples-catalogue}
 
-The directory \code{examples/} contains runnable, documented scripts. Every
-script has a \code{-{}-help} option, a module docstring that explains what it
-demonstrates, and a \code{main()} function. Media files are written to
+The directory \code{examples/} contains runnable, documented scripts, grouped
+by topic: \code{getting\_started/} (Table~\ref{tab:examples-start}),
+\code{environments/} (Table~\ref{tab:examples-envs}), \code{algorithms/}
+(Table~\ref{tab:examples-marl}) and \code{toolkit/}
+(Table~\ref{tab:examples-toolkit}); \code{examples/README.md} lists them with a
+typical invocation each. Every script has a \code{-{}-help} option, a module
+docstring that explains what it demonstrates, and a \code{main()} function. Media files are written to
 \code{renders/} (relative to the working directory), which Git ignores. Run
 the scripts from the repository root after installing the package with the
 extras they need (\code{pip install ".[all]"} covers all of them).
@@ -24,21 +28,13 @@ extras they need (\code{pip install ".[all]"} covers all of them).
 \begin{table}[htbp]
   \centering
   \small
-  \caption{Environment examples.}
-  \label{tab:examples-envs}
+  \caption{First steps (\code{examples/getting\_started/}).}
+  \label{tab:examples-start}
   \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.9cm}>{\raggedright\arraybackslash}X@{}}
     \toprule
     Script & What it shows \\
     \midrule
     \code{quickstart.py} & Creates every registered environment with \code{env\_lib.make}, takes a few random steps and prints the observation shape and return; \code{-{}-render DIR} saves one PNG frame per environment. \\
-    \code{kuramoto\_demo.py} & Drives an oscillator network to synchronisation with a phase-alignment controller and a coupling ramp; NumPy or batched PyTorch backend (\code{-{}-backend}), several topologies. \\
-    \code{linemsg\_demo.py} & Compares random, duty-cycled and always-relay policies on LineMsg (\code{-{}-policy} selects the one to show or record). \\
-    \code{wireless\_comm\_demo.py} & Compares random access, slotted ALOHA and a collision-free rotating schedule on WirelessComm. \\
-    \code{pistonball\_demo.py} & Compares a hand-written heuristic with random actions; \code{-{}-manual} enables keyboard control in a window. \\
-    \code{consensus\_demo.py} & Compares random actions with the distributed Laplacian controller for consensus or formation control on any topology. \\
-    \code{power\_grid\_demo.py} & Compares no control, random injections and decentralised droop control on \envid{PowerGrid-v0} under the same disturbances; reports the return, frequency nadir, largest deviation, settling time and trips (\code{-{}-buses}, \code{-{}-topology}, \code{-{}-gain}, \code{-{}-noise}). \\
-    \code{platoon\_demo.py} & Compares random actions, sensor-only ACC and cooperative ACC on \envid{Platoon-v0} and prints the analytic string-stability gain of both controllers; reports collisions, the smallest gap and the peak spacing errors of the first and last follower (\code{-{}-vehicles}, \code{-{}-topology}, \code{-{}-scenario}, \code{-{}-headway}). \\
-    \code{ajlatt\_demo.py} & Compares random actions with the packaged encircling baseline (\code{env\_lib.baseline\_policy}, implemented by \code{env\_lib.baselines.ajlatt\_encircle}, computed from the observation alone) for multi-robot target tracking and reports tracking error, covariance and collisions. \\
     \code{workflow\_demo.py} & The workflow of Chapter~\ref{chap:workflow} in six steps: lists the environments with continuous actions, creates a native vector environment, evaluates random actions and the baseline on all copies in parallel, flattens the spaces for single-agent libraries, adapts the environment to the PettingZoo Parallel API and records a GIF of the baseline (\code{-{}-env}, \code{-{}-num-envs}, \code{-{}-episodes}, \code{-{}-save}, \code{-{}-no-save}). \\
     \bottomrule
   \end{tabularx}
@@ -47,7 +43,28 @@ extras they need (\code{pip install ".[all]"} covers all of them).
 \begin{table}[htbp]
   \centering
   \small
-  \caption{Toolkit examples.}
+  \caption{Environment examples (\code{examples/environments/}).}
+  \label{tab:examples-envs}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.9cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Script & What it shows \\
+    \midrule
+    \code{kuramoto\_demo.py} & Drives an oscillator network to synchronisation with a phase-alignment controller and a coupling ramp; NumPy or batched PyTorch backend (\code{-{}-backend}), several topologies. \\
+    \code{linemsg\_demo.py} & Compares random, duty-cycled and always-relay policies on LineMsg (\code{-{}-policy} selects the one to show or record). \\
+    \code{wireless\_comm\_demo.py} & Compares random access, slotted ALOHA and a collision-free rotating schedule on WirelessComm. \\
+    \code{pistonball\_demo.py} & Compares a hand-written heuristic with random actions; \code{-{}-manual} enables keyboard control in a window. \\
+    \code{consensus\_demo.py} & Compares random actions with the distributed Laplacian controller for consensus or formation control on any topology. \\
+    \code{power\_grid\_demo.py} & Compares no control, random injections and decentralised droop control on \envid{PowerGrid-v0} under the same disturbances; reports the return, frequency nadir, largest deviation, settling time and trips (\code{-{}-buses}, \code{-{}-topology}, \code{-{}-gain}, \code{-{}-noise}). \\
+    \code{platoon\_demo.py} & Compares random actions, sensor-only ACC and cooperative ACC on \envid{Platoon-v0} and prints the analytic string-stability gain of both controllers; reports collisions, the smallest gap and the peak spacing errors of the first and last follower (\code{-{}-vehicles}, \code{-{}-topology}, \code{-{}-scenario}, \code{-{}-headway}). \\
+    \code{ajlatt\_demo.py} & Compares random actions with the packaged encircling baseline (\code{env\_lib.baseline\_policy}, implemented by \code{env\_lib.baselines.ajlatt\_encircle}, computed from the observation alone) for multi-robot target tracking and reports tracking error, covariance and collisions. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Toolkit examples (\code{examples/toolkit/}).}
   \label{tab:examples-toolkit}
   \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{5.5cm}>{\raggedright\arraybackslash}X@{}}
     \toprule
@@ -61,31 +78,79 @@ extras they need (\code{pip install ".[all]"} covers all of them).
   \end{tabularx}
 \end{table}
 
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Learning examples (\code{examples/algorithms/}; require PyTorch).}
+  \label{tab:examples-marl}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{4.3cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Script & What it shows \\
+    \midrule
+    \code{marl\_training\_demo.py} & \pkg{marl\_algorithms} on the environments (Chapter~\ref{chap:marl}): MAPPO on \envid{PowerGrid-v0}, MADDPG on \envid{Consensus-v0}, QMIX on \envid{LineMsg-v0} and VDN on \envid{WirelessComm-v1}, each trained with its tuned preset on batched copies and then compared with random actions and the baseline controller on the same seeded episodes; prints a results table and saves the learning curves (\code{-{}-algo}, \code{-{}-env}, \code{-{}-quick}, \code{-{}-episodes}, \code{-{}-plot}, \code{-{}-gif}, \code{-{}-seed}, \code{-{}-threads}). \\
+    \code{baseline\_comparison.py} & Your method against the baselines
+      (Section~\ref{sec:marl-baselines}): a distributed droop controller that
+      also uses the neighbours' mean frequency deviation, compared on
+      \envid{PowerGrid-v0} with MAPPO and IPPO trained over two seeds, the
+      classical droop controller and random actions, on the same episodes with
+      \code{marl\_algorithms.compare}; prints the table and saves it as CSV
+      and a bar chart (\code{-{}-algos}, \code{-{}-seeds}, \code{-{}-episodes},
+      \code{-{}-quick}, \code{-{}-csv}, \code{-{}-plot}, \code{-{}-threads}). \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
 The environment examples share a set of options: \code{-{}-seed}, \code{-{}-steps}
-(the episode length), \code{-{}-episodes} (evaluation episodes per policy),
+(the episode length), \code{-{}-episodes} (evaluation episodes per policy;
+\code{kuramoto\_demo.py} and \code{consensus\_demo.py} run a single episode
+and have no such option),
 \code{-{}-save PATH} (record an episode; the suffix \code{.gif} or \code{.mp4}
 selects the format; \code{power\_grid\_demo.py} and \code{platoon\_demo.py} call
 it \code{-{}-render PATH}, and the former also accepts \code{-{}-save}),
 \code{-{}-render-mode} (\code{human} opens a window) and
 \code{-{}-theme dark|light}. \code{workflow\_demo.py} takes an environment id
 (\code{-{}-env}) instead, and \code{quickstart.py} only \code{-{}-steps} and
-\code{-{}-render DIR}. The transformer examples accept \code{-{}-quick} for
-a run of a few seconds, used as a smoke test in continuous integration.
+\code{-{}-render DIR}. The transformer examples,
+\code{marl\_training\_demo.py} and \code{baseline\_comparison.py} accept
+\code{-{}-quick} for a run of a few seconds, used as a smoke test in
+continuous integration.
 
 \begin{shellcode}
-python examples/quickstart.py --render renders/quickstart
-python examples/kuramoto_demo.py --topology ring --save renders/kuramoto.gif
-python examples/linemsg_demo.py --policy relay --save renders/linemsg.gif
-python examples/wireless_comm_demo.py --policy schedule --save renders/wireless.gif
-python examples/pistonball_demo.py --episodes 20 --save renders/pistonball.gif
-python examples/consensus_demo.py --task formation --save renders/formation.gif
-python examples/power_grid_demo.py --topology ring --render renders/grid.gif
-python examples/platoon_demo.py --scenario stop_and_go --render renders/platoon.gif
-python examples/ajlatt_demo.py --map obstacles05 --save renders/ajlatt.gif
-python examples/workflow_demo.py --env Consensus-v0 --num-envs 128 --episodes 128
-python examples/plotkit_gallery.py --formats pdf png
-python examples/simple_transformer_example.py --quick
+python examples/getting_started/quickstart.py --render renders/quickstart
+python examples/environments/kuramoto_demo.py --topology ring --save renders/kuramoto.gif
+python examples/environments/linemsg_demo.py --policy relay --save renders/linemsg.gif
+python examples/environments/wireless_comm_demo.py --policy schedule --save renders/wireless.gif
+python examples/environments/pistonball_demo.py --episodes 20 --save renders/pistonball.gif
+python examples/environments/consensus_demo.py --task formation --save renders/formation.gif
+python examples/environments/power_grid_demo.py --topology ring --render renders/grid.gif
+python examples/environments/platoon_demo.py --scenario stop_and_go --render renders/platoon.gif
+python examples/environments/ajlatt_demo.py --map obstacles05 --save renders/ajlatt.gif
+python examples/getting_started/workflow_demo.py --env Consensus-v0 --num-envs 128 --episodes 128
+python examples/toolkit/plotkit_gallery.py --formats pdf png
+python examples/toolkit/simple_transformer_example.py --quick
+python examples/algorithms/marl_training_demo.py --algo qmix --env LineMsg-v0
 \end{shellcode}
+
+The full suite of \code{marl\_training\_demo.py} (without \code{-{}-algo})
+trains four presets and takes a few minutes on one CPU core; its results are in
+Table~\ref{tab:marl-demo-results} and Figure~\ref{fig:marl-training}. With
+\code{-{}-quick} every run takes only a few updates, so the trained returns
+only show that the pipeline works (times and returns depend on the machine):
+
+\begin{textcode}
+Training MAPPO on PowerGrid-v0 ...
+  2,048 env steps in 4.4 s; trained return -63.31
+Training MADDPG on Consensus-v0 ...
+  1,504 env steps in 2.3 s; trained return -1.278e+04
+Training QMIX on LineMsg-v0 ...
+  1,504 env steps in 1.9 s; trained return 82.17
+Training VDN on WirelessComm-v1 ...
+  1,504 env steps in 1.7 s; trained return 151.6
+\end{textcode}
+
+followed by a table with the columns of Table~\ref{tab:marl-demo-results}
+(random $-629.3$, trained $-63.31$ and baseline $-0.7858$ for MAPPO in this
+quick run) and the path of the learning-curve figure.
 
 Table~\ref{tab:examples-results} lists the results that the comparison
 scripts print with their default arguments. They are useful as sanity checks
@@ -400,23 +465,34 @@ env-lib bench PowerGrid-v0 --num-envs 1024 --kwarg n_buses=64
 env-lib bench LineMsg-v0 --num-envs 64 --async     # no native implementation
 \end{shellcode}
 
+\paragraph{Algorithms.} \code{benchmarks/benchmark\_marl.py} trains every
+preset of \pkg{marl\_algorithms} (seed 0, one thread) and evaluates random
+actions, the trained policy and the baseline controller on the same 64 seeded
+episodes; \code{-{}-only} selects presets, \code{-{}-shard K/N} splits the
+presets between parallel processes, \code{-{}-out} names the JSON-lines result
+file and \code{-{}-report FILE} (with \code{-{}-markdown}) prints the table.
+Section~\ref{sec:marl-results} describes the protocol and reports the results.
+
 \section{Testing, linting and continuous integration}\label{sec:examples-contributing}
 
 \subsection{Running the tests}
 
 The test suite lives in \code{tests/} (\code{tests/envs/} for the
-environments, \code{tests/toolkit/} for the toolkit) and uses \pkg{pytest}.
+environments, \code{tests/algorithms/} for \pkg{marl\_algorithms},
+\code{tests/toolkit/} for the toolkit) and uses \pkg{pytest}.
 After an editable installation with the \code{dev} extra
 (Section~\ref{sec:install-dev}):
 
 \begin{shellcode}
-pytest -q                                   # whole suite (under a minute)
+pytest -q                                   # whole suite (about two minutes)
 pytest tests/envs/test_consensus.py -q      # one file
 pytest -k "seed or determinism" -q          # tests whose name matches
-pytest --cov=env_lib --cov=toolkit --cov-report=term-missing
+pytest --cov=env_lib --cov=marl_algorithms --cov=toolkit \
+    --cov-report=term-missing
 \end{shellcode}
 
-The suite contains more than 1100 tests. \code{tests/conftest.py} sets
+The suite contains 1\,369 tests, 229 of them for
+\pkg{marl\_algorithms}. \code{tests/conftest.py} sets
 \code{MPLBACKEND=Agg} and \code{SDL\_VIDEODRIVER=dummy}, so rendering tests
 run without a display. Tests of optional features are skipped when the
 dependency is missing (\code{pytest.importorskip}). The marker \code{slow} is
@@ -433,7 +509,17 @@ check that copy~0 reproduces a single environment started from the same state,
 the three autoreset modes and the info masks; for the workflow layer they
 check the catalogue, the command line, the baseline controllers, the wrappers
 (including PettingZoo's \code{parallel\_api\_test} when PettingZoo is
-installed) and the evaluation statistics. For the toolkit they cover input handling and numerical
+installed) and the evaluation statistics. For \pkg{marl\_algorithms} they check the per-agent
+view of every kind of action space, the runner's final observations and
+per-agent rewards, generalised advantage estimation against the recursion
+written out, the replay buffer, the running statistics and the networks
+(including the monotonicity of the QMIX mixer), and for every algorithm the
+action shapes and bounds, \code{policy()} with \code{env\_lib.evaluate},
+the rejection of unsupported action kinds and invalid configurations, short
+training runs with shared and separate parameters, the losses and targets
+against their definitions, seed determinism, \code{save}/\code{load} round
+trips, small learning checks, the presets and the \code{marl-train} command
+line. For the toolkit they cover input handling and numerical
 results of \pkg{plotkit}, network shapes and the version 1.0 fixes of
 \pkg{neural\_toolkit}, and the conversion rules of \pkg{parakit}.
 
@@ -469,8 +555,12 @@ jobs:
     \code{workflow\_demo.py -{}-no-save},
     \code{power\_grid\_demo.py -{}-episodes 2 -{}-steps 50},
     \code{platoon\_demo.py -{}-episodes 2 -{}-steps 100}, \code{env-lib list},
-    \code{env-lib evaluate Formation-v0 -{}-episodes 8 -{}-num-envs 8} and
-    \code{benchmarks/benchmark\_envs.py -{}-steps 20 -{}-render-steps 2}.
+    \code{env-lib evaluate Formation-v0 -{}-episodes 8 -{}-num-envs 8},
+    \code{benchmarks/benchmark\_envs.py -{}-steps 20 -{}-render-steps 2},
+    \code{benchmarks/benchmark\_vector.py -{}-quick}, \code{marl-train list},
+    \code{marl\_training\_demo.py -{}-quick -{}-plot ''},
+    \code{baseline\_comparison.py -{}-quick} (one seed, 16 episodes) and
+    \code{marl-train compare LineMsg-v0} with IQL and VDN on a small budget.
 \end{description}
 
 Running the same commands locally before opening a pull request avoids
@@ -524,8 +614,11 @@ A new environment needs the following additions:
     arguments of the single environment plus \code{num\_envs} and
     \code{autoreset\_mode} (Appendix~\ref{app:api});
   \item tests in \code{tests/envs/} and an example script in
-    \code{examples/};
+    \code{examples/environments/};
   \item a chapter in this manual and an entry in \code{CHANGELOG.md}.
 \end{enumerate}
+
+Section~\ref{sec:marl-extending} lists the corresponding steps for a new
+learning algorithm in \pkg{marl\_algorithms}.
 
 \par\endgroup

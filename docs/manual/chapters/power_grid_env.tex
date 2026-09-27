@@ -399,6 +399,7 @@ a uniform gain.
 \section{Vector environment}\label{sec:power-grid-vector}
 
 The native vector environment
+% norun (signature)
 \begin{pycode}
 PowerGridVectorEnv(num_envs=1, *, autoreset_mode="next_step", render_mode=None, **kwargs)
 \end{pycode}
@@ -520,10 +521,10 @@ The example script compares zero, random and droop control on a few seeded
 episodes and can record the droop controller:
 
 \begin{shellcode}
-python examples/power_grid_demo.py
-python examples/power_grid_demo.py --buses 32 --topology ring --episodes 5 \
+python examples/environments/power_grid_demo.py
+python examples/environments/power_grid_demo.py --buses 32 --topology ring --episodes 5 \
     --theme light --render renders/power_grid.gif
-python examples/power_grid_demo.py --render-mode human
+python examples/environments/power_grid_demo.py --render-mode human
 \end{shellcode}
 
 % ---------------------------------------------------------------------------

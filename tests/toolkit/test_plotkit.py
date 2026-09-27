@@ -984,7 +984,7 @@ def test_gallery_cli_non_interactive_backend_saves(tmp_path, monkeypatch):
 
 
 def test_gallery_example_script(tmp_path):
-    path = REPO_ROOT / "examples" / "plotkit_gallery.py"
+    path = REPO_ROOT / "examples" / "toolkit" / "plotkit_gallery.py"
     spec = importlib.util.spec_from_file_location("plotkit_gallery_example", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

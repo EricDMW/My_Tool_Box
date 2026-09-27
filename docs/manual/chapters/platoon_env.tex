@@ -420,10 +420,10 @@ informative there. The example script reproduces such a comparison:
 
 \begin{shellcode}
 # random vs ACC vs CACC (default settings), then a GIF of CACC in stop-and-go
-python examples/platoon_demo.py
-python examples/platoon_demo.py --scenario stop_and_go --render renders/platoon.gif
+python examples/environments/platoon_demo.py
+python examples/environments/platoon_demo.py --scenario stop_and_go --render renders/platoon.gif
 # a longer headway, bidirectional communication and 12 followers
-python examples/platoon_demo.py --headway 1.2 --topology bidirectional --vehicles 12
+python examples/environments/platoon_demo.py --headway 1.2 --topology bidirectional --vehicles 12
 \end{shellcode}
 
 % ---------------------------------------------------------------------------

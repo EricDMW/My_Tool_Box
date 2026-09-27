@@ -396,14 +396,14 @@ print(info["agent_rewards"])                       # per system, with bonus
 env.close()
 \end{pycode}
 
-The example script \code{examples/kuramoto\_demo.py} ramps the coupling
+The example script \code{examples/environments/kuramoto\_demo.py} ramps the coupling
 strengths and adds phase alignment, and records the transition from incoherence
 to synchronisation:
 
 \begin{shellcode}
-python examples/kuramoto_demo.py --save renders/kuramoto.gif
-python examples/kuramoto_demo.py --backend torch --n-agents 4 --theme light
-python examples/kuramoto_demo.py --mode constant --topology two_clusters \
+python examples/environments/kuramoto_demo.py --save renders/kuramoto.gif
+python examples/environments/kuramoto_demo.py --backend torch --n-agents 4 --theme light
+python examples/environments/kuramoto_demo.py --mode constant --topology two_clusters \
     --render-mode human
 \end{shellcode}
 

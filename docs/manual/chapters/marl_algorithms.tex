@@ -1,0 +1,1820 @@
+% ---------------------------------------------------------------------------
+% Multi-agent reinforcement learning algorithms (marl_algorithms)
+% ---------------------------------------------------------------------------
+\begingroup
+% Line breaking for paragraphs with long, unbreakable identifiers (local to
+% this chapter): allow looser lines instead of overfull ones.
+\setlength{\emergencystretch}{3em}\tolerance=1000
+\chapter{Multi-Agent Reinforcement Learning Algorithms}\label{chap:marl}
+
+The package \pkg{marl\_algorithms}, new in version 1.2, contains reference
+implementations of seven classical algorithms for cooperative multi-agent
+reinforcement learning: independent and multi-agent proximal policy
+optimisation (IPPO, MAPPO), multi-agent deep deterministic policy gradient and
+its twin-critic variant (MADDPG, MATD3), and independent Q-learning, value
+decomposition networks and QMIX (IQL, VDN, QMIX). All seven are written
+against one small core and train directly on the environments of
+\pkg{env\_lib}: on the native batched vector environments where these exist,
+with the per-agent rewards that every environment reports, and with evaluation
+against the classical baseline controllers of
+Section~\ref{sec:workflow-baselines}.
+
+The code is meant to be read next to the papers. Every algorithm module cites
+the method it implements, every class docstring states the loss it minimises,
+and every simplification or deviation from the original method is stated in
+the code and in this chapter. Tuned \emph{presets} train each algorithm on one
+or more demonstration environments in at most about two minutes on a single
+CPU core.
+The package requires PyTorch (the \code{torch} extra,
+Section~\ref{sec:install-extras}); \code{import marl\_algorithms} itself loads
+nothing but the version number, and the first use of an algorithm imports
+PyTorch.
+
+% ---------------------------------------------------------------------------
+\section{Overview}\label{sec:marl-overview}
+
+Three parts of the package connect the algorithms to \pkg{env\_lib}:
+
+\begin{enumerate}
+  \item \emph{A per-agent view of the joint spaces.} The environments expose
+    the whole team through joint spaces: observations stacked as
+    \code{(n\_agents, obs\_dim)} and one joint action
+    (Section~\ref{sec:envlib-joint}). \code{MultiAgentSpec} reads the number of
+    agents, the size of one agent's observation and the kind and size of one
+    agent's action from these spaces, and converts observations to per-agent
+    arrays and per-agent actions back to the joint action
+    (Section~\ref{sec:marl-spec}).
+  \item \emph{Training on batched copies.} \code{make\_vector\_env} creates
+    \code{num\_envs} copies of an environment with \code{env\_lib.make\_vec},
+    which uses the native batched implementation when there is one
+    (Section~\ref{sec:workflow-vector}), with the \code{"same\_step"}
+    autoreset mode, so that every transition is a real one and the final
+    observation of a truncated episode is available for bootstrapping. A
+    \code{VectorRunner} turns every vector step into a \code{Transition} of
+    per-agent arrays, including the per-agent rewards of
+    \code{info["agent\_rewards"]} (Section~\ref{sec:marl-runner}).
+  \item \emph{Evaluation with the \pkg{env\_lib} tools.} The method
+    \code{policy()} of a trained algorithm returns a function from environment
+    observations to environment actions that works for single and vector
+    environments. The evaluation function \code{env\_lib.evaluate} therefore
+    compares the trained policy with random actions and with the baseline
+    controller on the same seeded episodes, and the recording function
+    \code{record\_episode} of \pkg{env\_lib.utils} turns an episode of it
+    into an animation (Section~\ref{sec:marl-quickstart}).
+\end{enumerate}
+
+Table~\ref{tab:marl-algorithms} lists the algorithms as registered in
+\pkg{marl\_algorithms.registry}; the function \code{list\_algorithms()}
+returns these records and the command \code{marl-train list} prints them.
+Section~\ref{sec:marl-references} gives the full references cited in the
+source code.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Registered algorithms. ``Family'' and ``Actions'' are the
+    \code{family} and \code{action\_kinds} fields of \code{AlgorithmInfo}.}
+  \label{tab:marl-algorithms}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{1.35cm}>{\raggedright\arraybackslash}p{2.1cm}>{\raggedright\arraybackslash}p{1.8cm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{2.2cm}@{}}
+    \toprule
+    Name & Family & Actions & Key idea & Reference \\
+    \midrule
+    \code{ippo} & on-policy & continuous, discrete &
+      PPO for every agent; decentralised critic $V(o_i)$ trained on the
+      agent's own reward & de Witt et al.\ (2020) \\
+    \code{mappo} & on-policy & continuous, discrete &
+      decentralised PPO actors; centralised critic $V(s, i)$ on the global
+      state, trained on the team reward & Yu et al.\ (2022) \\
+    \code{maddpg} & off-policy actor-critic & continuous &
+      deterministic actors $\mu_i(o_i)$; centralised critics
+      $Q_i(s, a_1, \dots, a_n)$ on the global state and the joint action &
+      Lowe et al.\ (2017) \\
+    \code{matd3} & off-policy actor-critic & continuous &
+      MADDPG with twin critics, target policy smoothing and delayed actor
+      updates & Ackermann et al.\ (2019) \\
+    \code{iql} & value-based & discrete &
+      one DQN utility $Q_i(o_i, a_i)$ per agent, each trained on its own
+      reward & Tan (1993) \\
+    \code{vdn} & value-based & discrete &
+      team value $\sum_i Q_i(o_i, a_i)$, trained end to end on the team
+      reward & Sunehag et al.\ (2018) \\
+    \code{qmix} & value-based & discrete &
+      team value as a monotonic, state-conditioned mixture of the utilities
+      (hypernetworks) & Rashid et al.\ (2018) \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Every algorithm works on every environment whose action kind it supports.
+Table~\ref{tab:marl-envs} shows the per-agent structure that
+\code{MultiAgentSpec} reads from the registered environments; every
+environment was trained briefly with an algorithm of each family that applies
+to it, and an algorithm given an environment of the wrong action kind raises
+\code{TypeError}.
+Environments whose observation is not stacked per agent, the Kuramoto
+environments, are treated as a single agent that observes and acts on the whole
+network; with one agent IPPO and MAPPO reduce to PPO, MADDPG and MATD3 to DDPG
+and TD3, and IQL to (double) DQN.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Per-agent structure of the registered environments as read by
+    \code{MultiAgentSpec} (default parameters) and the algorithms that apply.
+    $n$ is the number of agents and $d$ the size of one agent's observation.}
+  \label{tab:marl-envs}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{4.3cm}rr>{\raggedright\arraybackslash}p{3.1cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Environment & $n$ & $d$ & Action per agent & Algorithms \\
+    \midrule
+    \envid{Consensus-v0}, \envid{Formation-v0} & 8 & 16 & continuous, 2-d & IPPO, MAPPO, MADDPG, MATD3 \\
+    \envid{PowerGrid-v0} & 16 & 10 & continuous, 1-d & IPPO, MAPPO, MADDPG, MATD3 \\
+    \envid{Platoon-v0} & 8 & 13 & continuous, 1-d & IPPO, MAPPO, MADDPG, MATD3 \\
+    \envid{AJLATT-v0} & 4 & 24 & continuous, 2-d & IPPO, MAPPO, MADDPG, MATD3 \\
+    \envid{Pistonball-v0} & 20 & 7 & continuous, 1-d; 3 choices with \code{continuous=False} & all seven, by action mode \\
+    \envid{LineMsg-v0} (per-agent bits) & 10 & 3 & 2 choices & IPPO, MAPPO, IQL, VDN, QMIX \\
+    \envid{WirelessComm-v1} (\envid{-v0}) & 16 (36) & 18 & 5 choices & IPPO, MAPPO, IQL, VDN, QMIX \\
+    \envid{KuramotoOscillator-v0} (other Kuramoto ids: other sizes) & 1 & 75 & continuous, 55-d & IPPO, MAPPO, MADDPG, MATD3 \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Quick start}\label{sec:marl-quickstart}
+
+\subsection{Training and evaluating from Python}
+
+\code{marl\_algorithms.train} trains a registered algorithm on batched copies
+of an environment and returns the trained algorithm together with its
+\code{TrainingLog}. The run below is deliberately short (2\,000 environment
+steps, a few seconds); the tuned MAPPO preset for \envid{PowerGrid-v0} trains
+for 250\,000 steps (Section~\ref{sec:marl-results}).
+
+\begin{pycode}
+import env_lib
+from marl_algorithms import train
+
+# A short run; the tuned MAPPO preset for PowerGrid-v0 trains for 250_000 steps.
+algo, log = train("mappo", "PowerGrid-v0", total_steps=2_000, num_envs=8,
+                  seed=0)
+print(algo)
+print(len(log.episodes), "training episodes, mean return",
+      round(log.mean_return(), 1))
+
+envs = env_lib.make_vec("PowerGrid-v0", 16)
+for name, policy in [("random", None), ("mappo", algo.policy()),
+                     ("droop", env_lib.baseline_policy(envs))]:
+    result = env_lib.evaluate(envs, policy, n_episodes=32, seed=1)
+    print(f"{name:8s}{result.mean_return:10.2f}")
+envs.close()
+\end{pycode}
+
+\begin{textcode}
+MAPPO(16 agents, 10-d observations, continuous 1-d per agent, env_steps=2048)
+8 training episodes, mean return -381.0
+random     -613.22
+mappo       -49.52
+droop        -0.71
+\end{textcode}
+
+% norun
+\begin{pycode}
+train(algorithm, env_id, total_steps, *, num_envs=16, seed=0, env_kwargs=None,
+      device="cpu", callback=None, **config) -> (Algorithm, TrainingLog)
+\end{pycode}
+creates the copies with \code{make\_vector\_env}, builds the algorithm with the
+seed and the configuration overrides \code{**config} (field names of the
+algorithm's configuration class; an unknown name raises \code{TypeError}),
+trains it with \code{learn}, whose environment reset uses the same seed, and
+closes the copies. On-policy algorithms stop after the first
+complete rollout that reaches \code{total\_steps}, so the run above collected
+2\,048 steps (two rollouts of 64 steps on 8 copies). The training returns in
+the log are those of the exploratory policy; the evaluation uses the
+deterministic policy (the mean action), which \code{algo.policy()} returns by
+default.
+
+The presets of Section~\ref{sec:marl-results} are looked up and trained with the
+functions of \pkg{marl\_algorithms.presets}, which the top-level package also
+exports:
+
+\begin{pycode}
+from marl_algorithms import get_preset, list_presets, train_preset
+
+print(len(list_presets()), list_presets()[:2])
+print(get_preset("qmix", "LineMsg-v0"))
+
+# The preset trains for 25_000 steps; a smoke test overrides the length.
+algo, log = train_preset("qmix", "LineMsg-v0", total_steps=2_000,
+                         warmup_steps=500)
+print(algo.config.lr, algo.config.batch_size, algo.env_steps)
+\end{pycode}
+
+\begin{textcode}
+17 [('ippo', 'PowerGrid-v0'), ('ippo', 'Platoon-v0')]
+{'num_envs': 16, 'total_steps': 25000, 'config': {'batch_size': 128,
+'lr': 0.001, 'epsilon_decay_steps': 12500}, 'env_kwargs': {}}
+0.001 128 2000
+\end{textcode}
+
+% norun
+\begin{pycode}
+train_preset(algorithm, env_id, *, seed=0, total_steps=None, num_envs=None,
+             env_kwargs=None, device="cpu", callback=None,
+             **config) -> (Algorithm, TrainingLog)
+\end{pycode}
+calls \code{train} with the preset's values; \code{total\_steps},
+\code{num\_envs} and configuration overrides replace them, and
+\code{env\_kwargs} are merged into the preset's environment arguments. It
+raises \code{KeyError} when the pair has no preset.
+\code{get\_preset} returns a copy of the preset (or \code{None}), so it can be
+modified freely.
+
+A trained algorithm drives any environment of the same structure through
+\code{policy()}, and \code{save} and \code{Algorithm.load} store and restore
+it:
+
+\begin{pycode}
+import numpy as np
+import env_lib
+from env_lib.utils import record_episode
+from marl_algorithms import Algorithm, make_vector_env, train
+
+algo, log = train("vdn", "LineMsg-v0", total_steps=2_000, warmup_steps=500)
+
+# Record the greedy policy on a single environment with per-agent actions.
+env = env_lib.make("LineMsg-v0", action_space_type="multibinary",
+                   render_mode="rgb_array")
+frames = record_episode(env, algo.policy(), "renders/vdn_linemsg.gif",
+                        seed=1, render_every=2)
+env.close()
+
+# Save and restore: the class and the configuration are read from the file.
+path = algo.save("runs/vdn_linemsg.pt")
+restored = Algorithm.load(path)
+envs = make_vector_env("LineMsg-v0", 4)
+obs = restored.spec.agent_obs(envs.reset(seed=0)[0])     # (4, 10, 3)
+assert np.array_equal(restored.act(obs, deterministic=True),
+                      algo.act(obs, deterministic=True))
+print(type(restored).__name__, restored.env_steps, len(frames))
+envs.close()
+\end{pycode}
+
+The file written by \code{save} holds the registry name, the
+\code{MultiAgentSpec}, the configuration, the seed and the state (networks,
+optimisers, counters and normalisation statistics); \code{Algorithm.load}
+selects the class through the registry. The replay buffer of the off-policy
+methods is not saved. Checkpoints are read with \code{torch.load(...,
+weights\_only=False)} because they contain more than tensors, so load only
+files from trusted sources.
+
+\paragraph{Training in stages.} The method \code{learn} of an algorithm
+(Section~\ref{sec:marl-base}) trains until the counter \code{algo.env\_steps}, which
+persists across calls and through \code{save} and \code{load}, reaches
+\code{total\_steps}; \code{total\_steps} is therefore a cumulative target, not
+a number of additional steps. To continue a run, call \code{learn} again with
+a larger total and pass the previous log to append to it. Every call resets
+the copies with its \code{seed}, so episodes still running at the end of a
+call are not completed. The callback is
+called as \code{callback(algorithm, log)} after every update (on-policy) or
+every round of gradient steps (off-policy); returning \code{False} stops
+training. The environment copies passed to \code{learn} must use the
+\code{"same\_step"} autoreset mode, which \code{make\_vector\_env} sets:
+
+\begin{pycode}
+from marl_algorithms import MATD3, make_vector_env
+
+def stop_when_solved(algo, log):
+    """Stop once the last 20 training episodes average more than -1600."""
+    if log.mean_return(20) > -1600:     # NaN (no episode yet) compares False
+        return False
+
+envs = make_vector_env("Consensus-v0", 16)
+algo = MATD3(envs, seed=0, reward_scale=0.01, normalize_observations=True)
+log = algo.learn(envs, 3_200, seed=0)            # one episode per copy
+log = algo.learn(envs, 6_400, seed=1, log=log,   # 3_200 more steps
+                 callback=stop_when_solved)
+print(algo.env_steps, algo.num_updates, len(log.episodes))
+log.to_csv("runs/matd3_consensus.csv")
+envs.close()
+\end{pycode}
+
+\subsection{The \texorpdfstring{\code{marl-train}}{marl-train} command line}\label{sec:marl-cli}
+
+Installing the package provides the console script \code{marl-train}
+(equivalently \code{python -m marl\_algorithms}) with the sub-commands of
+Table~\ref{tab:marl-cli}. Values given with \code{-{}-set} and
+\code{-{}-env-kwarg} are parsed as Python literals (plain text otherwise) and
+override the preset's configuration and environment arguments.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Sub-commands of \code{marl-train} (defaults in brackets).}
+  \label{tab:marl-cli}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.36\textwidth}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Command & Purpose \\
+    \midrule
+    \code{list} & the registered algorithms with family, action kinds, summary
+      and reference \\
+    \code{presets} & every \code{(algorithm, environment)} pair with a preset,
+      with its steps and copies \\
+    \code{run ALGORITHM ENV\_ID} & train (with the preset when there is one),
+      print progress and a summary, optionally save the algorithm and the
+      training episodes, then evaluate random actions, the trained policy and
+      the baseline \\
+    \quad \code{-{}-steps N}, \code{-{}-num-envs N} & environment steps and
+      batched copies [preset; 100\,000 and 16 without a preset] \\
+    \quad \code{-{}-seed S} & seed of training [0]; the evaluation uses
+      \code{S + 1} \\
+    \quad \code{-{}-no-preset} & ignore the preset and use the defaults of the
+      configuration class \\
+    \quad \code{-{}-set KEY=VALUE ...} & configuration overrides \\
+    \quad \code{-{}-env-kwarg KEY=VALUE ...} & environment arguments \\
+    \quad \code{-{}-eval-episodes N} & evaluation episodes [64]; 0 skips the
+      evaluation \\
+    \quad \code{-{}-reports N} & progress lines during training [10] \\
+    \quad \code{-{}-save PATH}, \code{-{}-csv PATH} & save the algorithm
+      (\code{Algorithm.save}) and the training episodes
+      (\code{TrainingLog.to\_csv}) \\
+    \quad \code{-{}-threads N} & PyTorch threads [1]; 0 keeps the PyTorch
+      default \\
+    \code{compare ENV\_ID} & train baseline algorithms over one or more
+      seeds and compare them with random actions and the classical controller
+      on the same episodes (Section~\ref{sec:marl-baselines}) \\
+    \quad \code{-{}-algos ALGO ...} & algorithms [every one with a preset for
+      the environment] \\
+    \quad \code{-{}-seeds S ...} & training seeds [0] \\
+    \quad \code{-{}-steps N}, \code{-{}-num-envs N} & budget and copies per run
+      [preset] \\
+    \quad \code{-{}-episodes N}, \code{-{}-eval-seed S} & evaluation episodes
+      [64] and seed [1] \\
+    \quad \code{-{}-set}, \code{-{}-env-kwarg} & as for \code{run} \\
+    \quad \code{-{}-markdown}, \code{-{}-csv PATH} & print a Markdown table,
+      save the report as CSV \\
+    \quad \code{-{}-save-dir DIR} & save every trained algorithm as
+      \code{DIR/NAME\_seedS.pt} \\
+    \quad \code{-{}-threads N} & PyTorch threads [1] \\
+    \code{evaluate CHECKPOINT ENV\_ID} & evaluate a saved algorithm against
+      random actions and the baseline \\
+    \quad \code{-{}-episodes N}, \code{-{}-seed S} & evaluation episodes [64]
+      and seed [1] \\
+    \quad \code{-{}-env-kwarg KEY=VALUE ...} & environment arguments (as used
+      in training) \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{shellcode}
+marl-train list                       # algorithms and references
+marl-train presets                    # tuned (algorithm, environment) pairs
+marl-train run mappo PowerGrid-v0     # train with the preset, then evaluate
+marl-train run qmix LineMsg-v0 --steps 50000 --set lr=1e-3
+marl-train run maddpg Consensus-v0 --save runs/maddpg.pt --csv runs/maddpg.csv
+marl-train evaluate runs/maddpg.pt Consensus-v0 --episodes 64
+marl-train run ippo Formation-v0 --no-preset --steps 200000 --num-envs 32 \
+    --set lr=1e-3 normalize_observations=False --env-kwarg formation_shape=wedge
+\end{shellcode}
+
+The evaluation of \code{run} and \code{evaluate} uses
+\code{make\_vector\_env(env\_id, min(episodes, 64))}, so up to 64 episodes run in
+parallel. Output of \code{marl-train run qmix LineMsg-v0} (the complete preset;
+wall-clock times depend on the machine):
+
+\begin{textcode}
+Training qmix on LineMsg-v0 (preset): 25,000 env steps, 16 copies, seed 0
+       2,512 steps  mean return (last 20)        43.02     2.7 s
+       5,008 steps  mean return (last 20)        54.33     4.7 s
+       ...
+      22,512 steps  mean return (last 20)        92.35    17.3 s
+      25,008 steps  mean return (last 20)        91.96    19.1 s
+qmix on LineMsg-v0: 496 episodes, 25008 env steps, mean return (last 100) 92.18, 17.0 s
+
+Evaluation on LineMsg-v0, 64 episodes (seed 1):
+  policy       mean return   95% CI +-   length
+  random              43.2        1.17     50.0
+  qmix                  95           0     50.0
+  baseline              95           0     50.0
+\end{textcode}
+
+The progress lines report the mean return of the last 20 exploratory training
+episodes; the summary line is \code{TrainingLog.summary()}, with the
+environment steps taken and the time from the start of training to its last
+record. The evaluation columns
+are the mean team return of the deterministic policy, the half-width of its
+95\,\% confidence interval and the mean episode length
+(Table~\ref{tab:workflow-result}).
+
+% ---------------------------------------------------------------------------
+\section{Using the algorithms as baselines}\label{sec:marl-baselines}
+
+A new method for one of the environments is judged against established ones.
+Three kinds of reference are available for every environment: uniformly
+random actions (the floor), the environment's classical controller
+(\code{env\_lib.baseline\_policy}, the standard of its field) and the seven
+learning algorithms, with tuned presets for the environments of
+Table~\ref{tab:marl-presets}. The function \code{marl\_algorithms.compare}
+trains the learning baselines, over as many seeds as you ask for, and
+evaluates everything, your methods included, on the same seeded episodes.
+
+\subsection{In one call}
+
+\begin{pycode}
+import numpy as np
+from marl_algorithms import compare
+
+def my_policy(obs):
+    """Your method: (num_envs, n_agents, obs_dim) -> (num_envs, n_agents)."""
+    return np.zeros(obs.shape[:-1], dtype=np.float32)   # replace me
+
+report = compare("PowerGrid-v0", ["mappo", "ippo"], seeds=(0, 1),
+                 policies={"my method": my_policy},
+                 total_steps=4_096, num_envs=16)       # small budget: seconds
+print(report)
+report.to_csv("runs/power_grid_comparison.csv")
+\end{pycode}
+
+Without \code{total\_steps} and \code{num\_envs} every algorithm trains with
+its preset. The script \code{examples/algorithms/baseline\_comparison.py} runs
+exactly this comparison with a proposed method, a distributed droop controller
+that also reacts to the neighbours' mean frequency deviation, and the full
+presets (about six minutes on one core):
+
+\begin{textcode}
+PowerGrid-v0: mean return over 64 evaluation episodes (seed 1); higher is better
+
+method     kind       mean return    std  seeds  env steps  train [s]
+---------  ---------  -----------  -----  -----  ---------  ---------
+random     reference       -629.3      -      -          -          -
+baseline   reference       -0.786      -      -          -          -
+mappo      algorithm        -1.02  0.182      2    251,904      101.9
+ippo       algorithm        -2.25  0.172      2    200,704       65.2
+my method  policy          -0.675      -      -          -          -
+\end{textcode}
+
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.72\textwidth]{baseline_comparison.png}
+  \caption{Output figure of \code{baseline\_comparison.py}: mean return on
+    \envid{PowerGrid-v0} over 64 evaluation episodes; the error bars are the
+    standard deviation over two training seeds. Random actions ($-629.3$) are
+    off the scale.}
+  \label{fig:marl-baselines}
+\end{figure}
+
+Figure~\ref{fig:marl-baselines} draws the same numbers. The rows are the
+references first, then the algorithms with the mean and the
+standard deviation over the training seeds, the environment steps and the
+wall-clock training time of one run, then your policies. \code{compare} works
+in five steps:
+
+\begin{enumerate}
+  \item it checks every argument: the algorithm names, their support for the
+    environment's actions, the configuration overrides (applied to each
+    algorithm's preset), the environment arguments, the seeds and the budget,
+    so that a mistake shows in seconds instead of after a training run;
+  \item it creates the evaluation environment,
+    \code{make\_vector\_env(env\_id, min(n\_episodes, 64), **env\_kwargs)};
+  \item it evaluates random actions, the classical controller (when the
+    environment has one) and your policies, first, so that an error in a
+    policy shows before any training;
+  \item it trains every algorithm once per seed, with its preset
+    (\code{train\_preset}) or, without a preset, with its default
+    configuration and \code{total\_steps}, and evaluates the deterministic
+    policy;
+  \item it returns a \code{Comparison}, which also keeps every trained
+    algorithm and training log (the replay buffers of off-policy algorithms
+    are released unless \code{keep\_replay=True}).
+\end{enumerate}
+
+Every evaluation resets the copies with the same seed and counts only the
+first episode of every copy, so all rows meet identical initial conditions and
+disturbances. More than 64 episodes run in chunks of 64, reset with
+\code{eval\_seed}, \code{eval\_seed + 64}, and so on; automatic resets after
+episodes of policy-dependent length could otherwise give different policies
+different episodes. With the default training seed 0 and evaluation seed 1
+the numbers reproduce the published results of
+Table~\ref{tab:marl-results-table}.
+
+\subsection{From the command line}
+
+\begin{shellcode}
+marl-train compare PowerGrid-v0                   # every preset algorithm, seed 0
+marl-train compare PowerGrid-v0 --algos mappo ippo --seeds 0 1 2 --csv runs/pg.csv
+marl-train compare LineMsg-v0 --markdown          # a table for a paper
+marl-train compare Consensus-v0 --save-dir runs/baselines   # keep the models
+marl-train compare Formation-v0 --algos mappo --steps 200000  # no preset
+\end{shellcode}
+
+\code{marl-train compare} checks the environment, the algorithm names, their
+action kinds and the \code{-{}-set} fields before training
+(Table~\ref{tab:marl-cli}).
+
+\subsection{Recipes}
+
+\begin{description}[leftmargin=0.6cm,style=nextline]
+  \item[Choose the baselines and the budget]
+    \code{algorithms=["mappo", "maddpg"]} selects methods (by default every
+    algorithm with a preset for the environment, \code{marl-train presets});
+    \code{seeds=(0, 1, 2, 3, 4)} adds seeds; \code{total\_steps} and
+    \code{num\_envs} replace the presets' budget, for example for a quick
+    check before a long run.
+  \item[Another configuration of the environment]
+    \code{env\_kwargs=\{"n\_buses": 32\}} trains and evaluates every method on
+    the variant. The presets' hyperparameters are kept; a larger variant may
+    need a larger \code{total\_steps}.
+  \item[An algorithm without a preset]
+    Pass \code{total\_steps} to train it with its default configuration, or
+    tune it yourself with \code{train(...)} and pass the trained algorithm in
+    \code{policies}.
+  \item[A policy written for a single environment]
+    \code{compare} evaluates batched observations. Wrap a policy that maps one
+    observation \code{(n\_agents, obs\_dim)} to one action with
+    \code{per\_copy(policy)}; batched policies are faster.
+  \item[A method built on this package]
+    A modified algorithm (a new loss, another critic) is an \code{Algorithm}:
+    train it and pass the object in \code{policies}; its deterministic policy
+    is evaluated like the baselines. For several seeds of your method, train
+    one per seed and pass them under separate names, or register it
+    (Section~\ref{sec:marl-extending}) and list it in \code{algorithms}.
+  \item[Reuse the trained baselines]
+    \code{report.algorithms[("mappo", 0)]} is the trained MAPPO of seed 0:
+    save it, record an episode with \code{record\_episode(env,
+    algo.policy(), path)} or evaluate it on other scenarios;
+    \code{report.logs} holds the training logs for learning curves
+    (Section~\ref{sec:plotkit-curves}).
+  \item[Tables and further analysis]
+    \code{report.to\_markdown()}, \code{report.to\_csv(path)} and
+    \code{report.records()} (one dictionary per row, for example for
+    \code{pandas.DataFrame}); \code{report["mappo"].returns} gives the
+    per-seed returns and \code{report.ranking()} orders the algorithms and
+    your policies by mean return.
+\end{description}
+
+% ---------------------------------------------------------------------------
+\section{Design of the core}\label{sec:marl-core}
+
+The package separates what all methods share, what distinguishes each
+method, and the settings tuned for the environments. Every algorithm has its
+own module, next to the \code{common} module of its family, and the algorithm
+modules contain only what is specific to them:
+
+\begin{textcode}
+src/marl_algorithms/
+  __init__.py           lazy exports (train, compare, algorithms, ...)
+  __main__.py           the marl-train command line
+  registry.py           AlgorithmInfo, get_algorithm, make_algorithm, train
+  baselines.py          compare, Comparison, per_copy: baselines
+  core/                 shared by all methods
+    spec.py             MultiAgentSpec: per-agent view of the joint spaces
+    runner.py           make_vector_env, VectorRunner, Transition
+    buffers.py          RolloutBuffer, compute_gae, ReplayBuffer
+    normalization.py    RunningMeanStd, ObservationNormalizer, RewardScaler
+    networks.py         mlp, policies, QMixer, PerAgent, agent_one_hot,
+                        soft_update
+    config.py           AlgorithmConfig, OnPolicyConfig, OffPolicyConfig
+    base.py             Algorithm, OnPolicyAlgorithm, OffPolicyAlgorithm,
+                        TrainingLog
+  algorithms/           one module per algorithm, grouped by family
+    ppo/                on-policy
+      common.py         PPOConfig and the shared PPO implementation
+      ippo.py           IPPO (decentralised critics)
+      mappo.py          MAPPO (centralised critic)
+    ddpg/               off-policy actor-critic
+      common.py         DDPGConfig and the shared implementation
+      maddpg.py         MADDPG
+      matd3.py          MATD3 (twin critics, smoothing, delayed actors)
+    q_learning/         value-based
+      common.py         QLearningConfig and the shared implementation
+      iql.py            IQL (no mixing)
+      vdn.py            VDN and VDNMixer (additive mixing)
+      qmix.py           QMIX (monotonic mixing with QMixer)
+  presets/              tuned settings for the env_lib environments
+    __init__.py         PRESETS, get_preset, list_presets, train_preset
+    ppo.py, ddpg.py, q_learning.py
+                        the tables of each family, with tuning notes
+\end{textcode}
+
+The docstring of every family package (for example
+\code{help(marl\_algorithms.algorithms.ppo)}) describes the methods, the
+implementation choices and the references; the docstring of every class gives
+its losses.
+
+\subsection{The per-agent view: \texorpdfstring{\code{MultiAgentSpec}}{MultiAgentSpec}}\label{sec:marl-spec}
+
+\code{MultiAgentSpec.from\_env(env)} reads the agent structure of a single or
+vector environment (from \code{single\_observation\_space} and
+\code{single\_action\_space} when present) and
+\code{MultiAgentSpec.from\_spaces(observation\_space, action\_space)} from the
+spaces. The spec is a frozen dataclass with the fields \code{n\_agents},
+\code{obs\_dim}, \code{action\_kind} (\code{"continuous"} or
+\code{"discrete"}), \code{action\_dim} (1 for discrete actions),
+\code{n\_actions} (discrete only), \code{action\_low} and \code{action\_high}
+(continuous only, shape \code{(n\_agents, action\_dim)}), \code{obs\_shape},
+\code{action\_shape} and \code{action\_dtype}. The observation space must be a
+\code{Box}; the action spaces are read as follows.
+
+\begin{itemize}
+  \item \code{Box} of shape \code{(n, d)} with observations \code{(n, obs\_dim)}:
+    $n$ agents with $d$-dimensional continuous actions; shape \code{(n,)}: $n$
+    agents with one action each. Any other \code{Box} is a single agent whose
+    action is the flattened box (the Kuramoto environments). The bounds must be
+    finite; they may differ between agents and dimensions.
+  \item \code{MultiDiscrete} and \code{MultiBinary}: one agent per entry, with
+    the same number of choices for every agent; \code{MultiDiscrete} must
+    start at 0.
+  \item \code{Discrete}: only for a single agent. A joint \code{Discrete}
+    action over several agents, such as the default \code{Discrete(2 ** n)}
+    action of LineMsg, raises \code{TypeError}; \code{make\_vector\_env}
+    therefore creates LineMsg with \code{action\_space\_type="multibinary"}.
+  \item With several agents the observation must be stacked as
+    \code{(n, obs\_dim)}; with one agent it is flattened.
+\end{itemize}
+
+\code{spec.agent\_obs(obs)} returns observations with any leading batch shape
+as \code{float32} arrays \code{(*batch, n\_agents, obs\_dim)};
+\code{spec.env\_action(actions)} converts per-agent actions,
+\code{(*batch, n\_agents, action\_dim)} floats (or \code{(*batch, n\_agents)}
+when \code{action\_dim} is 1) or \code{(*batch, n\_agents)} integers, into the
+joint action and clips continuous actions to the bounds. The property
+\code{state\_dim} $= n \cdot \code{obs\_dim}$ is the size of the global state
+$s = [o_1, \dots, o_n]$ that the centralised critics and the QMIX mixer use:
+none of the environments exposes a separate state, so the global state is the
+concatenation of all agents' observations. \code{describe()} returns a one-line
+summary such as \code{"16 agents, 10-d observations, continuous 1-d per agent"}.
+
+\subsection{Collecting experience: \texorpdfstring{\code{VectorRunner}}{VectorRunner} and \texorpdfstring{\code{Transition}}{Transition}}\label{sec:marl-runner}
+
+% norun
+\begin{pycode}
+make_vector_env(env_id, num_envs=16, **env_kwargs)
+# = env_lib.make_vec(env_id, num_envs, autoreset_mode="same_step", **env_kwargs)
+\end{pycode}
+creates the training copies; for LineMsg it sets
+\code{action\_space\_type="multibinary"} unless the argument is given. Environments without a native vector implementation (LineMsg,
+WirelessComm, Pistonball, AJLATT and the PyTorch Kuramoto ids) are simulated
+with Gymnasium's \code{SyncVectorEnv}.
+
+\code{VectorRunner(envs, spec=None)} steps such a vector environment in
+per-agent form; it raises \code{ValueError} for any autoreset mode other than
+\code{"same\_step"}. \code{reset(seed=None)} resets all copies and returns
+observations \code{(B, n, obs\_dim)}; \code{step(actions)} applies per-agent
+actions to all copies and returns a \code{Transition}
+(Table~\ref{tab:marl-transition}), after which \code{runner.obs} holds the
+observations to act on next; \code{pop\_episodes()} returns and clears the
+\code{(return, length)} pairs of the episodes finished so far.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Fields of \code{Transition} ($B$ copies, $n$ agents).}
+  \label{tab:marl-transition}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.3cm}>{\raggedright\arraybackslash}p{3.4cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Field & Shape & Content \\
+    \midrule
+    \code{obs} & \code{(B, n, obs\_dim)} & observations the actions were taken in \\
+    \code{actions} & \code{(B, n, action\_dim)} or \code{(B, n)} & per-agent actions as passed to \code{step} (unclipped) \\
+    \code{reward} & \code{(B,)} & team rewards \\
+    \code{agent\_rewards} & \code{(B, n)} & per-agent rewards from \code{info["agent\_rewards"]}; the team reward for every agent when the environment reports none \\
+    \code{next\_obs} & \code{(B, n, obs\_dim)} & successor observations; the \emph{final} observation for copies whose episode ended \\
+    \code{terminated}, \code{truncated} & \code{(B,)} & episode-end flags; the property \code{done} is their disjunction \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+With same-step autoreset a finished copy is reset within the step, so the
+observation returned by the environment already belongs to the next episode.
+The runner therefore takes the final observation from
+\code{infos["final\_obs"]} and the final per-agent rewards from
+\code{infos["final\_info"]["agent\_rewards"]}. Every transition is a real one
+(there is no reset step to skip, as with next-step autoreset), and the value
+of the final observation is available to bootstrap episodes that were
+truncated by the time limit. Only \code{terminated} stops the bootstrap in the
+algorithms; \code{truncated} only cuts the advantage recursion.
+
+\subsection{Buffers and generalised advantage estimation}\label{sec:marl-buffers}
+
+\paragraph{Rollouts.} \code{RolloutBuffer(length, num\_envs, fields)} stores
+named arrays of shape \code{(T, B, ...)}, with \code{fields} a dictionary
+\code{\{name: (trailing\_shape, dtype)\}}. \code{add(**values)} stores one
+vector step (every field must be given), \code{buffer[name]} returns the
+stored steps, \code{full} tells whether $T$ steps are stored and
+\code{reset()} starts a new rollout in the same arrays.
+
+\paragraph{GAE.} The function
+
+% norun
+\begin{pycode}
+compute_gae(rewards, values, next_values, terminated, truncated, gamma,
+            gae_lambda) -> (advantages, returns)
+\end{pycode}
+works on arrays of shape \code{(T, B, ...)}; trailing dimensions such as
+agents are broadcast against the \code{(T, B)} flags. With $V_t = V(o_t)$,
+$V'_t$ the value of the successor observation $o'_t$ (the final observation
+when the episode ended), $\tau_t$ the \code{terminated} flag of step $t$ and
+$\mathrm{done}_t$ the flag that is set when the episode terminated or was
+truncated at step $t$,
+\begin{align}
+  \delta_t &= r_t + \gamma\,(1 - \tau_t)\, V'_t - V_t, \label{eq:marl-td}\\
+  A_t &= \delta_t + \gamma \lambda\, (1 - \mathrm{done}_t)\, A_{t+1},
+  \qquad A_T = 0, \label{eq:marl-gae}\\
+  R_t &= A_t + V_t. \nonumber
+\end{align}
+The recursion runs backwards from the last step of the rollout, where the
+bootstrap enters through $V'_{T-1}$ in $\delta_{T-1}$. A terminated episode
+does not bootstrap, a truncated one bootstraps from the value of its final
+observation, and neither passes advantages across the episode boundary. A test
+compares the function with this recursion written out step by step.
+
+\paragraph{Replay.} \code{ReplayBuffer(capacity, spec)} is a circular buffer of
+joint transitions. Its method \code{add(transition)} stores every copy of a
+vector transition, one entry per copy and step, so the capacity counts
+transitions rather than vector steps. The method \code{sample(batch\_size,
+rng)} draws transitions uniformly with replacement using the algorithm's
+generator and returns a dictionary of NumPy arrays:
+
+\begin{textcode}
+obs, next_obs      (N, n, obs_dim)       float32
+actions            (N, n, action_dim)    float32   (continuous actions)
+                   (N, n)                int64     (discrete actions)
+reward             (N,)                  float32
+agent_rewards      (N, n)                float32
+terminated         (N,)                  float32
+\end{textcode}
+
+Truncation is not stored, because the stored successor of a truncated
+transition is its final observation and the target bootstraps from it.
+
+\subsection{Normalisation}\label{sec:marl-normalisation}
+
+\code{RunningMeanStd(shape=())} keeps a running mean $\mu$, variance
+$\sigma^2$ and count $N$ (initially $10^{-4}$) and includes a batch with mean
+$\mu_b$, variance $\sigma_b^2$ and size $N_b$ with the parallel update rule
+\begin{equation}
+  \Delta = \mu_b - \mu, \quad
+  \mu \leftarrow \mu + \Delta \frac{N_b}{N + N_b}, \quad
+  \sigma^2 \leftarrow \frac{N \sigma^2 + N_b \sigma_b^2
+      + \Delta^2 N N_b / (N + N_b)}{N + N_b}, \quad
+  N \leftarrow N + N_b .
+\end{equation}
+
+\code{ObservationNormalizer(obs\_dim, clip=10.0, enabled=True)} standardises
+observations feature by feature, $\hat o = \operatorname{clip}((o - \mu) /
+\sigma, -10, 10)$, with statistics \emph{shared by all agents}: every agent's
+observation of every copy is a sample of the same per-feature statistics, as
+befits homogeneous agents with shared parameters. \code{update(obs)} adds
+observations of any leading shape; with \code{enabled=False} the normaliser
+returns its input unchanged.
+
+\code{RewardScaler(num\_envs, gamma, enabled=True)} divides rewards by the
+running standard deviation of the discounted return. Every copy $b$ keeps a
+return $G_b \leftarrow \gamma G_b + \bar r_b$, where $\bar r_b$ is the reward of
+copy $b$ averaged over its trailing dimensions (the agents), the statistics
+include the new $G_b$, the returns of finished copies are reset to zero, and
+the rewards are returned as $r / \sigma_G$. Rewards are scaled, not centred, so
+the optimal policy is unchanged, while value targets become of order one
+whether an environment's rewards are of order $10^{-3}$ per step (PowerGrid)
+or $10^{2}$ (Consensus).
+
+\subsection{Networks}\label{sec:marl-networks}
+
+The building blocks of \pkg{marl\_algorithms.core.networks} take per-agent
+inputs with arbitrary leading dimensions \code{(..., features)}:
+
+% norun
+\begin{pycode}
+mlp(in_dim, out_dim, hidden_sizes=(64, 64), activation="tanh", *,
+    output_gain=1.0, layer_norm=False)
+PerAgent(factory, n_agents, shared=True)
+GaussianPolicy(in_dim, action_dim, low, high, hidden_sizes, activation,
+               log_std_init=-0.5)
+CategoricalPolicy(in_dim, n_actions, hidden_sizes, activation)
+DeterministicPolicy(in_dim, action_dim, low, high, hidden_sizes,
+                    activation="relu")
+QMixer(n_agents, state_dim, embed_dim=32, hypernet_hidden=64)
+agent_one_hot(batch_shape, n_agents, device)
+soft_update(target, source, tau)
+\end{pycode}
+
+\begin{itemize}
+  \item \code{mlp} builds a multi-layer perceptron with orthogonal
+    initialisation (gain $\sqrt{2}$ for ReLU-type activations, $5/3$ for
+    tanh) and zero biases; the activation is \code{"tanh"}, \code{"relu"},
+    \code{"elu"} or \code{"gelu"}. The policy heads use
+    \code{output\_gain=0.01}, which makes the initial policies nearly uniform
+    (categorical) or centred in the action range (Gaussian, deterministic).
+  \item \code{PerAgent} with \code{shared=True} applies one network, built by
+    \code{factory()}, to all agents in one call; with \code{shared=False}
+    every agent has its own network and agent $i$'s slice of the input goes
+    through network $i$. \code{call(method, x, *args)} dispatches any method
+    of the underlying networks in the same way (tensor arguments are sliced
+    per agent, others, such as a \code{torch.Generator}, are passed
+    unchanged).
+  \item Agent identifiers: when parameters are shared and
+    \code{agent\_ids=True} (both defaults) and there is more than one agent,
+    the one-hot identifier $e_i \in \{0, 1\}^n$ of agent $i$ is appended to
+    its input, $x_i = [\hat o_i, e_i]$, so that agents sharing one network can
+    still behave differently. \code{Algorithm.agent\_inputs(obs)} builds these
+    inputs for all agents at once with \code{agent\_one\_hot}.
+  \item \code{GaussianPolicy} is a diagonal Gaussian with a state-independent
+    standard deviation, expressed in units of the action range: with the
+    centre $c = (\text{high} + \text{low})/2$ and the half-range
+    $h = (\text{high} - \text{low})/2$,
+    $\pi_\theta(\cdot \mid x) = \mathcal{N}\bigl(c + h \odot f_\theta(x),\;
+    \operatorname{diag}(h \odot e^{\ell})^2\bigr)$ with the learned vector
+    $\ell$ initialised to \code{log\_std\_init}. Samples are unbounded; the
+    log-density $\sum_k \log \mathcal{N}(a_k)$ is that of the unclipped sample,
+    and the entropy is $\sum_k \bigl(\tfrac12 + \tfrac12 \log 2\pi + \log
+    \sigma_k\bigr)$. A shared policy keeps the bounds of all agents, so agents
+    with different action ranges can share it.
+  \item \code{CategoricalPolicy} returns the logits of a categorical
+    distribution; like \code{GaussianPolicy} it provides
+    \code{sample(x, generator)} (actions and log-probabilities) and
+    \code{log\_prob(x, action)} (log-probabilities and entropy).
+  \item \code{DeterministicPolicy} computes $\mu_\theta(x) = c + h \odot
+    \tanh f_\theta(x)$, always within the bounds.
+  \item \code{QMixer} is the monotonic mixing network of QMIX
+    (Section~\ref{sec:marl-value}), and \code{soft\_update} performs Polyak
+    averaging, $\theta' \leftarrow (1 - \tau)\theta' + \tau\theta$.
+\end{itemize}
+
+\subsection{Base classes and training loops}\label{sec:marl-base}
+
+Every algorithm derives from \code{Algorithm}:
+
+% norun
+\begin{pycode}
+Algorithm(spec, config=None, *, device="cpu", seed=None, **overrides)
+\end{pycode}
+
+\code{spec} is a \code{MultiAgentSpec} or an environment (single or vector) to
+read it from; \code{config} an instance of the class attribute
+\code{config\_class} (defaults to \code{config\_class()}); \code{overrides}
+replace configuration fields with \code{dataclasses.replace}. An environment
+whose action kind is not in the class attribute \code{action\_kinds}, a
+configuration of the wrong class and an unknown field raise \code{TypeError};
+invalid values raise \code{ValueError} when the configuration is created.
+Table~\ref{tab:marl-config-common} lists the fields shared by all algorithms.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Configuration fields shared by the algorithms
+    (\pkg{marl\_algorithms.core.config}). \code{PPOConfig} derives from
+    \code{OnPolicyConfig}, \code{DDPGConfig} and \code{QLearningConfig} from
+    \code{OffPolicyConfig}; both derive from \code{AlgorithmConfig}.}
+  \label{tab:marl-config-common}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{4.3cm}>{\raggedright\arraybackslash}p{1.8cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Field & Default & Meaning \\
+    \midrule
+    \multicolumn{3}{@{}l}{\emph{\code{AlgorithmConfig} (all algorithms)}} \\
+    \code{hidden\_sizes} & \code{(64, 64)} & widths of the hidden layers of every network \\
+    \code{activation} & \code{"tanh"} & hidden activation (\code{"tanh"}, \code{"relu"}, \code{"elu"}, \code{"gelu"}) \\
+    \code{gamma} & 0.99 & discount factor $\gamma$ \\
+    \code{share\_parameters} & \code{True} & one set of network weights for all agents \\
+    \code{agent\_ids} & \code{True} & append one-hot agent identifiers to per-agent inputs when parameters are shared \\
+    \code{max\_grad\_norm} & 10.0 & gradient-norm clipping threshold \\
+    \midrule
+    \multicolumn{3}{@{}l}{\emph{\code{OnPolicyConfig} (IPPO, MAPPO)}} \\
+    \code{max\_grad\_norm} & 0.5 & overrides the default above \\
+    \code{rollout\_length} & 64 & vector steps $T$ per rollout ($T \cdot B$ transitions per update) \\
+    \code{lr} & $3 \cdot 10^{-4}$ & Adam learning rate (of the actor for PPO) \\
+    \code{gae\_lambda} & 0.95 & GAE parameter $\lambda$ \\
+    \code{normalize\_observations} & \code{True} & standardise observations with running statistics \\
+    \code{normalize\_rewards} & \code{True} & scale rewards by the running standard deviation of the return \\
+    \midrule
+    \multicolumn{3}{@{}l}{\emph{\code{OffPolicyConfig} (MADDPG, MATD3, IQL, VDN, QMIX)}} \\
+    \code{activation} & \code{"relu"} & overrides the default above \\
+    \code{buffer\_size} & 200\,000 & replay capacity in transitions (one per copy and step) \\
+    \code{batch\_size} & 256 & transitions per gradient step \\
+    \code{warmup\_steps} & 2\,000 & environment steps (summed over copies) with uniformly random actions before learning starts \\
+    \code{update\_every} & 1 & vector steps between rounds of gradient steps \\
+    \code{gradient\_steps} & 1 & gradient steps per round \\
+    \code{tau} & 0.01 & Polyak coefficient $\tau$ of the target networks \\
+    \code{reward\_scale} & 1.0 & constant factor $\kappa$ applied to rewards before learning \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\paragraph{Seeding without global side effects.} The seed initialises a
+\code{numpy.random.SeedSequence}, from which the algorithm derives its own
+NumPy generator \code{self.np\_rng} (random warm-up actions, replay sampling,
+$\epsilon$-greedy draws) and a seed for its own \code{torch.Generator}
+\code{self.torch\_rng} (policy samples, exploration and target-smoothing noise,
+minibatch permutations). The networks are built inside
+\code{torch.random.fork\_rng}, seeded from the same sequence, so network
+initialisation is reproducible while PyTorch's global random state is restored
+afterwards. Apart from this temporary, forked seeding, no code of the package
+seeds or draws from the global NumPy or PyTorch generators, and none changes
+the number of PyTorch threads; the scripts and \code{marl-train} set the
+thread count themselves. With the same seed and the same machine, training is identical
+(the tests check this for every algorithm); \code{seed=None} draws fresh
+entropy.
+
+\paragraph{The on-policy loop.} \code{OnPolicyAlgorithm.learn} resets the
+copies with the given seed and then repeats until \code{env\_steps} reaches
+\code{total\_steps}:
+\begin{enumerate}
+  \item for \code{rollout\_length} vector steps, call
+    \code{\_rollout\_step(obs)} for exploratory actions and extra fields (for
+    PPO the normalised observations and the log-probabilities), step the
+    runner, pass the transition to \code{\_observe\_transition} and store it
+    with the extra fields in a \code{RolloutBuffer};
+  \item call \code{\_update(buffer)} and record its statistics and the
+    finished episodes in the log, then call the callback.
+\end{enumerate}
+The buffer always holds the fields \code{obs}, \code{actions}, \code{reward},
+\code{agent\_rewards}, \code{next\_obs}, \code{terminated} and
+\code{truncated}, plus the fields declared by \code{\_rollout\_fields()}.
+
+\paragraph{The off-policy loop.} \code{OffPolicyAlgorithm.learn} resets the
+copies and then, at every vector step, takes uniformly random actions within
+the bounds while \code{env\_steps < warmup\_steps} and \code{\_explore(obs)}
+afterwards, steps the runner and adds the transition to the replay buffer
+(created on the first call), and records the episodes finished in this step
+in the log. Once the warm-up is over and the buffer holds at least
+\code{batch\_size} transitions, every \code{update\_every} vector steps it
+performs \code{gradient\_steps} calls of \code{\_update(batch)} on batches
+sampled from the replay buffer, records the statistics of the last one and
+calls the callback. With $B$ copies the loop therefore performs
+\code{gradient\_steps} / (\code{update\_every} $\cdot B$) gradient steps per
+environment step; the presets use one gradient step per vector step of 16
+copies.
+
+\paragraph{Public methods.} Every algorithm provides the following methods
+and the counters \code{env\_steps} and \code{num\_updates}:
+
+% norun
+\begin{pycode}
+algo.learn(envs, total_steps, *, seed=None, log=None,
+           callback=None) -> TrainingLog
+algo.act(obs, deterministic=False)   # (*batch, n, obs_dim) -> agent actions
+algo.policy(deterministic=True)      # env observation -> env action
+algo.evaluate(env, n_episodes=10, *, seed=None, deterministic=True)
+algo.state_dict(); algo.load_state_dict(state)
+algo.save(path) -> Path
+Algorithm.load(path, device="cpu") -> Algorithm      # class method
+\end{pycode}
+The method \code{evaluate} runs \code{env\_lib.evaluate} with the policy
+returned by \code{policy} and returns its \code{EvaluationResult}.
+
+\paragraph{The training log.} \code{TrainingLog} records every finished
+training episode as \code{(env\_steps, team\_return, length)} in
+\code{episodes} and the statistics of every update as
+\code{(env\_steps, statistics)} in \code{updates}; the returns are those of
+the environment's team reward, before any reward scaling.
+\code{episode\_steps} and \code{episode\_returns} return them as arrays,
+\code{mean\_return(last=100)} averages the last episodes (NaN before the
+first), \code{curve(points=50)} bins the returns into equal intervals of
+environment steps for a learning curve, \code{summary()} gives a one-line
+summary, \code{to\_csv(path)} writes the episodes as CSV
+(\code{env\_steps, return, length}), and \code{wall\_time} is the time from the
+creation of the log to its last record. Section~\ref{sec:plotkit-curves} shows how to plot learning
+curves of several seeds with confidence bands.
+
+% ---------------------------------------------------------------------------
+\section{PPO: IPPO and MAPPO}\label{sec:marl-ppo}
+
+IPPO and MAPPO train decentralised stochastic actors $\pi_\theta(a_i \mid x_i)$
+with the clipped surrogate objective of PPO (Schulman et al., 2017) and
+generalised advantage estimation (Schulman et al., 2016), and differ only in
+the critic:
+
+\begin{itemize}
+  \item \textbf{IPPO} gives every agent a decentralised critic
+    $V_\phi(x_i)$ on its own input $x_i = [\hat o_i, e_i]$, trained on the
+    agent's own reward $r^i_t$ (\code{reward\_source="agent"}, the default of
+    IPPO). Every agent is an independent PPO learner that treats the others as
+    part of the environment.
+  \item \textbf{MAPPO} gives every agent a centralised critic
+    $V_\phi(s, i)$ on the global state $s = [\hat o_1, \dots, \hat o_n]$, the
+    concatenation of all normalised observations, trained on the team reward
+    $r_t$ (\code{reward\_source="team"}, the default of MAPPO). With shared
+    parameters one network takes $[s, e_i]$, which amounts to one value head
+    per agent over the shared state; without sharing agent $i$ has its own
+    network on $s$. The critic is used only in training, so execution stays
+    decentralised.
+\end{itemize}
+
+\code{reward\_source} selects the reward of the critics for both methods:
+\code{"team"} gives every critic the team reward, \code{"agent"} gives critic
+$i$ agent $i$'s own reward. The presets of MAPPO on \envid{Platoon-v0} and
+\envid{Consensus-v0} use \code{"agent"} (Section~\ref{sec:marl-results}).
+
+\paragraph{Acting.} In a rollout the observation normaliser first includes the
+new observations and then normalises them; the normalised observations are
+stored, so the update evaluates the policy on exactly the input that produced
+each action. Continuous actions are sampled unbounded and stored unclipped
+(the environment adapter clips them); the stored log-probability is that of
+the unclipped sample. The deterministic policy returns the mean, clipped to
+the bounds, or the most likely discrete action.
+
+\paragraph{Advantages and value targets.} After a rollout of $T$ vector steps
+on $B$ copies the critic values $V_t^i$ of the stored inputs and $V'^i_t$ of
+the successor observations (normalised with the current statistics) give, for
+every agent and with the rewards $r^i_t$ of the chosen source scaled by the
+\code{RewardScaler}, the GAE advantages $A^i_t$ and targets $R^i_t = A^i_t +
+V^i_t$ of \eqref{eq:marl-td} and \eqref{eq:marl-gae}. With
+\code{normalize\_advantages} the advantages are standardised over the whole
+rollout (all steps, copies and agents), $\hat A = (A - \bar A)/(\operatorname{std}
+A + 10^{-8})$.
+
+\paragraph{Losses.} With the probability ratio
+$\rho^i_t = \pi_\theta(a^i_t \mid x^i_t) / \pi_{\theta_\text{old}}(a^i_t \mid
+x^i_t)$ and the means taken over the samples of a minibatch and all agents,
+the actor minimises
+\begin{equation}
+  L^{\pi}(\theta) = -\operatorname{mean}\Bigl[\min\bigl(\rho^i_t \hat A^i_t,\;
+    \operatorname{clip}(\rho^i_t, 1 - \epsilon, 1 + \epsilon)\, \hat A^i_t\bigr)\Bigr]
+    - c_H \operatorname{mean}\bigl[\mathcal{H}\bigl(\pi_\theta(\cdot \mid x^i_t)\bigr)\bigr]
+  \label{eq:marl-ppo-actor}
+\end{equation}
+with $\epsilon$ = \code{clip\_range} and $c_H$ = \code{ent\_coef}, and the
+critic minimises
+\begin{equation}
+  L^{V}(\phi) = \operatorname{mean}\Bigl[\max\Bigl(\ell\bigl(V_\phi - R\bigr),\;
+    \ell\bigl(V_\text{old} + \operatorname{clip}(V_\phi - V_\text{old},
+    -\epsilon_V, \epsilon_V) - R\bigr)\Bigr)\Bigr],
+  \label{eq:marl-ppo-critic}
+\end{equation}
+where $V_\phi$ is $V_\phi(x^i_t)$ for IPPO and $V_\phi(s_t, i)$ for MAPPO,
+$V_\text{old}$ the value before the update, $\epsilon_V$ =
+\code{value\_clip\_range} (\code{None} removes the clipped term) and
+$\ell(e) = e^2/2$, or with \code{huber\_delta} $=\eta$ the Huber loss
+$\ell(e) = e^2/2$ for $|e| \le \eta$ and $\eta(|e| - \eta/2)$ otherwise.
+
+\paragraph{Optimisation.} A sample is one copy at one step with all its agents,
+because the centralised critic needs every agent's observation; a rollout
+therefore holds $T B$ samples. Each of the \code{n\_epochs} epochs shuffles
+them with the algorithm's generator and splits them into
+\code{num\_minibatches} minibatches; on each minibatch the actor takes one Adam
+step on \eqref{eq:marl-ppo-actor} and then the critic one Adam step on
+\eqref{eq:marl-ppo-critic}, with separate optimisers ($\epsilon_\text{Adam} =
+10^{-5}$, learning rates \code{lr} and \code{critic\_lr}) and separate
+gradient-norm clipping at \code{max\_grad\_norm}. With \code{target\_kl} the
+epochs stop early once the mean approximate KL divergence of an epoch,
+$\operatorname{mean}[(\rho - 1) - \log \rho]$, exceeds $1.5$ times
+\code{target\_kl}. With \code{anneal\_lr} both learning rates decay linearly to
+zero over the steps of the current \code{learn} call. Every update records
+\code{policy\_loss}, \code{value\_loss}, \code{entropy}, \code{approx\_kl},
+\code{clip\_fraction} (the fraction of $|\rho - 1| > \epsilon$), averaged over
+the minibatches, and \code{explained\_variance}, \code{epochs},
+\code{learning\_rate}, \code{value\_mean}, \code{action\_std} (continuous
+actions) and \code{reward\_std} (with reward scaling).
+
+\paragraph{Stated simplifications.} The implementation follows the PPO recipe
+of the references (including the practices studied by Andrychowicz et al.,
+2021) with four standard simplifications, stated in the module docstring:
+feed-forward instead of recurrent networks (the \pkg{env\_lib} observations
+carry the recent history that matters, such as previous actions and rates of
+change); a state-independent Gaussian standard deviation with unbounded
+samples clipped by the environment adapter; reward scaling by the running
+standard deviation of the return instead of MAPPO's value normalisation
+(PopArt or ValueNorm), both of which keep value targets of order one; and the
+concatenation of the local observations as MAPPO's global state, not an
+environment-specific state.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Fields of \code{PPOConfig}, in addition to those of
+    \code{OnPolicyConfig} and \code{AlgorithmConfig}
+    (Table~\ref{tab:marl-config-common}).}
+  \label{tab:marl-ppo-config}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.7cm}>{\raggedright\arraybackslash}p{1.5cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Field & Default & Meaning \\
+    \midrule
+    \code{n\_epochs} & 10 & passes over each rollout \\
+    \code{num\_minibatches} & 4 & minibatches per epoch (a sample is one copy at one step with all its agents) \\
+    \code{clip\_range} & 0.2 & ratio clipping $\epsilon$ \\
+    \code{value\_clip\_range} & 0.2 & value clipping $\epsilon_V$ around the pre-update value; \code{None} disables it \\
+    \code{huber\_delta} & \code{None} & Huber threshold $\eta$ of the critic loss; \code{None} uses $e^2/2$ \\
+    \code{ent\_coef} & 0.0 & entropy weight $c_H$ \\
+    \code{normalize\_advantages} & \code{True} & standardise the advantages over the rollout \\
+    \code{critic\_lr} & \code{None} & critic learning rate; \code{None} uses \code{lr} \\
+    \code{critic\_hidden\_sizes} & \code{None} & hidden widths of the critic; \code{None} uses \code{hidden\_sizes} \\
+    \code{anneal\_lr} & \code{False} & decay both learning rates linearly to zero \\
+    \code{target\_kl} & \code{None} & stop the epochs once the mean approximate KL of an epoch exceeds $1.5\,\times$ this value \\
+    \code{log\_std\_init} & $-0.5$ & initial log standard deviation of the Gaussian policy, in units of half the action range \\
+    \code{reward\_source} & \code{None} & \code{"team"} or \code{"agent"}; \code{None} selects \code{"agent"} for IPPO and \code{"team"} for MAPPO \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{MADDPG and MATD3}\label{sec:marl-ddpg}
+
+MADDPG (Lowe et al., 2017) extends DDPG (Lillicrap et al., 2016) to several
+agents: decentralised deterministic actors $\mu_i(o_i)$ are trained with the
+deterministic policy gradient (Silver et al., 2014) of centralised critics
+$Q_i(s, a_1, \dots, a_n)$ that see the global state and the joint action.
+MATD3 (Ackermann et al., 2019) carries the three corrections of TD3
+(Fujimoto et al., 2018) over to the centralised critics. Both learn from a
+replay buffer and support continuous actions only.
+
+\paragraph{Normalised action units.} The actors output actions in $[-1, 1]$
+through a $\tanh$; the per-agent bounds of the environment map them to
+physical units, $a_i = c_i + h_i \odot \tilde a_i$, and actions from the
+replay buffer are mapped back, $\tilde a_i = (a_i - c_i) \oslash h_i$. Critics,
+exploration noise and target smoothing all work in these normalised units, so
+one set of hyperparameters suits environments with very different action
+ranges.
+
+\paragraph{Critic inputs.} With shared parameters (the default) one actor and
+one critic serve all agents, with the one-hot identifier $e_i$ appended to the
+actor input $x_i = [\hat o_i, e_i]$ and to the critic input; the shared critic
+evaluated at agent $i$'s identifier is $Q_i$. With \code{share\_parameters=False}
+every agent has its own actor and critic. By default
+(\code{critic\_local\_inputs=True}) the input of $Q_i$ also repeats agent $i$'s
+own observation and action,
+\begin{equation}
+  z_i(s, \tilde a) = \bigl[\,s,\; \tilde a_1, \dots, \tilde a_n,\; \hat o_i,\;
+    \tilde a_i,\; e_i\,\bigr], \qquad Q_i(s, \tilde a) = Q_\phi\bigl(z_i(s, \tilde a)\bigr).
+  \label{eq:marl-critic-input}
+\end{equation}
+This is a documented deviation from the original critic input
+$[s, a_1, \dots, a_n]$. The input is still a function of $(s, a)$ and $i$ only
+(the ``agent-specific global state'' of Yu et al., 2022), but a shared critic
+no longer has to learn from the identifier which of the $n$ blocks of $s$ and
+$a$ belong to agent $i$. According to the implementation notes, MADDPG does not
+learn on \envid{Consensus-v0} (8 agents) without these inputs and approaches
+the Laplacian baseline with them. \code{critic\_local\_inputs=False} restores
+the original input.
+
+\paragraph{Critic update.} On a replay batch of $N$ transitions
+$(o, a, r, o', d)$, with $d$ the \code{terminated} flag (truncated episodes
+bootstrap from their stored final observations) and $r_i$ agent $i$'s own
+reward (\code{reward\_source="agent"}, the default, as in MADDPG) or the team
+reward (\code{"team"}), the target actions and the TD targets are
+\begin{align}
+  \tilde a'_j &= \mu_{\theta'}(x'_j) &&\text{(MADDPG)}, \nonumber\\
+  \tilde a'_j &= \operatorname{clip}\bigl(\mu_{\theta'}(x'_j)
+      + \operatorname{clip}(\varepsilon_j, -c, c),\, -1, 1\bigr),
+      \quad \varepsilon_j \sim \mathcal{N}(0, \sigma^2 I) &&\text{(MATD3)},
+      \label{eq:marl-target-actions}\\
+  y_i &= \kappa\, r_i + \gamma\,(1 - d)\, \min_{k} Q'_{i,k}(s', \tilde a'), \nonumber
+\end{align}
+with the target actor $\mu_{\theta'}$, the target critics $Q'_{i,k}$ ($k = 1$
+for MADDPG, $k \in \{1, 2\}$ for MATD3), $\kappa$ = \code{reward\_scale},
+$\sigma$ = \code{target\_noise} and $c$ = \code{target\_noise\_clip}. The
+critics minimise
+\begin{equation}
+  L^{Q}(\phi) = \sum_k \frac{1}{N n} \sum_{b, i}
+      \ell\bigl(Q_{i,k}(s_b, \tilde a_b) - y_{b,i}\bigr),
+  \label{eq:marl-ddpg-critic}
+\end{equation}
+with $\ell(e) = e^2$ (\code{critic\_loss="mse"}, as in the papers) or, with
+\code{critic\_loss="huber"}, $\ell(e) = e^2$ for $|e| \le 1$ and $2|e| - 1$
+beyond, which bounds the gradient of rare, very large errors such as the trip
+penalty of \envid{PowerGrid-v0}. The gradient norm is clipped at
+\code{max\_grad\_norm}.
+
+\paragraph{Actor update.} Actor $i$ follows the deterministic policy gradient
+of its (first) critic, with its own action replaced by $\mu_\theta(x_i)$ and
+the other agents' actions taken from the replay batch:
+\begin{equation}
+  L^{\mu}(\theta) = -\frac{1}{N n} \sum_{b, i}
+      Q_{i,1}\bigl(s_b,\; (\tilde a_{b,1}, \dots, \mu_\theta(x_{b,i}), \dots,
+      \tilde a_{b,n})\bigr).
+  \label{eq:marl-ddpg-actor}
+\end{equation}
+The replacement applies to the joint action and, with local inputs, to the
+own-action slot of \eqref{eq:marl-critic-input}. All agents are updated in one
+batched pass (row $i$ of the batched critic input carries agent $i$'s
+replacement); the critic parameters are frozen during this step, so only the
+actor changes. After every actor update the target networks follow by Polyak
+averaging, $\theta' \leftarrow (1 - \tau)\theta' + \tau\theta$ and
+$\phi' \leftarrow (1 - \tau)\phi' + \tau\phi$. MADDPG updates the actor after
+every critic update; MATD3 updates the actor and the targets only every
+\code{policy\_delay} critic updates, which together with the twin critics and
+the target smoothing of \eqref{eq:marl-target-actions} are the three TD3
+corrections.
+
+\paragraph{Exploration.} During training, $\tilde a_i =
+\operatorname{clip}(\mu_\theta(x_i) + \sigma_t \xi_i, -1, 1)$ with $\xi_i \sim
+\mathcal{N}(0, I)$, drawn from the algorithm's generator. The noise scale
+$\sigma_t$ is \code{exploration\_noise} or, when
+\code{final\_exploration\_noise} is set, decays linearly with the environment
+steps $t$ (summed over copies),
+\begin{equation}
+  \sigma_t = \sigma_0 + \min(1, t / T_\sigma)\,(\sigma_1 - \sigma_0),
+\end{equation}
+where $\sigma_0$ is \code{exploration\_noise}, $\sigma_1$ is
+\code{final\_exploration\_noise} and $T_\sigma$ is the length
+\code{noise\_decay\_steps} of the decay; the property
+\code{exploration\_scale} returns the current value. The
+warm-up actions are uniform in the bounds.
+
+\paragraph{Observation normalisation.} Optional
+(\code{normalize\_observations}): the statistics are computed once, from all
+observations in the replay buffer at the first gradient step (the warm-up
+data), and frozen afterwards, so that stored transitions and learned values
+stay consistent. Every update records \code{critic\_loss}, \code{actor\_loss}
+(of the last actor update), \code{q\_mean}, \code{target\_mean} and
+\code{noise\_scale}.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Fields of \code{DDPGConfig}, in addition to those of
+    \code{OffPolicyConfig} and \code{AlgorithmConfig}
+    (Table~\ref{tab:marl-config-common}). Noise scales are in units of half the
+    action range.}
+  \label{tab:marl-ddpg-config}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{4.3cm}>{\raggedright\arraybackslash}p{1.5cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Field & Default & Meaning \\
+    \midrule
+    \code{actor\_lr}, \code{critic\_lr} & $10^{-3}$ & Adam learning rates \\
+    \code{critic\_hidden\_sizes} & \code{None} & hidden widths of the critics; \code{None} uses \code{hidden\_sizes} (which always sets the actors) \\
+    \code{exploration\_noise} & 0.1 & standard deviation $\sigma_0$ of the exploration noise \\
+    \code{final\_exploration\_noise} & \code{None} & when set, the noise decays linearly to this value $\sigma_1$ \\
+    \code{noise\_decay\_steps} & 0 & length $T_\sigma$ of the decay in environment steps \\
+    \code{reward\_source} & \code{"agent"} & \code{"agent"}: critic $i$ learns from agent $i$'s reward; \code{"team"}: from the team reward \\
+    \code{normalize\_observations} & \code{False} & standardise observations with statistics of the warm-up data, frozen at the first gradient step \\
+    \code{critic\_local\_inputs} & \code{True} & append agent $i$'s own observation and action to the input of $Q_i$ \eqref{eq:marl-critic-input} \\
+    \code{critic\_loss} & \code{"mse"} & \code{"mse"} or \code{"huber"} \\
+    \code{policy\_delay} & 2 & MATD3 only: critic updates per actor and target update \\
+    \code{target\_noise} & 0.2 & MATD3 only: standard deviation $\sigma$ of the target smoothing noise \\
+    \code{target\_noise\_clip} & 0.5 & MATD3 only: clipping bound $c$ of the smoothing noise \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{IQL, VDN and QMIX}\label{sec:marl-value}
+
+The value-based methods learn per-agent \emph{utilities}
+$Q_\theta(x_i) \in \mathbb{R}^{|\mathcal{A}|}$, one value per action of agent
+$i$, with the DQN machinery (Mnih et al., 2015): a replay buffer, target
+networks and $\epsilon$-greedy exploration. Every agent acts greedily on its
+own utility, $a_i = \arg\max_a Q_\theta(x_i)[a]$, from its own observation. The
+three methods differ only in how the utilities are trained. With shared
+parameters (default) one utility network serves all agents, with the one-hot
+identifier appended to the observation as in the QMIX paper;
+\code{share\_parameters=False} gives one network per agent. The observations
+enter the utility network unnormalised.
+
+On a replay batch $(o, a, r, o', d)$ the chosen utilities are
+$q_i = Q_\theta(x_i)[a_i]$. The greedy next actions are selected by the online
+network and evaluated by the target network $\theta^-$ (double Q-learning, van
+Hasselt et al., 2016, \code{double\_q=True}),
+\begin{equation}
+  \hat a'_i = \arg\max_a Q_\theta(x'_i)[a], \qquad
+  q'_i = Q_{\theta^-}(x'_i)[\hat a'_i],
+\end{equation}
+or both by the target network with \code{double\_q=False}. With $\kappa$ =
+\code{reward\_scale}, $d$ the \code{terminated} flag and $\ell$ the Huber loss
+(smooth L1 with threshold 1, $\ell(e) = e^2/2$ for $|e| < 1$ and $|e| - 1/2$
+otherwise; \code{loss="huber"}) or the squared error $\ell(e) = e^2$
+(\code{loss="mse"}):
+
+\begin{itemize}
+  \item \textbf{IQL} (Tan, 1993, here with DQN agents): every agent regresses
+    its utility on its own reward $r_i$ with its own target; there is no
+    mixing and no centralised information,
+    \begin{equation}
+      y_i = \kappa\, r_i + \gamma (1 - d)\, q'_i, \qquad
+      L = \frac{1}{N n} \sum_{b, i} \ell(q_{b,i} - y_{b,i}).
+    \end{equation}
+  \item \textbf{VDN} (Sunehag et al., 2018): the team value is the sum of the
+    utilities, trained end to end on the team reward $r$ with one target,
+    \begin{equation}
+      Q_\text{tot} = \sum_i q_i, \qquad
+      y = \kappa\, r + \gamma (1 - d) \sum_i q'_i, \qquad
+      L = \frac{1}{N} \sum_b \ell(Q_{\text{tot},b} - y_b).
+    \end{equation}
+  \item \textbf{QMIX} (Rashid et al., 2018): the team value is a monotonic
+    function of the utilities, computed by a mixing network whose weights are
+    generated from the global state $s$ by hypernetworks,
+    \begin{align}
+      Q_\text{tot}(q; s) &= w_2(s)^{\top} \operatorname{elu}\bigl(W_1(s)^{\top} q
+        + b_1(s)\bigr) + b_2(s), \label{eq:marl-qmix}\\
+      W_1(s) &= \bigl|h_{W_1}(s)\bigr| \in \mathbb{R}^{n \times m}, \quad
+      w_2(s) = \bigl|h_{w_2}(s)\bigr| \in \mathbb{R}^{m}, \nonumber\\
+      y &= \kappa\, r + \gamma (1 - d)\, Q^-_\text{tot}(q'; s'), \qquad
+      L = \frac{1}{N} \sum_b \ell\bigl(Q_\text{tot}(q_b; s_b) - y_b\bigr), \nonumber
+    \end{align}
+    with $m$ = \code{mixer\_embed\_dim}. The hypernetworks $h_{W_1}$ and
+    $h_{w_2}$ are MLPs with one hidden layer of \code{hypernet\_hidden} ReLU
+    units, $b_1$ is a linear function of $s$ and $b_2$ an MLP with one hidden
+    layer of $m$ ReLU units; the absolute values make the weights
+    non-negative, and since $\operatorname{elu}$ is increasing,
+    $\partial Q_\text{tot} / \partial q_i \ge 0$. The target mixer $Q^-_\text{tot}$
+    is a Polyak-averaged or periodically copied twin of the mixer.
+\end{itemize}
+
+Because the VDN and QMIX mixing is monotonic in every utility, the greedy joint
+action $\arg\max_{a} Q_\text{tot}$ is obtained by every agent maximising its own
+utility (the individual-global-max property). The centralised target is
+therefore computed from per-agent maxima, the mixers are used only in
+training, and execution stays decentralised. The global state of QMIX is the
+concatenation of all agents' observations (Section~\ref{sec:marl-spec}).
+
+\paragraph{Optimisation and exploration.} One Adam optimiser (learning rate
+\code{lr}) updates the utility network and the mixer, with the gradient norm of
+all their parameters clipped at \code{max\_grad\_norm}. After every gradient
+step the target networks follow by Polyak averaging with \code{tau}
+(\code{target\_update\_interval=0}, the default), or the online weights are
+copied into them every $K$ gradient steps (\code{target\_update\_interval}
+$= K > 0$, the original DQN scheme). While training, every agent of every copy
+independently takes a uniformly random action with probability
+\begin{equation}
+  \epsilon(t) = \epsilon_\text{start} + \min(1, t / T_\epsilon)\,
+      (\epsilon_\text{end} - \epsilon_\text{start}),
+\end{equation}
+where $t$ counts environment steps (summed over copies) from the start of
+training, including the warm-up, and $T_\epsilon$ =
+\code{epsilon\_decay\_steps} ($0$ uses $\epsilon_\text{end}$ from the start);
+\code{epsilon\_at(t)} and the property \code{epsilon} return the value. Every
+update records \code{td\_loss}, \code{q\_mean} (the trained value,
+$Q_\text{tot}$ or $q_i$, in units of the scaled reward), \code{target\_mean},
+\code{grad\_norm} (before clipping) and \code{epsilon}. The methods
+\code{q\_values(obs, *, target=False)}, \code{mix(agent\_q, obs, *,
+target=False)}, \code{td\_target(batch)} and \code{td\_loss(batch)} expose the
+pieces of the update.
+
+\paragraph{Stated simplifications.} The VDN and QMIX papers use recurrent
+(LSTM or GRU) agent networks trained on whole episodes sampled from an
+episode replay, to cope with partial observability. Here the agent networks
+are feed-forward and trained on single transitions from a transition replay:
+the observations of the discrete environments (the local message and queue
+windows of LineMsg and WirelessComm, the piston and ball features of
+Pistonball) are Markov enough for the demonstrations, and the feed-forward
+version is much cheaper on a CPU. Further standard choices: one-step TD
+targets, double Q-learning by default, Adam instead of RMSprop, and
+Polyak-averaged target networks by default. IQL with environments that report
+no per-agent rewards gives every agent the team reward, and with a single
+agent it is (double) DQN.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Fields of \code{QLearningConfig} (IQL, VDN, QMIX), in addition to
+    those of \code{OffPolicyConfig} and \code{AlgorithmConfig}
+    (Table~\ref{tab:marl-config-common}).}
+  \label{tab:marl-value-config}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{4.3cm}>{\raggedright\arraybackslash}p{1.5cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Field & Default & Meaning \\
+    \midrule
+    \code{lr} & $5 \cdot 10^{-4}$ & Adam learning rate of the utility network and the mixer \\
+    \code{epsilon\_start}, \code{epsilon\_end} & 1.0, 0.05 & exploration probability at the start and after the decay \\
+    \code{epsilon\_decay\_steps} & 50\,000 & environment steps $T_\epsilon$ of the linear decay \\
+    \code{double\_q} & \code{True} & select the next action with the online network, evaluate it with the target network \\
+    \code{target\_update\_interval} & 0 & 0: Polyak averaging with \code{tau} after every gradient step; $K > 0$: copy the online weights every $K$ gradient steps \\
+    \code{loss} & \code{"huber"} & TD loss, \code{"huber"} (threshold 1) or \code{"mse"} \\
+    \code{mixer\_embed\_dim} & 32 & QMIX: width $m$ of the mixing layer \\
+    \code{hypernet\_hidden} & 64 & QMIX: hidden width of the weight hypernetworks \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Presets and results}\label{sec:marl-results}
+
+The package \pkg{marl\_algorithms.presets} holds a table
+\code{PRESETS[algorithm][env\_id]} of tuned settings, collected from one module
+per family (\pkg{presets.ppo}, \pkg{presets.ddpg} and
+\pkg{presets.q\_learning}, each with the notes from tuning). A preset fixes the environment steps (\code{"total\_steps"}),
+the number of copies (\code{"num\_envs"}), configuration overrides
+(\code{"config"}) and environment arguments (\code{"env\_kwargs"}, empty for
+all current presets). The presets were tuned to train in at most about two
+minutes on one CPU core and to show clear learning.
+Table~\ref{tab:marl-presets} lists all 17 of them, as printed by
+\code{marl-train presets}, with their configuration overrides.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Presets (\code{list\_presets()}); ``Steps'' is the preset's
+    \code{total\_steps}, ``Copies'' its \code{num\_envs}.}
+  \label{tab:marl-presets}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}p{2.9cm}rr>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Algorithm & Environment & Steps & Copies & Configuration overrides \\
+    \midrule
+    IPPO  & \envid{PowerGrid-v0} & 200\,000 & 32 & \code{rollout\_length=64}, \code{n\_epochs=5}, \code{lr=1e-3}, \code{gamma=0.95}, \code{log\_std\_init=-1.5} \\
+    IPPO  & \envid{Platoon-v0}   & 450\,000 & 32 & \code{rollout\_length=64}, \code{n\_epochs=5}, \code{lr=3e-4}, \code{gamma=0.99}, \code{log\_std\_init=-1.0}, \code{normalize\_observations=False}, \code{value\_clip\_range=None} \\
+    IPPO  & \envid{Consensus-v0} & 400\,000 & 32 & \code{rollout\_length=64}, \code{n\_epochs=5}, \code{lr=1e-3}, \code{gamma=0.95}, \code{normalize\_observations=False} \\
+    IPPO  & \envid{LineMsg-v0}   & 100\,000 & 32 & \code{rollout\_length=50}, \code{n\_epochs=5}, \code{lr=1e-3}, \code{ent\_coef=0.01} \\
+    MAPPO & \envid{PowerGrid-v0} & 250\,000 & 32 & as IPPO on \envid{PowerGrid-v0} \\
+    MAPPO & \envid{Platoon-v0}   & 450\,000 & 32 & as IPPO on \envid{Platoon-v0}, and \code{reward\_source="agent"} \\
+    MAPPO & \envid{Consensus-v0} & 400\,000 & 32 & \code{rollout\_length=64}, \code{n\_epochs=5}, \code{lr=1e-3}, \code{gamma=0.9}, \code{reward\_source="agent"}, \code{normalize\_observations=False} \\
+    MAPPO & \envid{LineMsg-v0}   & 100\,000 & 32 & as IPPO on \envid{LineMsg-v0} \\
+    MADDPG & \envid{PowerGrid-v0} & 64\,000 & 16 & \code{critic\_hidden\_sizes=(128, 128)}, \code{batch\_size=64}, \code{warmup\_steps=3200}, \code{reward\_source="team"}, \code{critic\_loss="huber"} \\
+    MADDPG & \envid{Consensus-v0} & 96\,000 & 16 & \code{critic\_hidden\_sizes=(128, 128)}, \code{batch\_size=64}, \code{warmup\_steps=3200}, \code{gamma=0.95}, \code{reward\_scale=0.01}, \code{normalize\_observations=True}, \code{exploration\_noise=0.2}, \code{final\_exploration\_noise=0.02}, \code{noise\_decay\_steps=96000} \\
+    MATD3 & \envid{PowerGrid-v0} & 64\,000 & 16 & as MADDPG, and \code{exploration\_noise=0.3}, \code{final\_exploration\_noise=0.05}, \code{noise\_decay\_steps=64000} \\
+    MATD3 & \envid{Consensus-v0} & 96\,000 & 16 & as MADDPG on \envid{Consensus-v0} \\
+    IQL, VDN, QMIX & \envid{LineMsg-v0} & 25\,000 & 16 & \code{batch\_size=128}, \code{lr=1e-3}, \code{epsilon\_decay\_steps=12500} \\
+    VDN  & \envid{WirelessComm-v1} & 120\,000 & 16 & \code{batch\_size=128}, \code{lr=1e-3}, \code{gamma=0.8}, \code{epsilon\_decay\_steps=30000} \\
+    QMIX & \envid{WirelessComm-v1} & 100\,000 & 16 & \code{batch\_size=128}, \code{lr=1e-3}, \code{gamma=0.8}, \code{epsilon\_decay\_steps=45000} \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+The source code documents the reasons for these settings. On
+\envid{PowerGrid-v0} the PPO policies need little initial exploration noise
+(\code{log\_std\_init=-1.5}): with more noise the mean policy learns to
+compensate its own previous actions, which it observes, and performs poorly
+when executed without noise. On \envid{Platoon-v0} and \envid{Consensus-v0} the
+critics learn each agent's own reward, which isolates the effect of an agent's
+own command, and the observations are used unnormalised, because they are
+already of order one (Platoon) or in arena units (Consensus) and running
+statistics dominated by the large errors of early training would hide the
+small errors that matter once the task is nearly solved. MADDPG and MATD3 use
+the team reward on \envid{PowerGrid-v0}, where each bus sees only about
+1/16 of the benefit of its frequency support but pays its full control cost
+under the per-agent rewards, and the Huber loss keeps the rare trip
+transitions from dominating the critic updates. On \envid{WirelessComm-v1}
+packets are delivered in the step they are sent, so a short horizon
+($\gamma = 0.8$) suffices. IQL has no \envid{WirelessComm-v1} preset, for the
+reason discussed below.
+
+\paragraph{Results.} Table~\ref{tab:marl-results-table} reports the results
+of \code{benchmarks/benchmark\_marl.py}, which applies one protocol to every
+preset: train with \code{train\_preset(algorithm, env\_id, seed=0)} on one CPU
+core (\code{OMP\_NUM\_THREADS=1}, one PyTorch thread), then evaluate uniformly
+random actions, the trained deterministic policy and the baseline controller
+of the environment with \code{env\_lib.evaluate} on the same 64 episodes (seed
+1) of a 64-copy vector environment created with \code{make\_vector\_env}. The
+script appends one JSON record per preset to the file given by \code{-{}-out}
+(default \code{renders/marl\_benchmark.jsonl}); \code{-{}-only ALGO:ENV ...}
+selects presets, \code{-{}-shard K/N} runs every $N$-th preset starting at
+$K$, so that shards can run in parallel processes (for example pinned to
+different cores with \code{taskset}), and \code{-{}-report FILE} prints the
+table of a result file, as Markdown with \code{-{}-markdown}.
+
+\begin{shellcode}
+python benchmarks/benchmark_marl.py --out marl.jsonl          # all presets
+python benchmarks/benchmark_marl.py --only mappo:PowerGrid-v0 qmix:LineMsg-v0
+taskset -c 0 python benchmarks/benchmark_marl.py --shard 0/2 --out marl.jsonl &
+taskset -c 1 python benchmarks/benchmark_marl.py --shard 1/2 --out marl.jsonl &
+python benchmarks/benchmark_marl.py --report marl.jsonl --markdown
+\end{shellcode}
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Results of \code{benchmarks/benchmark\_marl.py}: mean team return of
+    64 evaluation episodes (seed 1, 64-copy vector environment) after training
+    with the preset and seed 0; higher is better. ``CPU'' is the processor
+    time of training on one core. ``Env steps'' are the steps actually
+    collected, a multiple of the steps per rollout (on-policy) or of the
+    number of copies (off-policy). The baselines are droop control
+    (PowerGrid), cooperative adaptive cruise control (Platoon), the Laplacian
+    protocol (Consensus), always relay (LineMsg) and the collision-free
+    schedule (WirelessComm).}
+  \label{tab:marl-results-table}
+  \begin{tabular}{@{}llrrrrr@{}}
+    \toprule
+    Environment & Algorithm & Env steps & CPU [s] & Random & Trained & Baseline \\
+    \midrule
+    \envid{PowerGrid-v0} & IPPO   & 200\,704 & 69  & $-629.3$ & $-2.37$ & $-0.79$ \\
+                         & MAPPO  & 251\,904 & 106 & $-629.3$ & $-0.89$ & $-0.79$ \\
+                         & MADDPG & 64\,000  & 70  & $-629.3$ & $-5.69$ & $-0.79$ \\
+                         & MATD3  & 64\,000  & 87  & $-629.3$ & $-5.63$ & $-0.79$ \\
+    \midrule
+    \envid{Platoon-v0}   & IPPO   & 450\,560 & 88  & $-5350$ & $-84.8$ & $-46.4$ \\
+                         & MAPPO  & 450\,560 & 102 & $-5350$ & $-65.0$ & $-46.4$ \\
+    \midrule
+    \envid{Consensus-v0} & IPPO   & 401\,408 & 83  & $-18041$ & $-1550$ & $-1518$ \\
+                         & MAPPO  & 401\,408 & 96  & $-18041$ & $-1586$ & $-1518$ \\
+                         & MADDPG & 96\,000  & 72  & $-18041$ & $-1681$ & $-1518$ \\
+                         & MATD3  & 96\,000  & 83  & $-18041$ & $-1737$ & $-1518$ \\
+    \midrule
+    \envid{LineMsg-v0}   & IPPO   & 100\,800 & 26 & 43.2 & 95.0 & 95.0 \\
+                         & MAPPO  & 100\,800 & 26 & 43.2 & 95.0 & 95.0 \\
+                         & IQL    & 25\,008  & 9  & 43.2 & 95.0 & 95.0 \\
+                         & VDN    & 25\,008  & 10 & 43.2 & 95.0 & 95.0 \\
+                         & QMIX   & 25\,008  & 16 & 43.2 & 95.0 & 95.0 \\
+    \midrule
+    \envid{WirelessComm-v1} & VDN  & 120\,000 & 74  & 139.2 & 338.0 & 339.6 \\
+                            & QMIX & 100\,000 & 101 & 139.2 & 319.1 & 339.6 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Discussion.} Every preset learns: each trained policy is far better
+than random actions, and several match their baseline.
+
+\begin{itemize}
+  \item \emph{LineMsg.} All five discrete-action methods learn the optimal
+    ``always relay'' policy (return 95.0, the same as the baseline); the
+    value-based methods need a quarter of the environment steps of the PPO
+    methods and 9 to 16 seconds.
+  \item \emph{Consensus.} IPPO and MAPPO come within about 2 and 5\,\% of the
+    Laplacian protocol, MADDPG and MATD3, with a quarter of the environment
+    steps, within about 11 and 14\,\%. The Laplacian protocol is a strong reference
+    here: it is the classical solution of the consensus problem on a
+    connected graph.
+  \item \emph{PowerGrid.} MAPPO reaches $-0.89$ against $-0.79$ for droop
+    control, IPPO $-2.37$. MADDPG and MATD3 improve the return from $-629$ to
+    about $-5.7$ but remain far from droop control. Fitting the actions of the
+    trained deterministic policies to the local frequency deviation $\omega_i$
+    (measured for this chapter over 200 steps on 16 copies) gives slopes of
+    $-0.09$ (MADDPG)
+    and $-0.14$ (MATD3), against the droop gain of $-0.25$, with correlations
+    of only $-0.15$ and $-0.12$: the actors have learned a partial droop
+    feedback, weaker than droop control, combined with a sizeable part of the
+    action that does not follow the local frequency deviation and costs
+    control effort.
+  \item \emph{Platoon.} IPPO and MAPPO reduce the cost from about 5\,350 to 85
+    and 65, which is still 83 and 40\,\% above the cost of cooperative
+    adaptive cruise control. According to the tuning notes in the source,
+    MAPPO with the team reward and normalised observations does not learn this
+    task (every episode ends in a collision); the per-agent rewards and
+    unnormalised observations of the preset are essential.
+  \item \emph{WirelessComm.} VDN comes within 0.5\,\% of the collision-free
+    schedule. IQL has no preset here: trained with the VDN settings
+    (120\,000 steps), it reached only 152.3 on the same evaluation episodes,
+    hardly better than random actions. This is a structural failure rather
+    than a matter of tuning. The per-agent reward is 1 for a delivered packet
+    and 0 otherwise, so a collision costs the transmitting agent nothing
+    compared with staying idle; for an independent learner transmitting is
+    never worse than waiting, the harm it does to the other agent's delivery is
+    invisible in its own reward, and the agents keep transmitting and
+    colliding. VDN and QMIX learn from the team reward, in which a collision
+    costs a delivery, and learn to leave a contested access point to one agent.
+    The QMIX result depends on the seed. With seed 0 it converges to a fixed
+    assignment in which each of the nine access points is used by exactly one
+    agent, the one to its upper right, and the seven agents of the first column
+    and the last row never deliver a packet (6 collisions in the 64 evaluation
+    episodes); the baseline additionally lets the border agents borrow idle
+    access points. With the same preset and seeds 1 and 2, QMIX reached 344.1
+    and 332.7 on the same evaluation episodes (measured for this chapter),
+    with 14 and 12 agents delivering packets.
+\end{itemize}
+
+The off-policy methods need three to four times fewer environment steps than the
+PPO methods on the continuous tasks, but spend more computation per step, so
+the training times are similar. The results come from single training runs
+(seed 0); a comparison of methods for a publication needs several seeds per
+method and confidence intervals, for example with
+\code{plot\_learning\_curves} of \pkg{plotkit}
+(Section~\ref{sec:plotkit-curves}).
+
+% ---------------------------------------------------------------------------
+\section{The demonstration script}\label{sec:marl-demo}
+
+\code{examples/algorithms/marl\_training\_demo.py} trains one algorithm of every family
+with its preset, each on a different environment:
+
+\begin{itemize}
+  \item MAPPO on \envid{PowerGrid-v0}: continuous actions, 16 agents, on-policy;
+  \item MADDPG on \envid{Consensus-v0}: continuous actions, 8 agents, off-policy;
+  \item QMIX on \envid{LineMsg-v0}: discrete actions, 10 agents, value-based;
+  \item VDN on \envid{WirelessComm-v1}: discrete actions, 16 agents, value-based.
+\end{itemize}
+
+Each run trains on batched copies created with \code{make\_vector\_env}
+(native batches for PowerGrid and Consensus), then evaluates random actions,
+the trained policy and the baseline controller on the same seeded episodes (a
+vector environment of \code{min(episodes, 64)} copies, seed \code{seed + 1}).
+The script
+prints one line per run and a results table, and saves the learning curves
+(training returns over environment steps, with the random and baseline
+evaluation returns as reference lines) as a PNG file. The full suite takes a
+few minutes on one CPU core.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Options of \code{examples/algorithms/marl\_training\_demo.py}.}
+  \label{tab:marl-demo-options}
+  \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{2.9cm}>{\raggedright\arraybackslash}p{4.6cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Option & Default & Meaning \\
+    \midrule
+    \code{-{}-algo}, \code{-{}-env} & the suite & train only this preset (both are required together) \\
+    \code{-{}-quick} & off & smoke test: 2\,000 steps (PPO) or 1\,500 steps with a 500-step warm-up (off-policy) on 8 copies \\
+    \code{-{}-seed} & 0 & training seed; the evaluation uses \code{seed + 1} \\
+    \code{-{}-episodes} & 64 & evaluation episodes per policy \\
+    \code{-{}-plot} & \code{renders/marl\_training.png} & learning-curve figure; an empty string skips it \\
+    \code{-{}-gif} & none & record the trained policy of a single run (\code{-{}-algo}/\code{-{}-env}) \\
+    \code{-{}-threads} & 1 & PyTorch threads \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{shellcode}
+python examples/algorithms/marl_training_demo.py                 # the suite, a few minutes
+python examples/algorithms/marl_training_demo.py --algo mappo --env PowerGrid-v0
+python examples/algorithms/marl_training_demo.py --algo qmix --env LineMsg-v0 \
+    --gif renders/qmix.gif
+python examples/algorithms/marl_training_demo.py --quick --plot ''   # smoke test
+\end{shellcode}
+
+Table~\ref{tab:marl-demo-results} shows the results of the full suite with its
+default arguments and Figure~\ref{fig:marl-training} the learning curves it
+saves. The evaluation protocol is that of
+Table~\ref{tab:marl-results-table}, and the returns agree with it to the digits
+shown there.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Output of \code{examples/algorithms/marl\_training\_demo.py} with default
+    arguments: training seed 0 on one CPU core (``Time'' is the wall-clock
+    training time), 64 evaluation episodes with seed 1 on a 64-copy vector
+    environment.}
+  \label{tab:marl-demo-results}
+  \begin{tabular}{@{}llrrrrr@{}}
+    \toprule
+    Algorithm & Environment & Env steps & Time [s] & Random & Trained & Baseline \\
+    \midrule
+    MAPPO  & \envid{PowerGrid-v0}    & 251\,904 & 106.6 & $-629.3$  & $-0.894$ & $-0.786$ \\
+    MADDPG & \envid{Consensus-v0}    & 96\,000  & 76.1  & $-18041$  & $-1681$  & $-1518$ \\
+    QMIX   & \envid{LineMsg-v0}      & 25\,008  & 16.6  & 43.2      & 95.0     & 95.0 \\
+    VDN    & \envid{WirelessComm-v1} & 120\,000 & 78.8  & 139.2     & 338.0    & 339.6 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{marl_training.png}
+  \caption{Learning curves saved by \code{examples/algorithms/marl\_training\_demo.py}
+    (default suite, seed 0): mean return of the exploratory training episodes
+    over environment steps, with the evaluation returns of random actions
+    (dotted) and of the baseline controller (dashed) for reference. The
+    training returns include the random warm-up and the exploration (policy
+    noise or $\epsilon$-greedy actions) and are averaged over the few episodes
+    that finish in each interval, so they are not directly comparable with
+    the evaluation returns of the deterministic policy in
+    Table~\ref{tab:marl-demo-results}.}
+  \label{fig:marl-training}
+\end{figure}
+
+% ---------------------------------------------------------------------------
+\section{Adding an algorithm}\label{sec:marl-extending}
+
+A new algorithm reuses the core and implements only what is specific to it.
+Inside the package it gets its own module in the folder of its family (or a
+new family folder with a \code{common.py} when it shares code with a sibling):
+
+\begin{enumerate}
+  \item Define a configuration dataclass that derives from
+    \code{OnPolicyConfig} or \code{OffPolicyConfig} (validate new fields in
+    \code{\_\_post\_init\_\_}, after calling the parent's).
+  \item Subclass \code{OnPolicyAlgorithm} or \code{OffPolicyAlgorithm} and set
+    the class attributes \code{name}, \code{action\_kinds} and
+    \code{config\_class}.
+  \item Implement the hooks: \code{\_build()} (networks and optimisers; it runs
+    under the seeded, forked PyTorch generator), \code{act(obs,
+    deterministic=False)}, \code{\_modules()} (what \code{save} stores) and,
+    for an on-policy method, \code{\_rollout\_step(obs)} and
+    \code{\_update(rollout)}, optionally \code{\_rollout\_fields()} and
+    \code{\_observe\_transition(transition)}; for an off-policy method,
+    \code{\_explore(obs)} and \code{\_update(batch)}. Extra state such as
+    normalisers goes into \code{\_extra\_state()} and
+    \code{\_load\_extra\_state(state)}. Use \code{self.np\_rng} and
+    \code{self.torch\_rng} for all randomness, \code{self.agent\_inputs} for
+    per-agent network inputs and \code{PerAgent} for shared or separate
+    networks, and batch over copies and agents.
+  \item Register it: add an \code{AlgorithmInfo} record (name,
+    \code{"module:Class"} entry point, family, action kinds, summary and
+    reference) to the tuple in \pkg{marl\_algorithms.registry}, and optionally a
+    lazy export in \code{marl\_algorithms/\_\_init\_\_.py}. \code{train},
+    \code{make\_algorithm}, \code{Algorithm.load} and \code{marl-train} then
+    find it. An unregistered class can still be trained directly
+    (\code{MyAlgorithm(envs, seed=0).learn(envs, ...)}) and loaded with
+    \code{MyAlgorithm.load(path)}.
+  \item Add presets as a table \code{\{name: \{env\_id: preset\}\}} in a
+    module of \pkg{marl\_algorithms.presets} and merge it into \code{PRESETS} in
+    \code{presets/\_\_init\_\_.py}, where \code{get\_preset}, \code{compare} and
+    \code{marl-train presets} look them up.
+  \item Add tests in \code{tests/algorithms/}: action shapes on several
+    environments, \code{policy()} with \code{env\_lib.evaluate}, the
+    \code{TypeError} for an unsupported action kind, a short \code{learn} with
+    shared and separate parameters, seed determinism, a \code{save}/\code{load}
+    round trip and a loose learning check on a small task.
+\end{enumerate}
+
+A minimal skeleton, an independent advantage actor-critic for discrete
+actions (one gradient step per rollout on the agents' own rewards):
+
+% norun
+\begin{pycode}
+from dataclasses import dataclass
+from typing import ClassVar
+
+import torch
+from torch import nn
+
+from marl_algorithms.core.base import OnPolicyAlgorithm
+from marl_algorithms.core.buffers import compute_gae
+from marl_algorithms.core.config import OnPolicyConfig
+from marl_algorithms.core.networks import CategoricalPolicy, PerAgent, mlp
+
+
+@dataclass
+class A2CConfig(OnPolicyConfig):
+    """Options of IA2C (this sketch ignores the normalisation options)."""
+
+    ent_coef: float = 0.01
+
+
+class IA2C(OnPolicyAlgorithm):
+    """Independent advantage actor-critic (discrete actions)."""
+
+    name: ClassVar[str] = "ia2c"
+    action_kinds: ClassVar[tuple[str, ...]] = ("discrete",)
+    config_class: ClassVar[type[A2CConfig]] = A2CConfig
+
+    def _build(self):
+        cfg, spec = self.config, self.spec
+        self.actor = PerAgent(
+            lambda: CategoricalPolicy(self.agent_input_dim, spec.n_actions,
+                                      cfg.hidden_sizes, cfg.activation),
+            spec.n_agents, cfg.share_parameters).to(self.device)
+        self.critic = PerAgent(
+            lambda: mlp(self.agent_input_dim, 1, cfg.hidden_sizes,
+                        cfg.activation),
+            spec.n_agents, cfg.share_parameters).to(self.device)
+        self.params = [*self.actor.parameters(), *self.critic.parameters()]
+        self.optimizer = torch.optim.Adam(self.params, lr=cfg.lr)
+
+    def _modules(self):
+        return {"actor": self.actor, "critic": self.critic,
+                "optimizer": self.optimizer}
+
+    def act(self, obs, deterministic=False):
+        inputs = self.agent_inputs(self.tensor(obs))
+        with torch.inference_mode():
+            if deterministic:
+                return self.actor(inputs).argmax(-1).cpu().numpy()
+            actions, _ = self.actor.call("sample", inputs, self.torch_rng)
+        return actions.cpu().numpy()
+
+    def _rollout_step(self, obs):
+        return self.act(obs), {}                 # no extra rollout fields
+
+    def _update(self, rollout):
+        cfg = self.config
+        inputs = self.agent_inputs(self.tensor(rollout["obs"]))
+        values = self.critic(inputs).squeeze(-1)                  # (T, B, n)
+        with torch.no_grad():
+            next_inputs = self.agent_inputs(self.tensor(rollout["next_obs"]))
+            next_values = self.critic(next_inputs).squeeze(-1)
+        advantages, returns = compute_gae(
+            rollout["agent_rewards"], values.detach().cpu().numpy(),
+            next_values.cpu().numpy(), rollout["terminated"],
+            rollout["truncated"], cfg.gamma, cfg.gae_lambda)
+        actions = self.tensor(rollout["actions"], torch.int64)
+        log_prob, entropy = self.actor.call("log_prob", inputs, actions)
+        loss = (-(log_prob * self.tensor(advantages)).mean()
+                - cfg.ent_coef * entropy.mean()
+                + 0.5 * (values - self.tensor(returns)).pow(2).mean())
+        self.optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        nn.utils.clip_grad_norm_(self.params, cfg.max_grad_norm)
+        self.optimizer.step()
+        return {"loss": loss.item(), "entropy": entropy.mean().item()}
+
+
+# Registration (in marl_algorithms/registry.py) and a preset (in a module of
+# marl_algorithms/presets/, merged into PRESETS):
+# AlgorithmInfo("ia2c", "my_package.ia2c:IA2C", "on-policy", ("discrete",),
+#               "independent advantage actor-critic", "<reference>")
+PRESETS = {"ia2c": {"LineMsg-v0": {"num_envs": 32, "total_steps": 100_000,
+                                   "config": {"lr": 1e-3}, "env_kwargs": {}}}}
+\end{pycode}
+
+% ---------------------------------------------------------------------------
+\section{References}\label{sec:marl-references}
+
+The source code of \pkg{marl\_algorithms} cites the following publications.
+
+\begin{itemize}[leftmargin=1.5em,itemindent=-1.5em,label={}]
+  \item J. Ackermann, V. Gabler, T. Osa and M. Sugiyama (2019).
+    \emph{Reducing overestimation bias in multi-agent domains using double
+    centralized critics.} NeurIPS Deep RL Workshop, arXiv:1910.01465.
+  \item M. Andrychowicz et al.\ (2021). \emph{What matters in on-policy
+    reinforcement learning? A large-scale empirical study.} ICLR.
+  \item C. S. de Witt, T. Gupta, D. Makoviichuk, V. Makoviychuk,
+    P. H. S. Torr, M. Sun and S. Whiteson (2020). \emph{Is independent
+    learning all you need in the StarCraft multi-agent challenge?}
+    arXiv:2011.09533.
+  \item S. Fujimoto, H. van Hoof and D. Meger (2018). \emph{Addressing
+    function approximation error in actor-critic methods.} ICML.
+  \item T. P. Lillicrap et al.\ (2016). \emph{Continuous control with deep
+    reinforcement learning.} ICLR.
+  \item R. Lowe, Y. Wu, A. Tamar, J. Harb, P. Abbeel and I. Mordatch (2017).
+    \emph{Multi-agent actor-critic for mixed cooperative-competitive
+    environments.} NeurIPS.
+  \item V. Mnih et al.\ (2015). \emph{Human-level control through deep
+    reinforcement learning.} Nature 518, 529--533.
+  \item T. Rashid et al.\ (2018). \emph{QMIX: monotonic value function
+    factorisation for deep multi-agent reinforcement learning.} ICML.
+  \item J. Schulman, P. Moritz, S. Levine, M. Jordan and P. Abbeel (2016).
+    \emph{High-dimensional continuous control using generalized advantage
+    estimation.} ICLR.
+  \item J. Schulman, F. Wolski, P. Dhariwal, A. Radford and O. Klimov (2017).
+    \emph{Proximal policy optimization algorithms.} arXiv:1707.06347.
+  \item D. Silver et al.\ (2014). \emph{Deterministic policy gradient
+    algorithms.} ICML.
+  \item P. Sunehag et al.\ (2018). \emph{Value-decomposition networks for
+    cooperative multi-agent learning based on team reward.} AAMAS.
+  \item M. Tan (1993). \emph{Multi-agent reinforcement learning: independent
+    vs.\ cooperative agents.} ICML.
+  \item H. van Hasselt, A. Guez and D. Silver (2016). \emph{Deep
+    reinforcement learning with double Q-learning.} AAAI.
+  \item C. Yu, A. Velu, E. Vinitsky, J. Gao, Y. Wang, A. Bayen and Y. Wu
+    (2022). \emph{The surprising effectiveness of PPO in cooperative
+    multi-agent games.} NeurIPS Datasets and Benchmarks.
+\end{itemize}
+
+\endgroup

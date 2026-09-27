@@ -87,6 +87,7 @@ quotes prevent shells such as \code{zsh} from interpreting the brackets.
       \code{PistonballEnv} (\pkg{pymunk} for the physics, \pkg{pygame} for
       rendering and keyboard control) \\
     \code{torch} & \pkg{torch} $\geq$ 2.0 &
+      \pkg{marl\_algorithms} and \code{marl-train},
       \code{KuramotoOscillatorEnvTorch}, \pkg{toolkit.neural\_toolkit} \\
     \code{video} & \pkg{imageio} $\geq$ 2.20, \pkg{imageio-ffmpeg} $\geq$ 0.4 &
       MP4, WebM, AVI, MOV and MKV export in \code{save\_animation} and
@@ -111,7 +112,9 @@ pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install ".[all]"
 \end{shellcode}
 
-GPU use is covered in Section~\ref{sec:trouble-torch}.
+GPU use is covered in Section~\ref{sec:trouble-torch}. The algorithms of
+\pkg{marl\_algorithms} run on the CPU by default (argument \code{device}) and
+were tuned there; the CPU build is sufficient for them.
 
 \subsection{PettingZoo}\label{sec:install-pettingzoo}
 
@@ -163,21 +166,26 @@ The following commands check, from quickest to most thorough, that the
 package is installed correctly:
 
 \begin{shellcode}
-# 1. Versions of both import packages
-python -c "import env_lib, toolkit; print(env_lib.__version__, toolkit.__version__)"
+# 1. Versions of the three import packages
+python -c "import env_lib, marl_algorithms as m, toolkit; \
+print(env_lib.__version__, m.__version__, toolkit.__version__)"
 
 # 2. Table of the registered environments (the env-lib console script)
 env-lib list
 python -m env_lib list            # the same without the console script
 
 # 3. Create every environment and take a few random steps
-python examples/quickstart.py --steps 5
+python examples/getting_started/quickstart.py --steps 5
 
-# 4. Full test suite (requires the dev extra)
+# 4. The algorithms (needs the torch extra) and a few seconds of training
+marl-train list
+python examples/algorithms/marl_training_demo.py --quick --plot ''
+
+# 5. Full test suite (requires the dev extra)
 pytest -q
 \end{shellcode}
 
-The first command prints \code{1.1.0 1.1.0}. \code{env-lib list} creates every
+The first command prints \code{1.2.0 1.2.0 1.2.0}. \code{env-lib list} creates every
 environment once and prints one row per registered id (18 rows) with its
 family, number of agents, observation shape, action type and shape, whether
 \code{env\_lib.make\_vec} uses a native batched implementation, and the
@@ -186,10 +194,15 @@ is marked \code{(missing)} instead of failing. \code{env-lib list -{}-no-inspect
 skips creating the environments. The command line is described in
 Section~\ref{sec:workflow-cli}. The quick-start script prints one line per
 environment and skips, with a message, environments whose optional
-dependencies are missing. The test suite skips tests of missing optional
+dependencies are missing. \code{import marl\_algorithms} succeeds without
+PyTorch (it loads only the version number), so the fourth step is the check
+that the algorithms can be used: \code{marl-train list} prints the seven
+algorithms, and the demonstration script trains four of them for a few
+seconds each (Section~\ref{sec:marl-demo}); without PyTorch both fail with a
+\code{ModuleNotFoundError} for \code{torch}. The test suite skips tests of missing optional
 dependencies in the same way.
 
-The installation provides four console scripts:
+The installation provides five console scripts:
 
 \begin{center}
   \small
@@ -198,6 +211,7 @@ The installation provides four console scripts:
     Command & Purpose \\
     \midrule
     \code{env-lib}          & list, run, evaluate and benchmark the environments (Section~\ref{sec:workflow-cli}) \\
+    \code{marl-train}       & list, train and evaluate the algorithms (Section~\ref{sec:marl-cli}) \\
     \code{ajlatt-build-map} & build an AJLATT map from a YAML specification (Chapter~\ref{chap:ajlatt}) \\
     \code{ajlatt-plot-map}  & list and plot the bundled AJLATT maps (Chapter~\ref{chap:ajlatt}) \\
     \code{plotkit-gallery}  & gallery of plotkit figures (Section~\ref{sec:plotkit-cli}) \\
@@ -227,6 +241,7 @@ extra to install.
     \code{PistonballEnv} & \pkg{pymunk} & \code{pistonball} \\
     Pistonball rendering and \code{ManualPolicy} & \pkg{pygame} & \code{pistonball} \\
     \code{KuramotoOscillatorEnvTorch} & \pkg{torch} & \code{torch} \\
+    \pkg{marl\_algorithms}, \code{marl-train} & \pkg{torch} & \code{torch} \\
     \pkg{toolkit.neural\_toolkit} & \pkg{torch} & \code{torch} \\
     MP4 and other video formats & \pkg{imageio}, \pkg{imageio-ffmpeg} & \code{video} \\
     \pkg{toolkit.plotkit} & core only & core \\

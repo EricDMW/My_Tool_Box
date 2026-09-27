@@ -12,7 +12,7 @@ exists and receives the key presses, then call the policy once per step::
             obs, info = env.reset()
     env.close()
 
-``examples/pistonball_demo.py --manual`` runs this loop.
+``examples/environments/pistonball_demo.py --manual`` runs this loop.
 """
 
 from __future__ import annotations

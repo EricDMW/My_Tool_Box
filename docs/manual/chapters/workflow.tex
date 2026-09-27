@@ -576,15 +576,15 @@ print(len(data), data.n_episodes, data.episode_returns().mean())
 % ---------------------------------------------------------------------------
 \section{A complete workflow}\label{sec:workflow-example}
 
-\code{examples/workflow\_demo.py} combines the pieces of this chapter: it lists
+\code{examples/getting\_started/workflow\_demo.py} combines the pieces of this chapter: it lists
 the environments with continuous actions, creates a native vector environment,
 evaluates random actions and the baseline on all copies in parallel, flattens
 the environment for a single-agent library, adapts it to the Parallel API and
 records a GIF of the baseline (about ten seconds in total):
 
 \begin{shellcode}
-python examples/workflow_demo.py
-python examples/workflow_demo.py --env Consensus-v0 --num-envs 128 --episodes 128
+python examples/getting_started/workflow_demo.py
+python examples/getting_started/workflow_demo.py --env Consensus-v0 --num-envs 128 --episodes 128
 \end{shellcode}
 
 \endgroup

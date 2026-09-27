@@ -48,7 +48,7 @@
 \setbeamercolor{block body}{fg=ink,bg=paper}
 \setbeamerfont{frametitle}{size=\large,series=\bfseries}
 \setbeamerfont{footnote}{size=\tiny}
-\setbeamertemplate{frame footer}{\color{muted}My Tool Box 1.1}
+\setbeamertemplate{frame footer}{\color{muted}My Tool Box 1.2}
 \setbeamerfont{page number in head/foot}{size=\tiny}
 \setbeamercolor{page number in head/foot}{fg=muted}
 
@@ -111,9 +111,9 @@
 \input{numbers}
 
 \title{My Tool Box}
-\subtitle{Networked multi-agent control environments and research utilities for Python}
+\subtitle{Networked multi-agent control environments, classical MARL algorithms and research utilities for Python}
 \author{Dongming Wang}
-\date{Version 1.1}
+\date{Version 1.2}
 
 \begin{document}
 
@@ -126,11 +126,12 @@
       \begin{minipage}{7.3cm}\raggedright
         {\color{white}\fontsize{32}{36}\selectfont\bfseries My Tool Box}\\[10pt]
         {\color{accentlight}\fontsize{14}{18}\selectfont Networked multi-agent control\\
-         environments and research\\ utilities for Python}\\[18pt]
+         environments, classical MARL\\ algorithms and research tools}\\[18pt]
         {\color{white!75!night}\small Gymnasium API\enspace$\cdot$\enspace continuous states and actions\\
-         native batched simulation\enspace$\cdot$\enspace reference controllers}\\[30pt]
+         native batched simulation\enspace$\cdot$\enspace reference controllers\\
+         MAPPO, MADDPG, QMIX and more, trained on the environments}\\[24pt]
         {\color{white}\small Dongming Wang}\\[3pt]
-        {\color{white!55!night}\scriptsize Version 1.1\enspace$\cdot$\enspace github.com/EricDMW/My\_Tool\_Box}
+        {\color{white!55!night}\scriptsize Version 1.2\enspace$\cdot$\enspace github.com/EricDMW/My\_Tool\_Box}
       \end{minipage}};
     \node[anchor=north east,inner sep=0pt] (a) at ($(current page.north east)+(-0.6,-0.72)$)
       {\includegraphics[width=6.4cm]{\FigTitleA}};
@@ -145,20 +146,26 @@
 \begin{frame}{At a glance}
   \centering
   \stat{accent}{\NumFamilies}{environment families\\(\NumIds{} registered ids)}\hfill
-  \stat{green}{\NumContinuous}{families with continuous\\states and actions}\hfill
+  \stat{green}{\NumAlgorithms}{classical MARL algorithms\\trained on the environments}\hfill
   \stat{orange}{\NumThroughput}{agent-steps per second\\(256 copies, one CPU core)}\hfill
   \stat{purple}{\NumTests}{tests, CI on\\Python 3.9 to 3.12}
 
   \vspace{14pt}
   \begin{columns}[T,onlytextwidth]
-    \column{0.49\textwidth}
+    \column{0.32\textwidth}
     \textbf{\color{accent}env\_lib}\quad simulation\\[2pt]
-    \small Oscillator networks, consensus and formation, power-grid frequency control,
+    \footnotesize Oscillator networks, consensus and formation, power-grid frequency control,
     vehicle platoons, multi-robot target tracking, cooperative physics and
-    communication benchmarks, behind one Gymnasium interface.
-    \column{0.49\textwidth}
+    communication benchmarks, behind one Gymnasium interface; \NumContinuous{} families with
+    continuous states and actions.
+    \column{0.32\textwidth}
+    \textbf{\color{accent}marl\_algorithms}\quad learning\\[2pt]
+    \footnotesize IPPO, MAPPO, MADDPG, MATD3, IQL, VDN and QMIX on one small core, trained
+    on batched copies of the environments and evaluated against their classical
+    controllers.
+    \column{0.32\textwidth}
     \textbf{\color{accent}toolkit}\quad research workflow\\[2pt]
-    \small Publication-quality plots with confidence bands, PyTorch policy and value
+    \footnotesize Publication-quality plots with confidence bands, PyTorch policy and value
     networks, and reproducible experiment parameters, in the same install.
   \end{columns}
 \end{frame}
@@ -179,7 +186,8 @@
       4/{Results others can reproduce}/{Seeded generators only, headless rendering and GIF/MP4 export, plotting
         and parameter tools in the same package.}/purple%
     }{
-      \node[box=\col,minimum height=0.86cm,text width=3.55cm,font=\footnotesize\bfseries,anchor=west]
+      \node[box=\col,minimum height=0.86cm,text width=3.55cm,font=\footnotesize\bfseries,anchor=west,
+            execute at begin node={\hyphenpenalty=10000}]
         (n\i) at (0,-\i*1.08) {\need};
       \node[anchor=west,text width=9.1cm,font=\footnotesize,align=left] (f\i) at (4.6,-\i*1.08) {\feat};
       \draw[arrow,color=\col] (n\i.east) -- ++(0.5,0);
@@ -192,6 +200,13 @@
   \centering
   \resizebox{\textwidth}{!}{%
   \begin{tikzpicture}[x=1cm,y=1cm]
+    % Learning layer
+    \node[fill=accent!10,draw=accent!55,rounded corners=3pt,line width=0.6pt,minimum width=12.9cm,
+          minimum height=0.62cm,font=\scriptsize] at (7.15,4.35)
+      {\code{marl\_algorithms}:\enspace IPPO\enspace$\cdot$\enspace MAPPO\enspace$\cdot$\enspace
+       MADDPG\enspace$\cdot$\enspace MATD3\enspace$\cdot$\enspace IQL\enspace$\cdot$\enspace
+       VDN\enspace$\cdot$\enspace QMIX\quad{\color{muted}trained on \code{make\_vec} batches}};
+    \draw[rule,line width=0.6pt] (0.7,3.84) -- (13.6,3.84);
     % Access layer
     \foreach \lab/\sub [count=\k from 0] in {\code{make(id)}/single environment,
         \code{make\_vec(id{,} B)}/native batch,\code{to\_parallel(env)}/per-agent dictionaries,
@@ -223,7 +238,7 @@
     \node[box=ink,minimum width=3.1cm,minimum height=0.82cm] at (12.05,-0.3)
       {\code{evaluate}, \code{rollout}\\[-1pt]{\tiny\color{muted}parallel evaluation, datasets}};
     % Layer labels
-    \foreach \y/\lab in {3.25/access,2.2/contract,1.15/environments,-0.3/services}{
+    \foreach \y/\lab in {4.35/learning,3.25/access,2.2/contract,1.15/environments,-0.3/services}{
       \node[font=\tiny\bfseries,text=muted,anchor=east] at (0.62,\y) {\MakeUppercase{\lab}};
     }
     \draw[rule,line width=0.6pt] (0.7,2.72) -- (13.6,2.72);
@@ -294,9 +309,9 @@ print(env_lib.evaluate(envs, policy, n_episodes=1024))
     \footnotesize\textbf{Existing learners}\\[2pt]
 \begin{pycode}
 from env_lib.wrappers import (
-    FlattenJointSpaces, to_parallel)
-flat = FlattenJointSpaces(env) # SB3
-par = to_parallel(env)  # PettingZoo
+  FlattenJointSpaces, to_parallel)
+sb3_env = FlattenJointSpaces(env)
+pettingzoo_env = to_parallel(env)
 \end{pycode}
     \vspace{6pt}
     \textbf{Shell}\\[2pt]
@@ -358,7 +373,7 @@ $ env-lib bench Platoon-v0
     \renewcommand{\arraystretch}{1.12}
     \begin{tabularx}{\linewidth}{@{}X r r@{}}
       \toprule
-      Environment & before 1.0 & 1.1\\
+      Environment & before 1.0 & 1.2\\
       \midrule
       \PerfRows
       \bottomrule
@@ -395,6 +410,49 @@ $ env-lib bench Platoon-v0
   \muted{Mean return over \NumEvalEpisodes{} seeded episodes (8 for AJLATT, 16 for Pistonball; higher is better).
   \code{env\_lib.baseline\_policy(env)} returns the controller as a function of the observation,
   so the same call drives one environment or a batch of thousands.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{Classical MARL algorithms, trained on the environments}
+  \begin{columns}[T,onlytextwidth]
+    \column{0.40\textwidth}
+    \footnotesize
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabularx}{\linewidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+      \toprule
+      Algorithm & Family, actions\\
+      \midrule
+      IPPO, MAPPO & on-policy; continuous or discrete\\
+      MADDPG, MATD3 & off-policy actor-critic; continuous\\
+      IQL, VDN, QMIX & value-based; discrete\\
+      \bottomrule
+    \end{tabularx}
+
+    \vspace{8pt}
+    One core serves all seven: per-agent view of the joint spaces, batched
+    experience collection, buffers, shared or per-agent networks, two
+    training loops.
+    \vspace{6pt}
+\begin{shcode}
+$ marl-train run mappo PowerGrid-v0
+$ marl-train compare PowerGrid-v0 \
+    --seeds 0 1 2      # baselines
+\end{shcode}
+    \column{0.57\textwidth}
+    \footnotesize
+    \textbf{Tuned presets, one CPU core, 64 seeded episodes}\\[3pt]
+    \renewcommand{\arraystretch}{1.15}
+    \setlength{\tabcolsep}{4.5pt}
+    \begin{tabular}{@{}llrrrr@{}}
+      \toprule
+      Algorithm & Environment & Time & Random & Trained & Baseline\\
+      \midrule
+      \MarlRows
+      \bottomrule
+    \end{tabular}\\[4pt]
+    \muted{Mean return, higher is better; the baseline is the environment's
+    classical controller.}
+  \end{columns}
 \end{frame}
 
 % ---------------------------------------------------------------------------
@@ -455,7 +513,7 @@ $ env-lib run Platoon-v0 --gif platoon.gif
     \begin{tabular}{@{}ll@{}}
       Slides & \code{docs/slides/my\_tool\_box\_slides.pdf}\\
       Handbook & \code{docs/manual/main.pdf}\\
-      Examples & \code{examples/} (one script per environment)\\
+      Examples & \code{examples/} (grouped by topic)\\
       Changes & \code{CHANGELOG.md}\\
     \end{tabular}
     \column{0.42\textwidth}

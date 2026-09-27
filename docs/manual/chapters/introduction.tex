@@ -8,7 +8,7 @@
 
 My Tool Box is a Python package for research on networked multi-agent control
 and multi-agent reinforcement learning (MARL). It is distributed as a single
-installable project, \pkg{my-tool-box}, that provides two import packages:
+installable project, \pkg{my-tool-box}, that provides three import packages:
 
 \begin{description}[leftmargin=1.6cm,style=nextline]
   \item[\pkg{env\_lib}] Multi-agent environments that follow the Gymnasium
@@ -19,6 +19,12 @@ installable project, \pkg{my-tool-box}, that provides two import packages:
     environments, a searchable catalogue and the \code{env-lib} command line,
     adapters for other interfaces, a classical baseline controller for every
     environment, evaluation tools and shared graph utilities.
+  \item[\pkg{marl\_algorithms}] Reference implementations of seven classical
+    multi-agent reinforcement learning algorithms (IPPO, MAPPO, MADDPG,
+    MATD3, IQL, VDN and QMIX) that train directly on the batched
+    \pkg{env\_lib} environments, with tuned presets, evaluation against the
+    baseline controllers and the \code{marl-train} command line. It requires
+    PyTorch.
   \item[\pkg{toolkit}] Research utilities that do not depend on the
     environments: \pkg{plotkit} creates publication-quality figures,
     \pkg{neural\_toolkit} provides PyTorch network building blocks and
@@ -26,9 +32,9 @@ installable project, \pkg{my-tool-box}, that provides two import packages:
     \pkg{argparse} parameters, with an optional graphical editor.
 \end{description}
 
-This manual describes version 1.1 of the package. It explains how to install
-it, documents every environment and toolkit module and the workflow layer that
-connects them to experiments, collects practical recipes and troubleshooting
+This manual describes version 1.2 of the package. It explains how to install
+it, documents every environment, the workflow layer that connects them to
+experiments, the learning algorithms and the toolkit modules, collects practical recipes and troubleshooting
 advice, and ends with an API reference and a migration guide for code written
 against earlier versions.
 
@@ -167,6 +173,16 @@ evaluation and trajectory recording. The graph utilities of
 topologies and compute Laplacians, algebraic connectivity and $k$-hop
 neighbourhoods.
 
+The \pkg{marl\_algorithms} package (Chapter~\ref{chap:marl}) trains
+cooperative multi-agent policies on these environments: IPPO and MAPPO for
+continuous and discrete actions, MADDPG and MATD3 for continuous actions, and
+IQL, VDN and QMIX for discrete actions, all built on one core that reads the
+per-agent structure of any environment, collects experience from the batched
+vector environments and evaluates the trained policies against random actions
+and the baseline controllers. \code{marl\_algorithms.train} and the
+\code{marl-train} command line train a tuned preset in at most about two
+minutes on one CPU core.
+
 The \pkg{toolkit} package contains three independent subpackages:
 
 \begin{itemize}
@@ -239,12 +255,14 @@ row of the observation only.
 environment, which makes a reference result one line of code.
 
 \paragraph{Light core, lazy extras.}
-\code{import env\_lib} and \code{import toolkit} load only the core
-dependencies (NumPy, SciPy, matplotlib, Gymnasium and PyYAML). Environment
-classes, renderers and toolkit subpackages are imported on first use, and
-PyTorch, pygame, pymunk, imageio and Tk are imported only when a feature that
-needs them is used; a missing dependency produces an error message that names
-the package extra to install. Other packages are optional integrations, never
+\code{import env\_lib}, \code{import marl\_algorithms} and
+\code{import toolkit} load only the core dependencies (NumPy, SciPy,
+matplotlib, Gymnasium and PyYAML). Environment classes, renderers, algorithms
+and toolkit subpackages are imported on first use, and PyTorch, pygame,
+pymunk, imageio and Tk are imported only when a feature that needs them is
+used; a missing dependency produces an error message that names the package
+extra to install, except in \pkg{marl\_algorithms}, which always needs PyTorch
+and reports PyTorch's own \code{ModuleNotFoundError}. Other packages are optional integrations, never
 requirements: the parallel adapter of Section~\ref{sec:workflow-wrappers},
 for example, works without the library whose interface it implements.
 
@@ -291,11 +309,22 @@ My_Tool_Box/
       pistonball_env/      Pistonball
       linemsg_env/         LineMsg
       wireless_comm_env/   WirelessComm
+    marl_algorithms/       learning algorithms (import name marl_algorithms)
+      core/                agent spec, runner, buffers, networks, base classes
+      algorithms/          one module per algorithm, by family: ppo/ (IPPO,
+                           MAPPO), ddpg/ (MADDPG, MATD3), q_learning/ (IQL,
+                           VDN, QMIX)
+      presets/             tuned settings for the environments
+      registry.py          train(), algorithm records
+      baselines.py         compare(): the algorithms as baselines
+      __main__.py          the marl-train command line
     toolkit/               research utilities (import name toolkit)
       plotkit/             plotting
       neural_toolkit/      PyTorch networks and tabular tools
       parakit/             argparse parameter management
-  examples/                runnable, documented example scripts
+  examples/                runnable, documented example scripts:
+                           getting_started/, environments/, algorithms/,
+                           toolkit/
   benchmarks/              performance measurements
   tests/                   pytest suite
   docs/manual/             this manual (LaTeX sources)
@@ -334,7 +363,7 @@ Python identifiers are set in \code{monospace}, package and module names in
 Shell commands are meant to be run from the repository root in a POSIX shell;
 on Windows, replace \code{export VAR=value} by \code{set VAR=value}
 (\code{cmd}) or \code{\$env:VAR="value"} (PowerShell). Code examples use the
-public API of version 1.1 and were executed with it. Array shapes are written
+public API of version 1.2 and were executed with it. Array shapes are written
 as tuples, for example \code{(n\_agents, obs\_dim)}; \code{B} denotes a batch
 size (the number of copies of a vector environment) and \code{T} a sequence
 length.
@@ -355,10 +384,14 @@ length.
     closes with the workflow layer: vectorised simulation, the catalogue and
     the command line, adapters, baseline controllers and evaluation
     (Chapter~\ref{chap:workflow}).
-  \item Part~II documents the toolkit: its structure and \pkg{parakit}
+  \item Part~II documents the multi-agent reinforcement learning algorithms of
+    \pkg{marl\_algorithms}: their shared core, the equations of every method,
+    the configuration, the presets with their results, and how to add an
+    algorithm (Chapter~\ref{chap:marl}).
+  \item Part~III documents the toolkit: its structure and \pkg{parakit}
     (Chapter~\ref{chap:toolkit}), \pkg{plotkit} (Chapter~\ref{chap:plotkit})
     and \pkg{neural\_toolkit} (Chapter~\ref{chap:neural}).
-  \item Part~III is practical: the example scripts, recording, benchmarks and
+  \item Part~IV is practical: the example scripts, recording, benchmarks and
     the contributor workflow (Chapter~\ref{chap:examples}), and
     troubleshooting (Chapter~\ref{chap:troubleshooting}).
   \item Appendix~\ref{app:api} is a compact API reference and
@@ -380,7 +413,7 @@ If the package contributes to published work, please cite it as follows:
   author  = {Wang, Dongming},
   title   = {My Tool Box: Multi-Agent Reinforcement Learning
              Environments and Research Utilities},
-  version = {1.1.0},
+  version = {1.2.0},
   year    = {2026},
   url     = {https://github.com/EricDMW/My_Tool_Box}
 }

@@ -1,12 +1,14 @@
 % Figures quoted on the slides, measured on one core of an Intel Xeon at
 % 2.8 GHz (OMP_NUM_THREADS=1) with benchmarks/benchmark_vector.py,
-% benchmarks/benchmark_envs.py and env_lib.evaluate (release 1.1).
+% benchmarks/benchmark_envs.py and env_lib.evaluate (environments, release 1.1;
+% unchanged in 1.2) and benchmarks/benchmark_marl.py (algorithms, release 1.2).
 \newcommand{\NumFamilies}{8}
 \newcommand{\NumIds}{18}
 \newcommand{\NumContinuous}{6}
+\newcommand{\NumAlgorithms}{7}
 \newcommand{\NumThroughput}{2--3\,M}
-\newcommand{\NumTests}{1\,140}
-\newcommand{\NumHandbookPages}{187}
+\newcommand{\NumTests}{1\,369}
+\newcommand{\NumHandbookPages}{227}
 \newcommand{\NumEvalEpisodes}{64}
 \newcommand{\FigTitleA}{power_grid.png}
 \newcommand{\FigTitleB}{platoon.png}
@@ -34,3 +36,11 @@
   Pistonball & ramp towards the ball & $-205$ & $841$\\
   LineMsg & always relay & $43$ & $95$\\
   WirelessComm & collision-free access schedule & $388$ & $924$\\}
+% marl_algorithms presets: benchmarks/benchmark_marl.py (train seed 0, evaluation seed 1).
+\newcommand{\MarlRows}{%
+  MAPPO & PowerGrid & 106\,s & $-629$ & $-0.89$ & $-0.79$\\
+  MAPPO & Platoon & 102\,s & $-5350$ & $-65$ & $-46$\\
+  IPPO & Consensus & 83\,s & $-18041$ & $-1550$ & $-1518$\\
+  MADDPG & Consensus & 72\,s & $-18041$ & $-1681$ & $-1518$\\
+  VDN & Wireless & 74\,s & $139$ & $338$ & $340$\\
+  QMIX & LineMsg & 16\,s & $43$ & $95$ & $95$\\}

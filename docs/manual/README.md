@@ -1,9 +1,10 @@
 # My Tool Box User Manual
 
 This directory contains the LaTeX sources of the user manual for My Tool Box
-1.1, the multi-agent environments for networked control and reinforcement
-learning (`env_lib`) and the research utilities (`toolkit`) of this
-repository.
+1.2, the multi-agent environments for networked control and reinforcement
+learning (`env_lib`), the classical multi-agent reinforcement learning
+algorithms trained on them (`marl_algorithms`) and the research utilities
+(`toolkit`) of this repository.
 
 ## Building
 
@@ -45,7 +46,8 @@ docs/manual/
   build.sh                  build script (latexmk)
   chapters/
     introduction.tex        purpose, overview, design principles, licence and citation
-    installation.tex        requirements, extras, env-lib check, building the manual
+    installation.tex        requirements, extras, installation check, building
+                            the manual
     envlib_overview.tex     common environment interface, registry and metadata,
                             reset options, graph utilities, rendering, registered ids
     kos_env.tex             Kuramoto oscillator networks (NumPy and PyTorch)
@@ -57,22 +59,32 @@ docs/manual/
     ajlatt_env.tex          multi-robot localisation and target tracking
     workflow.tex            vector environments, catalogue, env-lib command line,
                             wrappers, baseline controllers, evaluation
+    marl_algorithms.tex     multi-agent RL algorithms: overview, quick start
+                            (Python and the marl-train command line), using
+                            them as baselines, design of the core,
+                            IPPO/MAPPO, MADDPG/MATD3, IQL/VDN/QMIX, presets
+                            and results, the demonstration script, adding an
+                            algorithm
     toolkit_overview.tex    toolkit structure and parakit
     plotkit.tex             plotting
     neural_toolkit.tex      PyTorch networks and tabular tools
-    examples.tex            example scripts, env-lib command line, recording,
-                            benchmarks, contributing
+    examples.tex            example scripts by folder (including the MARL
+                            training demo and the baseline comparison),
+                            env-lib command line, recording, benchmarks,
+                            contributing
     troubleshooting.tex     common problems and solutions
   appendices/
-    api_reference.tex       signatures of the public API and the env-lib commands
-    migration.tex           migrating from 1.0 to 1.1 and from versions before 1.0
+    api_reference.tex       signatures of the public API and the env-lib and
+                            marl-train commands
+    migration.tex           migrating from 1.1 to 1.2, from 1.0 to 1.1 and from
+                            versions before 1.0
   figures/                  images included by the chapters
   output/                   build products (not tracked)
 ```
 
 `main.tex` includes the chapters with `\include` in the order of the list
-above, grouped into the parts Environments, Toolkit and Practice, followed by
-the appendices.
+above, grouped into the parts Environments, Algorithms, Toolkit and Practice,
+followed by the appendices.
 
 ## Writing conventions
 
