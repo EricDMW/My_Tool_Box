@@ -357,23 +357,23 @@ class AJLATTEnv(gym.Env):
             "episode_collisions": self._episode_collisions.copy(),
             "target_observed": self.RT_obs[:, self.nR].astype(bool),
             "communication": self.com_plot.astype(bool),
-            "robot_cov_trace": np.array([np.trace(est.cov) for est in self.robot_est]),
-            "target_cov_trace": np.array(
-                [np.trace(self.target_est[i][0].cov) for i in range(self.nR)]
-            ),
+            **dict(zip(("robot_cov_trace", "target_cov_trace"), self._cov_traces())),
             "step": self.step_count,
         }
+
+    def _cov_traces(self) -> tuple[np.ndarray, np.ndarray]:
+        """Traces of the robots' self covariances and of their target-0 covariances."""
+        robot = np.array([est.cov for est in self.robot_est])
+        target = np.array([self.target_est[i][0].cov for i in range(self.nR)])
+        return np.trace(robot, axis1=1, axis2=2), np.trace(target, axis1=1, axis2=2)
 
     def _record_history(self, reward) -> None:
         robot_true = np.array([agent.state[:2] for agent in self.robot_true])
         robot_est = np.array([est.state[:2] for est in self.robot_est])
         target_est = np.array([self.target_est[i][0].state[:2] for i in range(self.nR)])
-        self._history["robot_cov_trace"].append(
-            np.array([np.trace(est.cov) for est in self.robot_est])
-        )
-        self._history["target_cov_trace"].append(
-            np.array([np.trace(self.target_est[i][0].cov) for i in range(self.nR)])
-        )
+        robot_traces, target_traces = self._cov_traces()
+        self._history["robot_cov_trace"].append(robot_traces)
+        self._history["target_cov_trace"].append(target_traces)
         self._history["robot_error"].append(np.linalg.norm(robot_est - robot_true, axis=1))
         self._history["target_error"].append(
             np.linalg.norm(target_est - self.target_true[0].state[:2], axis=1)
@@ -386,7 +386,7 @@ class AJLATTEnv(gym.Env):
         cfg = self.config
         obs = np.zeros((nR, self.obs_dim))
         poses = np.array([est.state for est in self.robot_est])
-        cov_traces = np.array([np.trace(est.cov) for est in self.robot_est])
+        cov_traces, target_traces = self._cov_traces()
         targets = [self.target_est[i][0] for i in range(nR)]
         theta = poses[:, 2]
         cos, sin = np.cos(theta), np.sin(theta)
@@ -400,7 +400,7 @@ class AJLATTEnv(gym.Env):
         obs[:, 0:2] = (rot_t @ offset)[:, :, 0]
         obs[:, 2] = target_states[:, 2] - theta
         obs[:, 3:5] = self.target_velocity
-        obs[:, 5] = [np.trace(target.cov) for target in targets]
+        obs[:, 5] = target_traces
         if nR > 1:
             others = self._others
             block = obs[:, 6 : 6 + 4 * (nR - 1)].reshape(nR, nR - 1, 4)
@@ -513,8 +513,9 @@ class AJLATTEnv(gym.Env):
             residual = np.array([z[0] - zhat[0], pi_to_pi(z[1] - zhat[1])])
             inv_r = psd_inverse(R[det_id][other] + h_obj @ obj.cov @ h_obj.T)
             z_bar = residual + h_self @ me.state
-            s_list.append(h_self.T @ inv_r @ h_self)
-            y_list.append(h_self.T @ inv_r @ z_bar)
+            weighted = h_self.T @ inv_r
+            s_list.append(weighted @ h_self)
+            y_list.append(weighted @ z_bar)
         if not s_list:
             return  # nothing observed: the fused estimate equals the prior
         omega = psd_inverse(me.cov)
@@ -568,19 +569,15 @@ class AJLATTEnv(gym.Env):
         residual = np.array([z[0] - zhat[0], pi_to_pi(z[1] - zhat[1])])
         inv_r = psd_inverse(R[robot][self.nR + t] + h_robot @ me.cov @ h_robot.T)
         z_bar = residual + h_target @ target.state
-        return h_target.T @ inv_r @ h_target, h_target.T @ inv_r @ z_bar
+        weighted = h_target.T @ inv_r
+        return weighted @ h_target, weighted @ z_bar
 
     def get_reward(self, rt_obs) -> tuple[np.ndarray, np.ndarray]:
         """Per-robot rewards and obstacle-collision flags."""
         cfg = self.config
         nR = self.nR
-        reward = np.array(
-            [
-                -cfg.target_cov_weight * np.trace(self.target_est[i][0].cov)
-                - cfg.robot_cov_weight * np.trace(self.robot_est[i].cov)
-                for i in range(nR)
-            ]
-        )
+        robot_traces, target_traces = self._cov_traces()
+        reward = -cfg.target_cov_weight * target_traces - cfg.robot_cov_weight * robot_traces
         collided = np.zeros(nR, dtype=bool)
         poses = np.array([est.state for est in self.robot_est])
         lo, hi = self.MAP.mapmin + 0.1, self.MAP.mapmax - 0.1

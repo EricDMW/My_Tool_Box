@@ -1,3 +1,551 @@
+% ---------------------------------------------------------------------------
+% Power grid frequency control environment
+% ---------------------------------------------------------------------------
+\begingroup
+% Line breaking for paragraphs with long, unbreakable identifiers (local to
+% this chapter): allow looser lines instead of overfull ones.
+\setlength{\emergencystretch}{3em}\tolerance=1000
 \chapter{Power Grid Frequency Control}\label{chap:power_grid}
 
-% Placeholder: written in the 1.1 update.
+\code{env\_lib.power\_grid\_env.PowerGridEnv} (registered as \envid{PowerGrid-v0},
+new in version 1.1) is a benchmark for decentralised frequency control of a
+networked power system. The $n$ buses of a transmission network, synchronous
+generators or inverter-based resources, are the agents. They are coupled
+through the power lines and obey the classical swing equations. Step load
+changes and random load fluctuations push the bus frequencies away from their
+nominal value and excite lightly damped electro-mechanical oscillations; every
+agent injects a bounded, fast frequency response (for example from storage or
+inverter headroom) to arrest the frequency drop and damp the oscillations,
+using only local measurements and aggregates over its neighbourhood in the
+network.
+
+The environment is designed for research on networked multi-agent control: the
+interaction graph and all physical parameters are explicit and reproducible,
+the reward is a sum of per-agent terms, the benchmark system is fixed by a seed
+while \code{randomize\_network=True} resamples topology and parameters for
+robustness studies, and the dynamics are written once for a batch of grids, so
+\code{PowerGridVectorEnv} simulates thousands of grids at once
+(Section~\ref{sec:power-grid-vector}). The decentralised droop controller is
+included as a baseline (Section~\ref{sec:power-grid-baseline}). Typical uses are
+learning decentralised controllers that outperform droop control (for example
+by adapting gains to the local inertia or by exploiting neighbour information),
+studying the effect of the network topology and of low inertia, and
+comparing learned policies with model-based designs.
+
+% ---------------------------------------------------------------------------
+\section{Model}\label{sec:power-grid-model}
+
+Bus $i$ has the voltage (or rotor) angle $\theta_i$ in radians and the frequency
+deviation $\omega_i$ in rad/s from the nominal angular frequency
+$\omega_0 = 2\pi f_0$ ($f_0$ = \code{nominal\_frequency}); the frequency deviation
+in hertz is $\Delta f_i = \omega_i / 2\pi$. On a lossless, Kron-reduced network
+(the load buses are eliminated, so every node is an active bus) with line
+susceptances $B_{ij} \ge 0$ (per unit), the swing equations read
+\begin{equation}
+  \dot\theta_i = \omega_i, \qquad
+  M_i \dot\omega_i = P_i(t) - D_i \omega_i
+      - \sum_{j} B_{ij} \sin(\theta_i - \theta_j) + u_i,
+  \label{eq:swing}
+\end{equation}
+with the inertia coefficient $M_i = 2H_i/\omega_0$ ($H_i$ the inertia constant
+in seconds), the damping coefficient $D_i = d_i/\omega_0$ ($d_i$ the per-unit
+damping, which lumps the frequency sensitivity of the loads and mechanical
+damping), the net injection $P_i(t) = P_i^0 + \Delta P_i(t)$ and the control
+injection $u_i \in [-u_{\max,i}, u_{\max,i}]$. The sum
+$P^e_i = \sum_j B_{ij}\sin(\theta_i - \theta_j)$ is the electrical power exported
+by bus $i$. Powers are in per unit of a common base, time in seconds.
+
+\paragraph{Network and operating point.} The line graph is built with the
+function \code{make\_graph} of \pkg{env\_lib.utils.graphs} (topologies in
+Table~\ref{tab:power-grid-topologies}); $H_i$, $d_i$ and the susceptance of every
+line are drawn uniformly from \code{inertia\_range}, \code{damping\_range} and
+\code{susceptance\_range}. The operating point is constructed so that it is an
+exact and stable equilibrium with a prescribed stress. A raw injection pattern
+$z_i \sim \mathcal{U}(-1, 1)$, shifted to zero mean, is solved with the
+linearised (DC) flow equations $L_B \theta^{\mathrm{DC}} = z$ ($L_B$ the
+susceptance-weighted Laplacian, $\sum_i \theta^{\mathrm{DC}}_i = 0$); the angles
+are scaled so that the most loaded line operates at the loading
+$\ell$ = \code{line\_loading},
+\begin{equation}
+  \theta^\star = s\,\theta^{\mathrm{DC}}, \qquad
+  s = \frac{\arcsin \ell}{\max_{(i,j) \in \mathcal{E}} |\theta^{\mathrm{DC}}_i - \theta^{\mathrm{DC}}_j|},
+  \qquad
+  P_i^0 = \sum_j B_{ij} \sin(\theta^\star_i - \theta^\star_j),
+  \label{eq:power-grid-operating-point}
+\end{equation}
+and the nominal injections are the exact flows at these angles (they sum to
+zero). Hence $(\theta^\star, 0)$ is a synchronous equilibrium of
+\eqref{eq:swing} without disturbance and control, to machine precision. Since
+every line angle satisfies $|\theta^\star_i - \theta^\star_j| < \pi/2$, the
+linearisation couples the buses through a Laplacian with positive weights
+$B_{ij}\cos(\theta^\star_i - \theta^\star_j)$, and the equilibrium is stable
+(up to the rotational symmetry of the angles). A test verifies that Newton's
+method on the flow equations, started from the DC solution, converges to the
+same angles. Every episode starts from this equilibrium, so only the
+disturbances drive the system away from it. The benchmark network is sampled
+once at construction from \code{network\_seed} (default 0), so the default system
+is the same for every user.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Network topologies (\code{topology}); see \code{make\_graph} for details.}
+  \label{tab:power-grid-topologies}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    \code{topology} & Graph \\
+    \midrule
+    \code{"small\_world"} (default) & Watts--Strogatz ring lattice, every bus linked to its 4 nearest buses, each link rewired with probability 0.1 (resampled until connected) \\
+    \code{"ring"}, \code{"line"}, \code{"star"}, \code{"complete"} & deterministic graphs (bus 0 is the hub of the star) \\
+    \code{"grid"} & 4-neighbour lattice of the most square shape with $n$ nodes \\
+    \code{"erdos\_renyi"} & independent edges with probability \code{edge\_probability}, by default $\min(1, 2\ln n/n)$, resampled until connected \\
+    \code{"random\_geometric"} & buses uniform in the unit square, linked when closer than a radius about twice the connectivity threshold \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Parameters of \code{make\_graph} (\code{edge\_probability}, \code{neighbors},
+\code{rewire\_probability}, \code{radius}) are passed through
+\code{topology\_kwargs}.
+
+\paragraph{Disturbances.} The injection disturbance is
+$\Delta P_i = S_i + X_i$. The step component $S_i$ receives step load changes:
+at reset, \code{initial\_disturbances} distinct buses are hit; afterwards, at
+every step boundary an event occurs with probability $1 - e^{-\lambda \Delta t}$
+($\lambda$ = \code{disturbance\_rate}, $\Delta t$ = \code{dt}) at a uniformly random
+bus. Step sizes $|\Delta P|$ are uniform in \code{disturbance\_magnitude}; a step
+is a load increase (a negative change of the injection) with probability
+\code{load\_increase\_prob}. Steps persist until the end of the episode. The
+optional Ornstein--Uhlenbeck fluctuation $X_i$ has the stationary standard
+deviation $\sigma$ = \code{noise\_std} and the correlation time
+$\tau$ = \code{noise\_tau}; it starts from its stationary distribution and is
+updated exactly at every step boundary,
+\begin{equation}
+  X_i(t_{k+1}) = a\, X_i(t_k) + \sigma \sqrt{1 - a^2}\, \xi_{i,k}, \qquad
+  a = e^{-\Delta t / \tau}, \quad \xi_{i,k} \sim \mathcal{N}(0, 1).
+\end{equation}
+All random draws come from \code{self.np\_random}, in a vectorised way. The
+disturbance sequence of a seeded episode does not depend on the actions, so
+different controllers can be compared on identical disturbances.
+
+\paragraph{Integration.} The action and the disturbance are held constant over
+the control interval $\Delta t$ (zero-order hold). Equation \eqref{eq:swing} is
+integrated with the classical fourth-order Runge--Kutta scheme and
+\code{substeps} sub-steps of length $h = \Delta t/\code{substeps}$. The fastest
+electro-mechanical mode is bounded by
+$\omega_{\max}^2 \le \max_i 2\sum_j B_{ij}/M_i$ (Gershgorin); the environment
+warns when $h\,\omega_{\max}$ exceeds 2.5, close to the stability limit of RK4 on
+the imaginary axis. On the default system, after 5 seconds of an undisturbed
+recovery from a step load change (largest $|\omega_i|$ 0.354 rad/s), the largest
+deviation from a reference solution with 32 sub-steps was
+$1.3\cdot10^{-3}$ rad/s with one sub-step, $8.7\cdot10^{-5}$ rad/s with two (the
+default) and $5.5\cdot10^{-6}$ rad/s with four: the expected fourth-order
+convergence.
+
+\paragraph{Energy function.} Without disturbance and control, the classical
+energy function of the swing equations,
+\begin{equation}
+  V = \tfrac12 \sum_i M_i \omega_i^2
+      - \sum_i P_i^0 (\theta_i - \theta^\star_i)
+      + \tfrac12 \sum_{i,j} B_{ij}
+        \bigl(\cos(\theta^\star_i - \theta^\star_j) - \cos(\theta_i - \theta_j)\bigr),
+\end{equation}
+satisfies $\dot V = -\sum_i D_i \omega_i^2 \le 0$. The tests check that $V$
+decreases monotonically in simulation and is conserved without damping.
+
+\paragraph{The default system.} The default benchmark has 16 buses and 32 lines
+(small-world graph, bus degrees 2 to 5), inertia constants between 2.5 and 7.6
+seconds and nominal injections between $-0.62$ and $0.50$ per unit. Its
+linearisation around $\theta^\star$ has 15 oscillatory modes between 0.55 and
+2.41 Hz with damping ratios between 1.4\,\% and 4.4\,\%, and a
+centre-of-inertia mode with the time constant $\sum_i M_i/\sum_i D_i = 3.1$
+seconds. Without control a load step therefore produces a slow drift of the
+system frequency with visible, slowly decaying inter-area oscillations; with
+the droop baseline ($k = 0.25$) the damping ratios of the oscillatory modes
+rise to between 0.35 and 0.95.
+
+% ---------------------------------------------------------------------------
+\section{Spaces}\label{sec:power-grid-spaces}
+
+\paragraph{Action.} \code{Box(-u\_max, u\_max, (n,), float32)}: the control
+injection $u_i$ of every bus in per unit (default bound 0.1). Any array with $n$
+entries is accepted; values are clipped to $[-u_{\max,i}, u_{\max,i}]$, and NaN or
+infinite values raise \code{ValueError}.
+
+\paragraph{Observation.} \code{Box(-inf, inf, (n, 10), float32)}. Row $i$ holds
+quantities a controller at bus $i$ can measure locally, aggregates over its
+$\kappa$-hop neighbourhood $\mathcal{N}_i$ ($\kappa$ = \code{neighbourhood},
+default 1, bus $i$ excluded) and two local parameters
+(Table~\ref{tab:power-grid-obs}). Every feature is multiplied by a fixed factor
+(\code{OBSERVATION\_SCALE}), chosen so that typical values are of order one; the
+factors do not depend on the constructor arguments, so a policy can recover the
+physical values. \code{env.observation\_layout} returns the column slice of
+every key and \code{env.observation\_scale} the factors.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{PowerGrid observation (row $i$). The RoCoF is zero on the first
+    observation of an episode.}
+  \label{tab:power-grid-obs}
+  \begin{tabularx}{\textwidth}{@{}cl>{\raggedright\arraybackslash}Xll@{}}
+    \toprule
+    Col. & Key & Content & Unit & Scale \\
+    \midrule
+    0 & \code{omega} & frequency deviation $\omega_i$ & rad/s & 1 \\
+    1 & \code{rocof} & rate of change of frequency over the last step, $(\omega_i(t) - \omega_i(t - \Delta t))/\Delta t$ & rad/s$^2$ & 0.1 \\
+    2 & \code{disturbance} & local injection disturbance $\Delta P_i$ for the next interval & pu & 10 \\
+    3 & \code{power\_flow} & change of the exported power, $P^e_i - P^0_i$ & pu & 10 \\
+    4 & \code{action} & previous applied control $u_i$ & pu & 10 \\
+    5 & \code{neighbour\_omega\_mean} & mean of $\omega_j$ over $\mathcal{N}_i$ & rad/s & 1 \\
+    6 & \code{neighbour\_omega\_max} & maximum of $|\omega_j|$ over $\mathcal{N}_i$ & rad/s & 1 \\
+    7 & \code{neighbour\_action\_mean} & mean previous control $u_j$ over $\mathcal{N}_i$ & pu & 10 \\
+    8 & \code{capacity} & control bound $u_{\max,i}$ & pu & 10 \\
+    9 & \code{inertia} & inertia constant $H_i$ & s & 0.1 \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Reward and episode end}\label{sec:power-grid-reward}
+
+Agent $i$ is penalised for its frequency deviation, its rate of change of
+frequency $\rho_i = (\omega_i(t_{k+1}) - \omega_i(t_k))/\Delta t$ and its control
+effort, all evaluated at the end of the step,
+\begin{equation}
+  r_i = -\bigl(w_f\, \omega_i^2 + w_\rho\, \rho_i^2 + w_u\, u_i^2\bigr)\,\Delta t
+        \;-\; c_{\mathrm{trip}}\, \mathbb{1}[\text{trip}],
+  \label{eq:power-grid-reward}
+\end{equation}
+with $w_f$ = \code{w\_freq} (default 1), $w_\rho$ = \code{w\_rocof} (0.1),
+$w_u$ = \code{w\_u} (10) and $c_{\mathrm{trip}}$ = \code{trip\_penalty} (100). The
+team reward returned by \code{step()} is $R = \sum_i r_i$; the per-agent rewards
+are in \code{info["agent\_rewards"]}. The weights were chosen so that all three
+terms matter for a good controller: over 1000 default episodes with the droop
+baseline, the three terms contributed on average 0.27, 0.31 and 0.17 to the
+team cost of an episode (frequency, RoCoF, control), whereas without control
+the frequency term dominates (68 on average) and with random actions the RoCoF
+term does (330).
+
+\code{terminated} is \code{True} when the largest deviation exceeds the trip
+limit, $\max_i |\omega_i| > 2\pi f_{\lim}$ with $f_{\lim}$ =
+\code{frequency\_limit} (default 0.5 Hz), which stands for loss of stability or a
+protection trip; every agent then receives the extra penalty
+$-c_{\mathrm{trip}}$. The default penalty exceeds the frequency cost of
+operating at the limit for a whole default episode
+($w_f (2\pi f_{\lim})^2 \cdot 10\,\mathrm{s} \approx 99$ per agent), so tripping
+early never pays off through the frequency term. \code{truncated} is
+\code{True} after \code{max\_steps} steps.
+
+% ---------------------------------------------------------------------------
+\section{Parameters}\label{sec:power-grid-params}
+
+All constructor arguments are keyword-only. The defaults make an episode
+10 seconds of simulated time (200 steps of 50 ms, a realistic update period of
+fast frequency response), a disturbance a sizeable fraction of a bus injection,
+and the uncontrolled system stable but slow to settle.
+
+\begingroup\small
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.25\textwidth}>{\raggedright\arraybackslash}p{0.15\textwidth}>{\raggedright\arraybackslash}p{0.54\textwidth}@{}}
+  \caption{Constructor parameters of \code{PowerGridEnv} (also accepted by \code{PowerGridVectorEnv}).}\label{tab:power-grid-params}\\
+  \toprule
+  Parameter & Default & Description \\
+  \midrule
+  \endfirsthead
+  \toprule
+  Parameter & Default & Description \\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  \code{n\_buses} & \code{16} & Number of buses (agents) $n \ge 2$; tested up to several hundred. \\
+  \code{topology} & \code{"small\_world"} & Line graph (Table~\ref{tab:power-grid-topologies}). \\
+  \code{topology\_kwargs} & \code{None} & Extra \code{make\_graph} arguments. \\
+  \code{network\_seed} & \code{0} & Seed of the benchmark network, sampled once at construction; \code{None} uses fresh entropy. \\
+  \code{randomize\_network} & \code{False} & Resample topology and all physical parameters from \code{self.np\_random} on every reset (per copy in the vector environment). \\
+  \code{inertia\_range} & \code{(2.0, 8.0)} & Range of the inertia constants $H_i$ in seconds (low-inertia to conventional units). \\
+  \code{damping\_range} & \code{(2.0, 6.0)} & Range of the per-unit damping $d_i$; $D_i = d_i/\omega_0$. \\
+  \code{susceptance\_range} & \code{(0.3, 0.8)} & Range of the line susceptances $B_{ij}$ (per unit); sets the modes to about 0.5--2.5 Hz. \\
+  \code{line\_loading} & \code{0.5} & Loading $\max|\sin(\theta^\star_i - \theta^\star_j)|$ of the most loaded line, in $[0, 1)$; higher values weaken the synchronising coupling. \\
+  \code{nominal\_frequency} & \code{50.0} & $f_0$ in Hz. \\
+  \code{u\_max} & \code{0.1} & Control bound $u_{\max,i}$ (per unit), scalar or array of shape $(n,)$. \\
+  \code{dt} & \code{0.05} & Control interval $\Delta t$ in seconds. \\
+  \code{substeps} & \code{2} & RK4 sub-steps per interval. \\
+  \code{max\_steps} & \code{200} & Episode length before truncation. \\
+  \code{initial\_disturbances} & \code{1} & Number of distinct buses with a step load change at reset. \\
+  \code{disturbance\_rate} & \code{0.1} & Rate (1/s) of further step load changes. \\
+  \code{disturbance\_magnitude} & \code{(0.05, 0.2)} & Range of the step sizes $|\Delta P|$ (per unit). \\
+  \code{load\_increase\_prob} & \code{0.5} & Probability that a step is a load increase. \\
+  \code{noise\_std} & \code{0.0} & Stationary standard deviation $\sigma$ of the Ornstein--Uhlenbeck load fluctuation (per unit); 0 disables it. \\
+  \code{noise\_tau} & \code{1.0} & Correlation time $\tau$ of the fluctuation in seconds. \\
+  \code{frequency\_limit} & \code{0.5} & Trip limit $f_{\lim}$ in Hz. \\
+  \code{w\_freq}, \code{w\_rocof}, \code{w\_u} & \code{1.0}, \code{0.1}, \code{10.0} & Reward weights $w_f$, $w_\rho$, $w_u$. \\
+  \code{trip\_penalty} & \code{100.0} & Penalty $c_{\mathrm{trip}}$ added to every agent's reward on a trip. \\
+  \code{neighbourhood} & \code{1} & Number of hops $\kappa$ of the observed neighbourhood. \\
+  \code{render\_mode} & \code{None} & \code{None}, \code{"human"} or \code{"rgb\_array"}. \\
+\end{longtable}
+\endgroup
+
+Invalid values raise \code{ValueError} and arguments of the wrong type
+\code{TypeError}.
+
+% ---------------------------------------------------------------------------
+\section{Reset options, info dictionary and properties}\label{sec:power-grid-info}
+
+\code{reset(seed=None, options=None)} starts from the equilibrium with zero
+frequency deviation and random initial steps. The options
+\code{"theta"}, \code{"omega"} and \code{"disturbance"} (arrays of shape
+\code{(n,)}) set the initial angles, frequency deviations and step disturbance
+instead; their values are validated. Other keys are ignored with a
+\code{UserWarning}, so generic tools that pass their own options keep working.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{PowerGrid info dictionary (returned by \code{reset()} and \code{step()};
+    frequencies in rad/s).}
+  \label{tab:power-grid-info}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Key & Content \\
+    \midrule
+    \code{agent\_rewards} & \code{float64} array \code{(n,)} of the rewards $r_i$ (zeros at reset) \\
+    \code{omega}, \code{rocof} & arrays \code{(n,)} of $\omega_i$ and $\rho_i$ \\
+    \code{max\_abs\_omega} & current $\max_i |\omega_i|$ \\
+    \code{frequency\_nadir} & lowest $\omega_i$ over buses and time in the episode so far \\
+    \code{peak\_abs\_omega} & largest $|\omega_i|$ over buses and time in the episode so far \\
+    \code{coi\_omega} & centre-of-inertia frequency $\sum_i M_i\omega_i / \sum_i M_i$ \\
+    \code{frequency\_spread} & standard deviation of $\omega_i$ over the buses \\
+    \code{control\_effort} & $\sum_i |u_i|$ of the applied control (per unit) \\
+    \code{order\_parameter} & phase order parameter $|\frac1n \sum_i e^{\mathrm{j}\theta_i}|$ \\
+    \code{total\_disturbance} & $\sum_i \Delta P_i$ (per unit; negative for a net load increase) \\
+    \code{tripped}, \code{step}, \code{time} & trip flag, steps taken, simulated time in seconds \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Read-only properties of \code{PowerGridEnv} (arrays are copies).}
+  \label{tab:power-grid-properties}
+  \begin{tabularx}{\textwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Property & Content \\
+    \midrule
+    \code{adjacency}, \code{edges} & boolean line graph \code{(n, n)} and the lines $(i, j)$, $i < j$, as \code{(E, 2)} \\
+    \code{susceptance} & weighted adjacency $B_{ij}$, \code{(n, n)} \\
+    \code{inertia}, \code{inertia\_constants}, \code{damping} & $M_i$, $H_i$ and $D_i$ \\
+    \code{nominal\_injections}, \code{equilibrium} & $P_i^0$ and $\theta^\star$ \\
+    \code{u\_max}, \code{omega\_limit} & control bounds and the trip limit in rad/s \\
+    \code{theta}, \code{omega}, \code{disturbance} & current state and $\Delta P_i$ (after \code{reset()}) \\
+    \code{line\_flows} & $B_{ij}\sin(\theta_i - \theta_j)$ in the order of \code{edges} \\
+    \code{time}, \code{step\_count} & simulated time and steps of the episode \\
+    \code{positions} & plotting layout of the buses in $[-1, 1]^2$ \\
+    \code{observation\_layout}, \code{observation\_scale} & column slices and scale factors of an observation row \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Baseline controller}\label{sec:power-grid-baseline}
+
+\code{droop\_policy(obs, gain=0.25)} (module-level function in
+\code{env\_lib.power\_grid\_env}) implements decentralised droop control, the
+classical primary frequency response,
+\begin{equation}
+  u_i = \operatorname{clip}\bigl(-k\,\omega_i,\; -u_{\max,i},\; u_{\max,i}\bigr),
+  \label{eq:droop}
+\end{equation}
+with the gain $k$ in per unit power per rad/s. It reads $\omega_i$ and
+$u_{\max,i}$ from agent $i$'s own observation row and works for any leading batch
+shape, \code{(..., n, 10) -> (..., n)}, so the same function drives the single
+and the vector environment. \code{env\_lib.baseline\_policy(env)} returns it for
+\envid{PowerGrid-v0}.
+
+The droop gain is limited by the sampling of the controller. Over one control
+interval, the local loop of bus $i$ behaves approximately like
+$\omega_i(t_{k+1}) \approx (1 - k\Delta t / M_i)\,\omega_i(t_k)$, which is
+non-oscillatory for $k\Delta t < M_i$ and unstable for $k\Delta t > 2M_i$ (the
+control then chatters between its bounds). With the default ranges
+($H_i \ge 2$ s at 50 Hz, $\Delta t = 0.05$ s) the default gain $0.25$ satisfies
+the first condition for every admissible network. Table~\ref{tab:power-grid-baseline}
+compares zero control, uniformly random actions and droop control with several
+gains over 1000 default episodes; droop control improves the mean return by two
+orders of magnitude and never trips. On the default network (smallest inertia
+constant 2.5 s) the best uniform gain lies near $0.5$, while $k = 0.75$ violates
+the sampling condition at the low-inertia buses: the RoCoF term explodes. A
+learned policy can use the \code{inertia} and \code{rocof} features to go beyond
+a uniform gain.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Baselines on \envid{PowerGrid-v0} (default parameters; one episode on each
+    of the 1000 copies of \code{PowerGridVectorEnv(1000)} reset with seed 0;
+    nadir and largest deviation are episode values averaged over the episodes).}
+  \label{tab:power-grid-baseline}
+  \begin{tabular}{@{}lrrrrr@{}}
+    \toprule
+    Controller & mean return & std & nadir [Hz] & max $|\Delta f|$ [Hz] & trips \\
+    \midrule
+    zero control      & $-80.61$  & 143.32 & $-0.090$ & 0.156 & 0.4\,\% \\
+    random actions    & $-566.75$ & 468.71 & $-0.291$ & 0.387 & 9.4\,\% \\
+    droop, $k = 0.1$  & $-2.05$   & 1.80   & $-0.044$ & 0.069 & 0\,\% \\
+    droop, $k = 0.25$ (default) & $-0.75$ & 0.61 & $-0.033$ & 0.053 & 0\,\% \\
+    droop, $k = 0.4$  & $-0.58$   & 0.47   & $-0.029$ & 0.046 & 0\,\% \\
+    droop, $k = 0.5$  & $-0.55$   & 0.45   & $-0.028$ & 0.045 & 0\,\% \\
+    droop, $k = 0.75$ & $-39.32$  & 2.36   & $-0.039$ & 0.047 & 0\,\% \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Vector environment}\label{sec:power-grid-vector}
+
+The native vector environment
+\begin{pycode}
+PowerGridVectorEnv(num_envs, autoreset_mode="next_step", **kwargs)
+\end{pycode}
+accepts every keyword argument of \code{PowerGridEnv} and simulates
+\code{num\_envs} grids as one batch; \code{env\_lib.make\_vec} returns it for
+\envid{PowerGrid-v0}. Observations have shape \code{(num\_envs, n, 10)} and
+actions \code{(num\_envs, n)}. The reward of a copy is its team reward, and
+every info key of Table~\ref{tab:power-grid-info} is returned as a batched array;
+for example, \code{infos["agent\_rewards"]} has shape \code{(num\_envs, n)}. The
+info of a copy that was reset automatically within a call describes its new
+episode, as in Gymnasium's \code{SyncVectorEnv}. The reset options accept
+arrays of shape \code{(n,)} (broadcast to all copies) or \code{(num\_envs, n)},
+together with \code{"reset\_mask"}. \code{render()} draws copy 0.
+
+The dynamics are implemented once for a batch of grids (the single
+environment is the batch of size one), with the state stored node-major and
+the network coupling computed as
+$P^e = \sin\theta \odot (B\cos\theta) - \cos\theta \odot (B\sin\theta)$ with one
+sparse matrix product, so the cost per step grows with the number of lines
+rather than with $n^2$. Copy 0 of the vector environment reproduces a single
+environment started from the same state (injected with \code{reset(options=...)})
+and driven by the same actions; the tests check this. With the default fixed
+network all copies share it; with \code{randomize\_network=True} every copy owns
+its network (a block-diagonal coupling matrix), resampled when the copy resets.
+
+Table~\ref{tab:power-grid-throughput} reports the measured throughput with
+constant actions (best of three runs on a 4-core x86-64 development machine
+shared with other jobs), compared with Gymnasium's \code{SyncVectorEnv} of
+single environments. A single environment step takes about 0.27 ms with 16 buses
+and 0.38 ms with 128 buses (a reset about 0.2 ms).
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Throughput of \envid{PowerGrid-v0}: native \code{PowerGridVectorEnv}
+    versus \code{SyncVectorEnv} (env-steps and agent-steps per second).}
+  \label{tab:power-grid-throughput}
+  \begin{tabular}{@{}rrrrrrr@{}}
+    \toprule
+    & & \multicolumn{3}{c}{\code{PowerGridVectorEnv}} & \code{SyncVectorEnv} & \\
+    \cmidrule(lr){3-5}\cmidrule(lr){6-6}
+    $n$ & copies & ms/step & env-steps/s & agent-steps/s & env-steps/s & speed-up \\
+    \midrule
+    16  & 1    & 0.285  & 3\,514   & 56\,230      & 3\,435 & 1.0 \\
+    16  & 64   & 0.782  & 81\,836  & 1\,309\,369  & 3\,411 & 24 \\
+    16  & 1024 & 5.40   & 189\,538 & 3\,032\,602  & 3\,507 & 54 \\
+    128 & 1    & 0.409  & 2\,445   & 312\,975     & 2\,276 & 1.1 \\
+    128 & 64   & 2.83   & 22\,654  & 2\,899\,730  & 2\,233 & 10 \\
+    128 & 1024 & 54.4   & 18\,829  & 2\,410\,050  & 2\,232 & 8.4 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Most of the time of a large batch is spent in the double-precision sine and
+cosine evaluations of the eight right-hand-side evaluations per step (two RK4
+sub-steps); \code{substeps=1} halves the cost at a moderate loss of accuracy
+(Section~\ref{sec:power-grid-model}).
+
+% ---------------------------------------------------------------------------
+\section{Rendering}\label{sec:power-grid-render}
+
+The dashboard ($1000 \times 560$ pixels, Figure~\ref{fig:power-grid}) shows the
+network on the left: buses coloured by their frequency deviation (diverging
+colour map with a colour bar in hertz, a symmetric range that only grows within
+an episode), a ring around every bus whose size shows its control effort
+$|u_i|/u_{\max,i}$ (green when injecting, violet when absorbing power), lines
+coloured and widened with their loading $|\sin(\theta_i - \theta_j)|$ and
+triangles at buses with an active step load change (pointing down for a load
+increase). On the right, the upper panel shows the frequency deviation of every
+bus over time (thin traces), the centre-of-inertia frequency (bold), the
+frequency nadir (dotted line and marker) and the trip limits over a shaded band
+when they are within range; the lower panel shows the power balance, the net
+control injection $\sum_i u_i$ against the load imbalance $-\sum_i \Delta P_i$ it
+has to cover. The header reports the system size, step, time, largest deviation
+and nadir, and a status badge: STABLE, ALERT (deviation above half the limit)
+or TRIPPED. Both themes are supported. With blitting an \code{"rgb\_array"}
+frame took about 20 ms (median) with 16 buses and 26 ms with 128 buses on the
+development machine; the few frames per episode that rebuild the cached static
+layer (when an axis range grows) took up to about 90 ms.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\figwidth]{power_grid.png}
+  \caption{\envid{PowerGrid-v0} with the droop baseline (seed 16, light theme) at
+    $t = 6$ s. A load increase at reset and a second one at $t = 5.7$ s
+    (triangles) caused frequency dips of about 0.05 Hz at the affected buses;
+    the controllers near the second event respond most (large rings), and the
+    net control injection has risen to cover the new imbalance.}
+  \label{fig:power-grid}
+\end{figure}
+
+% ---------------------------------------------------------------------------
+\section{Usage}\label{sec:power-grid-usage}
+
+\begin{pycode}
+import env_lib
+from env_lib.power_grid_env import droop_policy
+
+env = env_lib.make("PowerGrid-v0", render_mode="rgb_array")
+obs, info = env.reset(seed=0)              # obs: (16, 10)
+layout = env.unwrapped.observation_layout
+episode_return = 0.0
+while True:
+    action = droop_policy(obs, gain=0.25)  # u_i = -k omega_i, clipped
+    obs, reward, terminated, truncated, info = env.step(action)
+    episode_return += reward
+    if terminated or truncated:
+        break
+print(info["frequency_nadir"], info["peak_abs_omega"], episode_return)
+frame = env.render()                       # (560, 1000, 3) uint8
+env.close()
+
+# 1024 grids at once, each with its own random network
+envs = env_lib.make_vec("PowerGrid-v0", 1024, randomize_network=True)
+obs, infos = envs.reset(seed=0)            # obs: (1024, 16, 10)
+obs, rewards, terminated, truncated, infos = envs.step(droop_policy(obs))
+\end{pycode}
+
+The example script compares zero, random and droop control on a few seeded
+episodes and can record the droop controller:
+
+\begin{shellcode}
+python examples/power_grid_demo.py
+python examples/power_grid_demo.py --buses 32 --topology ring --episodes 5 \
+    --theme light --render renders/power_grid.gif
+python examples/power_grid_demo.py --render-mode human
+\end{shellcode}
+
+% ---------------------------------------------------------------------------
+\section{Background}\label{sec:power-grid-background}
+
+The swing equation and the per-unit conventions follow the standard treatment
+of power system stability and frequency control in textbooks such as Kundur's
+\emph{Power System Stability and Control}. Network-reduced models with one
+oscillator per generator go back to the classical transient-stability
+literature; Bergen and Hill proposed the structure-preserving alternative, and
+D\"orfler and Bullo analysed the Kron reduction of electrical networks and the
+relation between power-network synchronisation and non-uniform Kuramoto
+oscillators. The energy function of Section~\ref{sec:power-grid-model} is the classical
+Lyapunov function of the direct methods of transient-stability analysis. The view of power
+grids as networks of second-order phase oscillators was popularised in the
+physics literature, for example by Filatrella, Nielsen and Pedersen, by Rohden,
+Sorge, Timme and Witthaut and by Motter, Myers, Anghel and Nishikawa. Droop
+control is the classical decentralised primary frequency control; distributed
+averaging integral controllers, studied for instance by Simpson-Porco, D\"orfler
+and Bullo and by Andreasson and co-authors, add secondary control that restores
+the nominal frequency using neighbour communication, which the neighbour
+features of the observation make possible. The default topology is the
+small-world model of Watts and Strogatz.
+
+\endgroup

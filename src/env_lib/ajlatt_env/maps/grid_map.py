@@ -145,35 +145,48 @@ def bresenham_batch(sx, sy, ex, ey):
     valid:
         Boolean mask of the same shape; ray ``j`` has ``valid[j].sum()`` cells.
     """
-    ex = round_half_away(np.asarray(ex, dtype=float)).astype(np.int64)
-    ey = round_half_away(np.asarray(ey, dtype=float)).astype(np.int64)
-    sx = np.broadcast_to(round_half_away(sx).astype(np.int64), ex.shape)
-    sy = np.broadcast_to(round_half_away(sy).astype(np.int64), ey.shape)
+    ex = round_half_away(np.asarray(ex, dtype=float))
+    ey = round_half_away(np.asarray(ey, dtype=float))
+    sx = np.broadcast_to(round_half_away(sx), ex.shape)
+    sy = np.broadcast_to(round_half_away(sy), ey.shape)
+    xs, ys, valid = _bresenham_cells(sx, sy, ex, ey)
+    return xs.T, ys.T, valid.T
 
-    dx = np.abs(ex - sx)
-    dy = np.abs(ey - sy)
-    steep = dy > dx
-    major = np.where(steep, dy, dx)
-    minor = np.where(steep, dx, dy)
+
+def _bresenham_cells(sx, sy, ex, ey):
+    """Core of :func:`bresenham_batch` for integer-valued float arrays of shape ``(n_rays,)``.
+
+    Returns ``xs``, ``ys`` (``int64``) and ``valid`` of shape ``(max_len, n_rays)``
+    (step-major, so that the elementwise work runs along the long ray axis).
+    The arithmetic is done on small integers stored as float64, which is
+    exact (``floor`` of an exact quotient of integers below ``2**26``).
+    """
+    dx = ex - sx
+    dy = ey - sy
+    adx = np.abs(dx)
+    ady = np.abs(dy)
+    steep = ady > adx
+    major = np.where(steep, ady, adx)
+    minor = np.where(steep, adx, ady)
 
     length = int(major.max()) + 1 if major.size else 1
-    k = np.arange(length)[None, :]
-    valid = k <= major[:, None]
+    k = np.arange(length, dtype=np.float64)[:, np.newaxis]
+    valid = k <= major
 
     # Minor-axis offsets. The error term e_k = (h - k*b) mod a (h = floor(a/2))
     # wraps around exactly when floor((h - k*b) / a) decreases, so the number of
     # minor steps after k major steps is -floor((h - k*b) / a) (0 when b = 0).
     # This closed form equals the cumulative count of wrap-arounds.
-    half = (major // 2)[:, None]
-    minor_offset = -((half - k * minor[:, None]) // np.maximum(major, 1)[:, None])
+    offset = np.floor((np.floor(0.5 * major) - k * minor) / np.maximum(major, 1.0))
+    np.negative(offset, out=offset)
 
-    sign_x = np.where(ex >= sx, 1, -1)[:, None]
-    sign_y = np.where(ey >= sy, 1, -1)[:, None]
-    steep_col = steep[:, None]
-    x0, y0 = sx[:, None], sy[:, None]
-    xs = np.where(steep_col, x0 + sign_x * minor_offset, x0 + sign_x * k)
-    ys = np.where(steep_col, y0 + sign_y * k, y0 + sign_y * minor_offset)
-    return xs, ys, valid
+    along_x = np.where(steep, offset, k)
+    along_y = np.where(steep, k, offset)
+    along_x *= np.where(dx >= 0, 1.0, -1.0)
+    along_y *= np.where(dy >= 0, 1.0, -1.0)
+    along_x += sx
+    along_y += sy
+    return along_x.astype(np.int64), along_y.astype(np.int64), valid
 
 
 # ---------------------------------------------------------------------------
@@ -348,8 +361,8 @@ class GridMap:
             return np.zeros(len(start_pos), dtype=bool)
         start = round_half_away((start_pos[:, :2] - self.mapmin) / self.mapres - 0.5)
         end = round_half_away((end_pos[:, :2] - self.mapmin) / self.mapres - 0.5)
-        xs, ys, valid = bresenham_batch(start[:, 0], start[:, 1], end[:, 0], end[:, 1])
-        return np.any(self._cells_blocked(xs, ys) & valid, axis=1)
+        xs, ys, valid = _bresenham_cells(start[:, 0], start[:, 1], end[:, 0], end[:, 1])
+        return np.any(self._cells_blocked(xs, ys) & valid, axis=0)
 
     def _cast(self, odom, angles: np.ndarray, r_max: float):
         """Cast rays at ``angles`` (body frame); return first-hit distances and cells.
@@ -378,9 +391,10 @@ class GridMap:
         rotation[:, 1, 1] = cos
         end = (rotation @ body + odoms[:, :2, np.newaxis]).transpose(0, 2, 1).reshape(-1, 2)
         ex, ey = se2_to_cell_batch(end, self.mapmin, self.mapres)
-        xs, ys, valid = bresenham_batch(
+        # Start and end cells are already integers: skip the rounding of bresenham_batch.
+        xs, ys, valid = _bresenham_cells(
             np.repeat(start[:, 0], n_rays), np.repeat(start[:, 1], n_rays), ex, ey
-        )
+        )  # step-major: (max_len, n_rays)
 
         if self.map is None:
             cx = (xs + 0.5) * self.mapres[0] + self.mapmin[0]
@@ -395,10 +409,10 @@ class GridMap:
             hit = self._cells_blocked(xs, ys)
         hit &= valid
 
-        has_hit = hit.any(axis=1)
-        first = hit.argmax(axis=1)
-        rows = np.arange(len(first))
-        hit_cells = np.stack([xs[rows, first], ys[rows, first]], axis=1)
+        has_hit = hit.any(axis=0)
+        first = hit.argmax(axis=0)
+        rays = np.arange(len(first))
+        hit_cells = np.stack([xs[first, rays], ys[first, rays]], axis=1)
         points = (hit_cells + 0.5) * self.mapres + self.mapmin
         origin = np.repeat(odoms[:, :2], n_rays, axis=0)
         dist = np.sqrt(np.sum(np.square(points - origin), axis=1))

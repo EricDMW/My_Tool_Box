@@ -45,6 +45,9 @@ __all__ = [
 ]
 
 _J = np.array([[0.0, -1.0], [1.0, 0.0]])
+_J_T = _J.T
+_EYE2 = np.eye(2)
+_EYE3 = np.eye(3)
 CI_SOLVERS = ("newton", "slsqp")
 
 
@@ -120,12 +123,12 @@ class AgentEstimate(AgentState):
         """EKF prediction for the unicycle model with velocity noise ``(sigma_v, sigma_w)``."""
         dt = self.sampling_period
         new_state = se2_step(self.state, dt, control_input)
-        phi = np.eye(3)
+        phi = _EYE3.copy()
         phi[:2, 2] = _J @ (new_state[:2] - self.state[:2])
         g = np.array(
             [[dt * np.cos(self.state[2]), 0.0], [dt * np.sin(self.state[2]), 0.0], [0.0, dt]]
         )
-        q = np.diag([sigma_v**2, sigma_w**2])
+        q = np.array([[sigma_v**2, 0.0], [0.0, sigma_w**2]])
         cov = phi @ self.cov @ phi.T + g @ q @ g.T
         self.state = new_state
         self.cov = 0.5 * (cov + cov.T)
@@ -154,20 +157,25 @@ def measurement_model(xe_i, xe_j) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     xe_i = np.asarray(xe_i, dtype=np.float64)
     xe_j = np.asarray(xe_j, dtype=np.float64)
-    c = rotation_matrix(xe_i[2])
+    theta = float(xe_i[2])
+    cos_t, sin_t = np.cos(theta), np.sin(theta)
+    c = np.array([[cos_t, -sin_t], [sin_t, cos_t]])  # rotation_matrix(theta)
     delta = xe_j[:2] - xe_i[:2]
     p_ij = c.T @ delta
     # Guard against coincident poses (zero range), which would make the
-    # Jacobians undefined.
-    rho = max(float(np.linalg.norm(p_ij)), 1e-9)
+    # Jacobians undefined. (sqrt of the dot product is numpy.linalg.norm.)
+    rho = max(math.sqrt(p_ij.dot(p_ij)), 1e-9)
     zhat = np.array([rho, np.arctan2(p_ij[1], p_ij[0])])
 
     h_l = np.empty((2, 2))
     h_l[0] = p_ij / rho
-    h_l[1] = (p_ij @ _J.T) / rho**2
-    hi_prior = np.hstack([np.eye(2), (_J @ delta).reshape(2, 1)])
+    h_l[1] = (p_ij @ _J_T) / rho**2
+    hi_prior = np.empty((2, 3))
+    hi_prior[:, :2] = _EYE2
+    hi_prior[:, 2] = _J @ delta
     hi = -h_l @ c.T @ hi_prior
-    hj = np.hstack([h_l @ c.T, np.zeros((2, 1))])
+    hj = np.zeros((2, 3))
+    hj[:, :2] = h_l @ c.T
     return zhat, hi, hj
 
 
@@ -181,6 +189,20 @@ def psd_inverse(matrix: np.ndarray) -> np.ndarray:
     Moore-Penrose pseudo-inverse otherwise (e.g. information matrices with an
     unobservable component).
     """
+    if (
+        _umath_linalg is not None
+        and type(matrix) is np.ndarray
+        and matrix.dtype == np.float64
+        and matrix.ndim == 2
+    ):
+        # Fast path: the LAPACK kernel of numpy.linalg.inv without its wrapper
+        # (bitwise identical); a singular matrix yields NaN instead of LinAlgError.
+        if (matrix.diagonal() > 0).all():
+            with np.errstate(**_QUIET_FP):
+                inverse = _raw_inv(matrix)
+            if not np.isnan(inverse).any():
+                return inverse
+        return np.linalg.pinv(matrix)
     if np.all(np.diag(matrix) > 0):
         try:
             return np.linalg.inv(matrix)
@@ -301,10 +323,12 @@ def _newton_loop(S: np.ndarray, flat: np.ndarray, n: int, d: int, max_iter: int)
             rhs[:m] = -grad[idx]
             rhs[m] = 0.0
         solution = _raw_solve(kkt, rhs)
-        if not np.isfinite(solution).all():  # singular or ill-conditioned KKT system
+        # A finite sum implies finite entries; the full check only runs otherwise.
+        if not math.isfinite(solution.sum()) and not np.isfinite(solution).all():
+            # Singular (NaN result) or ill-conditioned KKT system.
             solution = np.linalg.lstsq(kkt, rhs, rcond=None)[0]
         if idx is None:
-            step = solution[:m].copy()
+            step = solution[:m]
         else:
             step = np.zeros(n)
             step[idx] = solution[:m]
@@ -312,11 +336,11 @@ def _newton_loop(S: np.ndarray, flat: np.ndarray, n: int, d: int, max_iter: int)
         decrement = -float(grad @ step)  # Newton decrement (>= 0 for convex f)
 
         accepted = False
-        if decrement > 1e-14 * f and np.abs(step).max() > 1e-13:
-            decreasing = step < 0
-            alpha_max = 1.0
-            if decreasing.any():
-                alpha_max = min(1.0, float((c[decreasing] / -step[decreasing]).min()))
+        # Scalar bookkeeping on Python floats (the same IEEE operations).
+        step_list = step.tolist()
+        if decrement > 1e-14 * f and max(map(abs, step_list)) > 1e-13:
+            ratios = [ci / -si for ci, si in zip(c.tolist(), step_list) if si < 0]
+            alpha_max = min(1.0, min(ratios)) if ratios else 1.0
             alpha = alpha_max
             while alpha > 1e-12:
                 trial = np.maximum(c + alpha * step, 0.0)
@@ -332,7 +356,7 @@ def _newton_loop(S: np.ndarray, flat: np.ndarray, n: int, d: int, max_iter: int)
                 alpha *= 0.5
             if accepted:
                 if alpha == alpha_max and alpha_max < 1.0:
-                    blocked = decreasing & (c + alpha * step <= 1e-14)
+                    blocked = (step < 0) & (c + alpha * step <= 1e-14)
                     free &= ~blocked
                     trial[blocked] = 0.0
                     trial /= trial.sum()
