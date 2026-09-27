@@ -52,6 +52,7 @@ jobs:
           env-lib list
           env-lib evaluate Formation-v0 --episodes 8 --num-envs 8
           python benchmarks/benchmark_envs.py --steps 20 --render-steps 2
+          python benchmarks/benchmark_baselines.py --only LineMsg-v0 PowerGrid-v0 --episodes 8
           python benchmarks/benchmark_vector.py --quick
           marl-train list
           python examples/algorithms/marl_training_demo.py --quick --plot ''

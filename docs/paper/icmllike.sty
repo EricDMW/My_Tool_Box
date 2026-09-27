@@ -1,0 +1,157 @@
+% icmllike.sty -- a two-column layout following the ICML author template.
+%
+% The official ICML style files (icml20XX.sty, icml20XX.bst) are distributed by
+% the conference and are not redistributed here. This file reproduces the
+% layout of the ICML template (letter paper, 6.75in x 9in two-column body,
+% Times, the title between rules, author block with affiliation footnote,
+% running title) and the same author-facing macros, so that the paper builds
+% with the official style by replacing
+%     \usepackage[accepted]{icmllike}   with   \usepackage[accepted]{icml20XX}
+% and \bibliographystyle{plainnat} with \bibliographystyle{icml20XX}.
+%
+% Options:
+%   (none)     anonymous submission: authors, affiliations and the repository
+%              link are replaced by placeholders; notice "Preliminary work...".
+%   accepted   named version with the notice "Preprint. Copyright by the
+%              author(s)."
+%
+% Macros: \icmltitle, \icmltitlerunning, \icmlauthor, icmlauthorlist,
+% \icmlaffiliation, \icmlcorrespondingauthor, \icmlsetsymbol, \icmlkeywords,
+% \printAffiliationsAndNotice, \icmlEqualContribution, \ificmlshowauthors.
+
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{icmllike}[2026/09/27 ICML-like two-column layout]
+
+\newif\ificmlshowauthors
+\icmlshowauthorsfalse
+\DeclareOption{accepted}{\icmlshowauthorstrue}
+\DeclareOption{nohyperref}{}
+\ProcessOptions\relax
+
+% ---------------------------------------------------------------------------
+% Page layout
+% ---------------------------------------------------------------------------
+\RequirePackage[letterpaper,textwidth=6.75in,textheight=9in,columnsep=0.25in,
+  top=1in,headheight=10pt,headsep=0.15in,footskip=0.35in,hcentering]{geometry}
+\RequirePackage{times}
+\RequirePackage[T1]{fontenc}
+\RequirePackage{fancyhdr}
+\RequirePackage{xcolor}
+\RequirePackage[round]{natbib}
+\RequirePackage{url}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5.5pt plus 1pt minus 1pt}
+\setlength{\footnotesep}{6.65pt}
+\flushbottom
+\sloppy
+
+% Running title
+\def\@icmltitlerunning{}
+\newcommand{\icmltitlerunning}[1]{\gdef\@icmltitlerunning{#1}}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[C]{\small\@icmltitlerunning}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{1pt}
+\fancypagestyle{icmlfirst}{\fancyhf{}\renewcommand{\headrulewidth}{0pt}
+  \fancyfoot[C]{\small\thepage}}
+
+% ---------------------------------------------------------------------------
+% Sections, as in the ICML template: "1. Introduction", "1.1. Title"
+% ---------------------------------------------------------------------------
+\renewcommand{\@seccntformat}[1]{\csname the#1\endcsname.\hskip 0.5em}
+\renewcommand{\section}{\@startsection{section}{1}{\z@}%
+  {-0.11in plus -0.05in minus -0.02in}{0.08in}{\large\bfseries\raggedright}}
+\renewcommand{\subsection}{\@startsection{subsection}{2}{\z@}%
+  {-0.1in plus -0.04in minus -0.02in}{0.06in}{\normalsize\bfseries\raggedright}}
+\renewcommand{\subsubsection}{\@startsection{subsubsection}{3}{\z@}%
+  {-0.08in plus -0.03in minus -0.02in}{0.05in}{\normalsize\scshape\raggedright}}
+\renewcommand{\paragraph}{\@startsection{paragraph}{4}{\z@}%
+  {0.2ex plus 0.3ex minus 0.1ex}{-1em}{\normalsize\bfseries}}
+
+% Captions: "Figure 1." in the caption font, 9pt
+\long\def\@makecaption#1#2{%
+  \vskip 4pt
+  \sbox\@tempboxa{\small #1. #2}%
+  \ifdim \wd\@tempboxa >\hsize
+    {\small #1. #2\par}%
+  \else
+    \hbox to\hsize{\hfil\box\@tempboxa\hfil}%
+  \fi
+  \vskip 2pt}
+\setlength{\abovecaptionskip}{4pt}
+\setlength{\belowcaptionskip}{2pt}
+\setlength{\textfloatsep}{12pt plus 2pt minus 2pt}
+\setlength{\dbltextfloatsep}{12pt plus 2pt minus 2pt}
+\setlength{\floatsep}{10pt plus 2pt minus 2pt}
+
+% Abstract: centred heading, indented block in the first column
+\renewenvironment{abstract}{%
+  \centerline{\large\bfseries Abstract}\vspace{0.5ex}%
+  \begin{list}{}{\setlength{\leftmargin}{0.25in}\setlength{\rightmargin}{0.25in}%
+    \setlength{\parsep}{4pt}}\item\relax}%
+  {\end{list}\vspace{0.1in}}
+
+% ---------------------------------------------------------------------------
+% Title and authors
+% ---------------------------------------------------------------------------
+\newcommand{\icmltitle}[1]{%
+  \thispagestyle{icmlfirst}%
+  {\centering\vbox{\hrule height 1pt}\vskip 0.25in%
+   {\LARGE\bfseries #1\par}%
+   \vskip 0.22in\hrule height 1pt\vskip 0.2in}}
+
+% Symbols (e.g. equal contribution) and affiliations are numbered in order of
+% first use in \icmlauthor.
+\newcounter{@icmlaffilcount}
+\def\@icmlaffillist{}
+\def\@icmlsymbols{}
+\newcommand{\icmlsetsymbol}[2]{\expandafter\gdef\csname icmlsym@#1\endcsname{#2}}
+\newcommand{\icmlEqualContribution}{\textsuperscript{*}Equal contribution. }
+
+\newcommand{\@icmlmark}[1]{%
+  \@ifundefined{icmlsym@#1}{%
+    \@ifundefined{icmlaffilnum@#1}{%
+      \stepcounter{@icmlaffilcount}%
+      \expandafter\xdef\csname icmlaffilnum@#1\endcsname{\arabic{@icmlaffilcount}}}{}%
+    \csname icmlaffilnum@#1\endcsname}{\csname icmlsym@#1\endcsname}}
+
+\newenvironment{icmlauthorlist}{%
+  \par\centering\ificmlshowauthors\else\textbf{Anonymous Authors}\textsuperscript{1}\fi
+  \def\@sep{}}{\par\vskip 0.1in}
+\newcommand{\icmlauthor}[2]{%
+  \ificmlshowauthors
+    \@sep\mbox{\textbf{#1}\,\textsuperscript{\@for\@m:=#2\do{\@icmlmark{\@m}}}}%
+    \gdef\@sep{\hskip 1.2em}%
+  \fi}
+
+\def\@icmlaffiltext{}
+\newcommand{\icmlaffiliation}[2]{%
+  \@ifundefined{icmlaffilnum@#1}{\stepcounter{@icmlaffilcount}%
+    \expandafter\xdef\csname icmlaffilnum@#1\endcsname{\arabic{@icmlaffilcount}}}{}%
+  \g@addto@macro\@icmlaffiltext{\textsuperscript{\csname icmlaffilnum@#1\endcsname}#2. }}
+\def\@icmlcorresp{}
+\newcommand{\icmlcorrespondingauthor}[2]{%
+  \g@addto@macro\@icmlcorresp{#1 \textless\texttt{#2}\textgreater}}
+\newcommand{\icmlkeywords}[1]{}
+
+\newcommand{\printAffiliationsAndNotice}[1]{%
+  \begingroup
+  \renewcommand{\thefootnote}{}%
+  \footnotetext{\hspace*{-\footnotesep}\ificmlshowauthors
+      #1\@icmlaffiltext Correspondence to: \@icmlcorresp.%
+    \else
+      \textsuperscript{1}Anonymous Institution, Anonymous City, Anonymous Region,
+      Anonymous Country. Correspondence to: Anonymous Author
+      \textless\texttt{anon.email@domain.com}\textgreater.%
+    \fi
+    \par\medskip
+    \ificmlshowauthors
+      \emph{Preprint. Copyright \the\year{} by the author(s).}%
+    \else
+      \emph{Preliminary work. Under review. Do not distribute.}%
+    \fi}%
+  \endgroup}
+
+\endinput

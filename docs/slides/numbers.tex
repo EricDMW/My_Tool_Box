@@ -27,13 +27,13 @@
   PowerGrid, 16 buses & new & 0.25 ms\\
   Platoon, 8 followers & new & 0.13 ms\\}
 \newcommand{\BaselineRows}{%
-  PowerGrid & droop control $u_i = -k\,\omega_i$ & $-569$ & $-0.8$\\
-  Platoon & CACC $u_i = k_p e_i + k_d \Delta v_i + k_a a_{i-1}$ & $-5270$ & $-47$\\
-  Consensus & Laplacian protocol & $-17178$ & $-1414$\\
-  Formation & Laplacian protocol on formation offsets & $-18011$ & $-1608$\\
-  Kuramoto (frequency tracking) & frequency compensation and phase feedback & $-117$ & $-104$\\
-  AJLATT (no collision termination) & encircle the target belief & $-33113$ & $-7109$\\
-  Pistonball & ramp towards the ball & $-205$ & $841$\\
+  PowerGrid & droop control $u_i = -k\,\omega_i$ & $-562$ & $-0.76$\\
+  Platoon & CACC $u_i = k_p e_i + k_d \Delta v_i + k_a a_{i-1}$ & $-5604$ & $-46$\\
+  Consensus & Laplacian protocol & $-17327$ & $-1414$\\
+  Formation & Laplacian protocol on formation offsets & $-18166$ & $-1608$\\
+  Kuramoto (frequency tracking) & frequency compensation and phase feedback & $-128$ & $-112$\\
+  AJLATT (no collision termination) & encircle the target belief & $-34273$ & $-7415$\\
+  Pistonball & ramp towards the ball & $-254$ & $801$\\
   LineMsg & always relay & $43$ & $95$\\
   WirelessComm & collision-free access schedule & $388$ & $924$\\}
 % marl_algorithms presets: benchmarks/benchmark_marl.py (train seed 0, evaluation seed 1).

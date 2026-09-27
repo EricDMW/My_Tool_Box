@@ -465,6 +465,13 @@ env-lib bench PowerGrid-v0 --num-envs 1024 --kwarg n_buses=64
 env-lib bench LineMsg-v0 --num-envs 64 --async     # no native implementation
 \end{shellcode}
 
+\paragraph{Controllers.} \code{benchmarks/benchmark\_baselines.py} evaluates
+uniformly random actions and the classical controller on every registered id
+(and on AJLATT without collision termination) on the same seeded episodes: the
+first episode of every copy of a vector environment with \code{-{}-episodes}
+copies (64 by default) reset with \code{-{}-seed} (0); \code{-{}-only} selects
+ids and \code{-{}-markdown} prints a table.
+
 \paragraph{Algorithms.} \code{benchmarks/benchmark\_marl.py} trains every
 preset of \pkg{marl\_algorithms} (seed 0, one thread) and evaluates random
 actions, the trained policy and the baseline controller on the same 64 seeded

@@ -22,7 +22,8 @@ building blocks and reproducible experiment parameters.
   <img src="docs/images/hero.gif" width="820" alt="Platoon-v0 under cooperative adaptive cruise control">
 </p>
 
-**Introduction slides:** [`docs/slides/my_tool_box_slides.pdf`](docs/slides/my_tool_box_slides.pdf)
+**Paper:** [`docs/paper/my_tool_box_paper.pdf`](docs/paper/my_tool_box_paper.pdf)
+&nbsp;&middot;&nbsp; **Introduction slides:** [`docs/slides/my_tool_box_slides.pdf`](docs/slides/my_tool_box_slides.pdf)
 &nbsp;&middot;&nbsp; **Handbook:** [`docs/manual/main.pdf`](docs/manual/main.pdf)
 &nbsp;&middot;&nbsp; **Changes:** [`CHANGELOG.md`](CHANGELOG.md)
 
@@ -38,7 +39,7 @@ building blocks and reproducible experiment parameters.
   observation layouts, units and bounds.
 - **Fast.** Environments are written batch-first: `env_lib.make_vec(id, 256)`
   advances all copies with a few array operations, 2 to 3 million agent-steps
-  per second on one CPU core and 33 to 44 times the throughput of Gymnasium's
+  per second on one CPU core and 33 to 43 times the throughput of Gymnasium's
   `SyncVectorEnv`. Evaluating 1024 PowerGrid episodes takes about a second.
 - **Convenient.** One catalogue (`env_lib.catalog()`, `env-lib list`), one
   command to run, record, evaluate or benchmark any environment, adapters for
@@ -178,18 +179,19 @@ Every environment ships a decentralised baseline, returned by
 
 | Environment | Baseline controller | Random | Baseline |
 |---|---|---:|---:|
-| `PowerGrid-v0` | droop control, u_i = -k omega_i | -569 | -0.8 |
-| `Platoon-v0` | CACC, u_i = k_p e_i + k_d dv_i + k_a a_(i-1) | -5270 | -47 |
-| `Consensus-v0` | Laplacian protocol | -17178 | -1414 |
-| `Formation-v0` | Laplacian protocol on formation offsets | -18011 | -1608 |
-| `KuramotoOscillator-FreqSync-Constant-v0` | frequency compensation and phase feedback | -117 | -104 |
-| `AJLATT-v0` (no collision termination) | encircle the target belief | -33113 | -7109 |
-| `Pistonball-v0` | ramp towards the ball | -205 | 841 |
-| `LineMsg-v0` | always relay | 43 | 95 |
-| `WirelessComm-v0` | collision-free access schedule | 388 | 924 |
+| `PowerGrid-v0` | droop control, u_i = -k omega_i | -562.1 | -0.76 |
+| `Platoon-v0` | CACC, u_i = k_p e_i + k_d dv_i + k_a a_(i-1) | -5,604 | -46.3 |
+| `Consensus-v0` | Laplacian protocol | -17,327 | -1,414 |
+| `Formation-v0` | Laplacian protocol on formation offsets | -18,166 | -1,608 |
+| `KuramotoOscillator-FreqSync-Constant-v0` | frequency compensation and phase feedback | -128.1 | -112.0 |
+| `AJLATT-v0` (no collision termination) | encircle the target belief | -34,273 | -7,415 |
+| `Pistonball-v0` | ramp towards the ball | -253.7 | 801.3 |
+| `LineMsg-v0` | always relay | 42.7 | 95.0 |
+| `WirelessComm-v0` | collision-free access schedule | 388.0 | 923.8 |
 
-Mean return over 64 seeded episodes (8 for AJLATT, 16 for Pistonball),
-higher is better, measured with `env_lib.evaluate` on vector environments.
+Mean return on the same 64 seeded episodes (the first episode of every copy of
+a 64-copy vector environment reset with seed 0), higher is better; reproduce
+with `python benchmarks/benchmark_baselines.py`, which covers all 18 ids.
 
 ## Multi-agent reinforcement learning algorithms
 
@@ -390,6 +392,10 @@ the AJLATT, Kuramoto and Consensus speed-ups of 1.1 are bitwise identical.
   baselines, evaluation), the multi-agent RL algorithms and their use as
   baselines, the toolkit, examples, troubleshooting, an API reference and a
   migration guide.
+- **Paper** (`docs/paper/my_tool_box_paper.pdf`, built by
+  `docs/paper/build.sh`; `--anonymous` for a double-blind version): the
+  environments, their usage and the integrated baselines, in the two-column
+  layout of the ICML template.
 - **Slides** (`docs/slides/my_tool_box_slides.pdf`, built by
   `docs/slides/build.sh`): a short introduction to the package.
 - **Examples** (`examples/`, see `examples/README.md`), grouped by topic:
@@ -408,6 +414,7 @@ ruff check src tests examples benchmarks           # lint
 ruff format src tests examples benchmarks          # format
 python benchmarks/benchmark_envs.py                # single-environment timings
 python benchmarks/benchmark_vector.py              # batched throughput
+python benchmarks/benchmark_baselines.py           # random vs classical controller, every id
 python benchmarks/benchmark_marl.py                # train and evaluate every MARL preset
 ```
 
