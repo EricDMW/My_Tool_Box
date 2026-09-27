@@ -187,7 +187,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--sync-max", type=int, default=256, help="largest num_envs timed with SyncVectorEnv"
     )
-    parser.add_argument("--min-steps", type=int, default=20, help="minimum batched steps")
+    parser.add_argument(
+        "--min-steps",
+        type=int,
+        default=300,
+        help="minimum batched steps (300 spans a full episode, so autoresets are included)",
+    )
     parser.add_argument(
         "--env-steps", type=int, default=20000, help="minimum single-environment steps per case"
     )

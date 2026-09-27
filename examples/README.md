@@ -20,12 +20,35 @@ pip install -e ".[all]"          # or ".[pistonball]" / ".[torch]" for a subset
 | `wireless_comm_demo.py` | Wireless access grid: random, slotted ALOHA and a collision-free schedule | `python examples/wireless_comm_demo.py --policy schedule --save renders/wireless.gif` |
 | `pistonball_demo.py` | Pistonball: heuristic vs random pistons, optional keyboard control (`--manual`) | `python examples/pistonball_demo.py --save renders/pistonball.gif` |
 | `consensus_demo.py` | Networked consensus / formation control with the Laplacian baseline | `python examples/consensus_demo.py --task formation --save renders/formation.gif` |
-| `ajlatt_demo.py` | Multi-robot localisation and target tracking with an encircling heuristic | `python examples/ajlatt_demo.py --save renders/ajlatt.gif` |
+| `power_grid_demo.py` | Power-grid frequency control (`PowerGrid-v0`): no control, random injections and decentralised droop control under the same disturbances; frequency nadir, settling time, trips | `python examples/power_grid_demo.py --buses 32 --topology ring --render renders/power_grid.gif` |
+| `platoon_demo.py` | Vehicle platoon (`Platoon-v0`): random actions, sensor-only ACC and cooperative ACC, with the analytic string-stability gain; collisions and spacing errors | `python examples/platoon_demo.py --scenario stop_and_go --render renders/platoon.gif` |
+| `ajlatt_demo.py` | Multi-robot localisation and target tracking with the packaged encircling baseline (`env_lib.baseline_policy`) | `python examples/ajlatt_demo.py --save renders/ajlatt.gif` |
+| `workflow_demo.py` | The 1.1 workflow in six steps: catalogue, native vector environment, parallel evaluation of random actions and the baseline, flattened spaces, PettingZoo Parallel API, GIF of the baseline | `python examples/workflow_demo.py --env Consensus-v0 --num-envs 128 --episodes 128` |
 
-Rendering is headless-friendly: `--save` records `rgb_array` frames with
+Rendering is headless-friendly: `--save` (`--render` in `power_grid_demo.py`
+and `platoon_demo.py`) records `rgb_array` frames with
 `env_lib.utils.record_episode`, and `--render-mode human` opens a window when an
 interactive matplotlib backend (for example TkAgg or QtAgg) or a display for
 pygame is available.
+
+## Without writing code: the `env-lib` command line
+
+Installing the package also installs the `env-lib` console script (equivalently
+`python -m env_lib`), which lists, describes, runs, records, evaluates and
+benchmarks every registered environment with its baseline controller or random
+actions:
+
+```bash
+env-lib list --continuous                          # catalogue of the environments
+env-lib describe PowerGrid-v0                      # spaces, parameters, baseline
+env-lib run Platoon-v0 --gif renders/platoon.gif   # one episode, recorded
+env-lib evaluate Formation-v0 --episodes 64 --num-envs 32
+env-lib bench Consensus-v0 --num-envs 256 --steps 200
+```
+
+Constructor arguments are passed as `--kwarg key=value ...`; `env-lib <command> -h`
+lists the options. The handbook (`docs/manual`, chapter "Vectorised Simulation,
+Adapters, Baselines and Evaluation") describes every command.
 
 ## Toolkit
 

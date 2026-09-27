@@ -83,3 +83,34 @@ def test_every_spec_has_a_valid_limit_argument():
         accepts_kwargs = any(p.kind is p.VAR_KEYWORD for p in params.values())
         assert spec.limit_kwarg in params or accepts_kwargs, spec.id
         assert gym.spec(spec.id).vector_entry_point == spec.vector_entry_point
+
+
+@pytest.mark.parametrize("mode", [None, "sync"])
+@pytest.mark.parametrize("autoreset_mode", ["same_step", "SameStep"])
+def test_make_vec_autoreset_mode_for_every_vectorization_mode(mode, autoreset_mode):
+    envs = env_lib.make_vec(
+        "Consensus-v0",
+        2,
+        vectorization_mode=mode,
+        autoreset_mode=autoreset_mode,
+        max_episode_steps=1,
+    )
+    envs.reset(seed=0)
+    _, _, _, truncated, infos = envs.step(envs.action_space.sample())
+    assert truncated.all()
+    assert "final_obs" in infos and infos["_final_obs"].all()
+    envs.close()
+
+
+def test_make_vec_rejects_unknown_autoreset_mode():
+    with pytest.raises(ValueError):
+        env_lib.make_vec("LineMsg-v0", 2, autoreset_mode="sometimes")
+
+
+def test_make_vec_reduces_per_agent_rewards_for_sync_vectors():
+    envs = env_lib.make_vec("AJLATT-v0", 2, max_episode_steps=3)
+    envs.reset(seed=0)
+    _, rewards, terminated, _, infos = envs.step(envs.action_space.sample())
+    assert rewards.shape == (2,) and terminated.shape == (2,)
+    assert infos["agent_rewards"].shape == (2, 4)
+    envs.close()

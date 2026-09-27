@@ -52,3 +52,4 @@ jobs:
           env-lib list
           env-lib evaluate Formation-v0 --episodes 8 --num-envs 8
           python benchmarks/benchmark_envs.py --steps 20 --render-steps 2
+          python benchmarks/benchmark_vector.py --quick

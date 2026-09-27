@@ -1,18 +1,141 @@
 % ---------------------------------------------------------------------------
-% Appendix: Migration from pre-1.0 versions
+% Appendix: Migration from earlier versions
 % ---------------------------------------------------------------------------
-\chapter{Migration from pre-1.0 versions}\label{app:migration}
+\chapter{Migration from Earlier Versions}\label{app:migration}
 % Long monospaced identifiers leave little room for line breaking; allow some
 % extra inter-word stretch in this chapter (the group keeps it local).
 \begingroup\setlength{\emergencystretch}{3em}% chapter-local
+
+This appendix explains what code written for earlier versions of the package
+has to change. Section~\ref{sec:migration-11} covers the step from version 1.0
+to 1.1, which adds features and changes little existing behaviour.
+Section~\ref{sec:migration-pre10} covers code written for the versions before
+1.0, when the package consisted of two separate projects. The complete list of
+changes is in \code{CHANGELOG.md}.
+
+\section{From 1.0 to 1.1}\label{sec:migration-11}
+
+Version 1.1 adds the environments \envid{PowerGrid-v0} and \envid{Platoon-v0},
+native vector environments, the catalogue and the \code{env-lib} command line,
+wrappers, baseline controllers, evaluation tools and graph utilities
+(Chapter~\ref{chap:workflow}). No public name was removed, and class names,
+module paths, constructor arguments and their defaults are unchanged. The
+following changes can affect code written for version 1.0.
+
+\paragraph{Gymnasium 1.0 or newer.} The package requires
+\code{gymnasium>=1.0} (version 1.0 accepted 0.29). The vector API of
+Gymnasium changed in 1.0: a finished copy of a vector environment is by
+default reset on the \emph{next} call to \code{step()}, whereas Gymnasium 0.29
+reset it within the same step, and in same-step mode the last observation is
+returned in \code{infos["final\_obs"]} instead of Gymnasium 0.29's
+\code{infos["final\_observation"]}. Code that ran vector
+environments with Gymnasium 0.29 has to follow these conventions
+(Section~\ref{sec:workflow-vector}); single environments are not affected.
+
+\paragraph{Unknown reset options warn instead of raising.} In version 1.0 the
+Consensus, Formation and Kuramoto environments raised \code{ValueError} for a
+key of \code{reset(options=...)} that they did not know. They now ignore such
+keys with a \code{UserWarning}, as do the new PowerGrid and Platoon
+environments, so that generic tools can pass options of their own; the values
+of known keys are still validated and raise \code{ValueError} when invalid
+(Section~\ref{sec:envlib-reset-options}). Code or tests that relied on the
+error to catch a misspelt key can turn the warning into an error:
+
+\begin{pycode}
+import warnings
+import numpy as np
+import env_lib
+
+env = env_lib.make("Consensus-v0")
+with warnings.catch_warnings():
+    warnings.filterwarnings("error", message=r".*unknown reset option")
+    try:
+        env.reset(seed=0, options={"position": np.zeros((8, 2))})   # misspelt
+    except UserWarning as err:
+        print(err)
+\end{pycode}
+
+\paragraph{\texorpdfstring{\code{max\_episode\_steps}}{max\_episode\_steps} sets the environment's own limit.}
+In version 1.0, \code{env\_lib.make(id, max\_episode\_steps=N)} passed the
+argument on to \code{gymnasium.make}, which added a \code{TimeLimit} wrapper on
+top of the environment's own limit: the shorter of the two applied, so
+\code{env\_lib.make("Consensus-v0", max\_episode\_steps=500)} still ended
+episodes after 200 steps, and for AJLATT the value never reached the
+configuration. \code{env\_lib.make} and \code{env\_lib.make\_vec} now set the
+environment's limit argument (\code{max\_steps}, \code{max\_iter},
+\code{max\_cycles} or \code{max\_episode\_steps}; see
+\code{env\_lib.get\_spec(id).limit\_kwarg}) instead, so the value given is the
+episode length and no \code{TimeLimit} wrapper is added. Consequently
+\code{env.spec.max\_episode\_steps} is \code{None}; read the limit from the
+environment, for example \code{env.unwrapped.max\_steps}. Passing both
+\code{max\_episode\_steps} and a different value of the limit argument raises
+\code{ValueError}. \code{gymnasium.make} called directly behaves as before.
+
+\paragraph{Native vector environments.} The ids \envid{Consensus-v0} and
+\envid{Formation-v0} and the NumPy Kuramoto ids now register a vector entry
+point, as do the new PowerGrid and Platoon ids. For these ids,
+\code{gymnasium.make\_vec(id, n)}, which returned a \code{SyncVectorEnv} in
+version 1.0, and \code{env\_lib.make\_vec(id, n)} therefore return the native
+\code{ConsensusVectorEnv} or \code{KuramotoOscillatorVectorEnv}. They follow the
+same dynamics and the Gymnasium conventions of \code{SyncVectorEnv} (next-step
+autoreset, where the reset step ignores the copy's action and returns reward
+0, both flags \code{False} and the info of the reset; batched infos with
+\code{"\_key"} masks), but differ in the following points:
+\begin{itemize}
+  \item All copies draw from one generator: copy $i$ no longer reproduces a
+    single environment reset with seed $s + i$
+    (Section~\ref{sec:workflow-vector}).
+  \item There is no \code{envs.envs} list of single environments; the batched
+    state is available through properties such as \code{envs.positions}
+    (Appendix~\ref{app:api}).
+  \item \code{render()} returns the frame of copy 0 instead of a tuple with
+    one frame per copy.
+  \item The autoreset mode is a keyword argument of \code{make\_vec}
+    (\code{autoreset\_mode="same\_step"}, for every vectorisation mode), not an
+    entry of \code{vector\_kwargs}.
+\end{itemize}
+Pass \code{vectorization\_mode="sync"} to keep the \code{SyncVectorEnv} of
+version 1.0.
+
+\paragraph{AJLATT example controller.} The function \code{encircle\_policy(env,
+radius, gain)} of \code{examples/ajlatt\_demo.py} was removed from the example.
+Its controller is part of the package as \code{env\_lib.baselines.ajlatt\_encircle}
+(a pure function of the observation) and is returned, with its parameters bound
+to the environment, by \code{env\_lib.baseline\_policy(env)}:
+
+\begin{pycode}
+import env_lib
+from env_lib import AJLATTEnv
+
+env = AJLATTEnv(num_robots=4)
+# Before (examples/ajlatt_demo.py of version 1.0): action = encircle_policy(env)
+policy = env_lib.baseline_policy(env, radius=1.8, gain=1.2)   # the old defaults
+obs, info = env.reset(seed=0)
+obs, reward, terminated, truncated, info = env.step(policy(obs))
+\end{pycode}
+
+The old function read the robots' pose and target estimates from the
+environment's internal filters; the packaged controller reads the same
+quantities from the observation, in the robot's frame. Its results are
+therefore close to, but not identical with, those of version 1.0: the two
+default episodes of \code{ajlatt\_demo.py} return $-7333.0$ and $-7113.1$
+instead of $-7334.3$ and $-7170.4$.
+
+\paragraph{The catalogue module is callable.} \pkg{env\_lib.catalog} is both a
+module and a function: \code{env\_lib.catalog(...)} returns the catalogue
+whether or not the submodule has been imported, and its other names remain
+module attributes (\code{env\_lib.catalog.describe},
+\code{env\_lib.catalog.EnvInfo}, \code{env\_lib.catalog.Catalog}).
+\code{from env\_lib.catalog import catalog} imports the function itself.
+
+\section{From versions before 1.0}\label{sec:migration-pre10}
 
 Before version 1.0 the code lived in two separate projects,
 \code{envlib\_project/env\_lib} and \code{toolkit\_project/toolkit}, each with
 its own \code{setup.py}, and several environments had their own installation
 files. Version 1.0 turns them into one distribution with a stable API, fixes a
-number of bugs and changes some behaviour. This appendix explains, module by
-module, what code written for the earlier versions has to change. The complete
-list of changes is in \code{CHANGELOG.md}.
+number of bugs and changes some behaviour. This section explains, module by
+module, what code written for these earlier versions has to change.
 
 Most user code keeps working: class names, module paths, constructor
 arguments and their defaults are unchanged, and deprecated arguments are
@@ -21,7 +144,7 @@ for code in \code{\_\_main\_\_} by default; run your scripts once with
 \code{python -W default::DeprecationWarning} to list everything that needs
 attention.
 
-\section{Checklist}\label{sec:migration-checklist}
+\subsection{Checklist}\label{sec:migration-checklist}
 
 \begin{enumerate}
   \item Uninstall the old distributions and install \pkg{my-tool-box}
@@ -43,7 +166,7 @@ attention.
     (Section~\ref{sec:migration-plotkit}).
 \end{enumerate}
 
-\section{Installation}\label{sec:migration-install}
+\subsection{Installation}\label{sec:migration-install}
 
 \textbf{Before}, each project (and optionally each environment) was installed
 from its own folder:
@@ -71,7 +194,7 @@ Tk; the subpackages and environment classes are loaded on first use, so
 \code{import toolkit; toolkit.plotkit.plot\_line(...)} and
 \code{from env\_lib import PistonballEnv} continue to work.
 
-\section{Changes common to all environments}\label{sec:migration-common}
+\subsection{Changes common to all environments}\label{sec:migration-common}
 
 \paragraph{Reset and step.}
 All environments follow the Gymnasium API. \code{reset(*, seed=None,
@@ -126,7 +249,7 @@ calls in \code{"human"} loops are no longer needed, and \code{"rgb\_array"}
 works without a display. \code{step()} before the first \code{reset()} now
 raises an error instead of resetting implicitly.
 
-\section{Kuramoto oscillators}\label{sec:migration-kuramoto}
+\subsection{Kuramoto oscillators}\label{sec:migration-kuramoto}
 
 \begin{itemize}
   \item \emph{PyTorch backend.} A sign error made the coupling repulsive
@@ -149,7 +272,7 @@ raises an error instead of resetting implicitly.
     and its phase coherence and bonus rules now match the NumPy backend.
 \end{itemize}
 
-\section{LineMsg and WirelessComm}\label{sec:migration-networked}
+\subsection{LineMsg and WirelessComm}\label{sec:migration-networked}
 
 Seeded trajectories are bit-identical to the previous implementations, so
 existing results remain valid. The text output of the old renderers is
@@ -160,7 +283,7 @@ show the new dashboards. LineMsg accepts actions either as an integer in
 WirelessComm validates its arguments and actions and reports per-agent
 outcomes (idle, success, collision, lost) in \code{info["outcomes"]}.
 
-\section{Pistonball}\label{sec:migration-pistonball}
+\subsection{Pistonball}\label{sec:migration-pistonball}
 
 \paragraph{Discrete actions.}
 The discrete action space is \code{MultiDiscrete([3] * n\_pistons)}: one
@@ -191,7 +314,7 @@ rendering is requested; the methods \code{draw()}, \code{draw\_background()},
 the PNG sprites were replaced by a vector renderer. The environment works with
 pymunk 6 and 7.
 
-\section{AJLATT}\label{sec:migration-ajlatt}
+\subsection{AJLATT}\label{sec:migration-ajlatt}
 
 AJLATT was rewritten as a Gymnasium environment configured by a dataclass.
 The old factory called \code{argparse.parse\_args()} internally, which failed
@@ -231,6 +354,7 @@ and \code{terminated} are per-robot arrays; wrap the environment in
 
 \begin{pycode}
 import numpy as np
+from env_lib import AJLATTEnv
 from env_lib.ajlatt_env import TeamRewardWrapper
 
 env = AJLATTEnv(num_robots=4)
@@ -272,6 +396,7 @@ options on a script's own parser, use \code{AJLATTConfig.add\_arguments}:
 
 \begin{pycode}
 import argparse
+from env_lib import AJLATTConfig, AJLATTEnv
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--lr", type=float, default=3e-4)       # your own options
@@ -290,7 +415,7 @@ with the new builder. Maps whose grid is one row shorter than the header
 declares are padded with a wall row and a warning (three bundled maps had this
 problem and were fixed).
 
-\section{plotkit}\label{sec:migration-plotkit}
+\subsection{plotkit}\label{sec:migration-plotkit}
 
 The function names and positional arguments are unchanged; new options are
 keyword-only arguments appended to the signatures.
@@ -324,7 +449,7 @@ ax = plot_line([0, 1, 2], [[0, 1, 4], [0, 2, 3]], labels=["a", "b"])   # two ser
 reset_style()
 \end{pycode}
 
-\section{neural\_toolkit}\label{sec:migration-neural}
+\subsection{neural\_toolkit}\label{sec:migration-neural}
 
 \paragraph{Retrain models.}
 Earlier MLP stacks applied no activation between hidden layers, and several
@@ -379,7 +504,7 @@ equivalents.
   \end{tabularx}
 \end{table}
 
-\section{parakit}\label{sec:migration-parakit}
+\subsection{parakit}\label{sec:migration-parakit}
 
 \code{ParameterTuner} (and its alias \code{ParameterAdjuster}) keeps its
 constructor and \code{tune\_parameters} class method, but its behaviour was

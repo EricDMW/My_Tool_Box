@@ -34,10 +34,10 @@ reproducible experiment parameters.
   vehicle platoons with actuator lag, oscillator networks, single and double
   integrators, and range-bearing target tracking, each with documented
   observation layouts, units and bounds.
-- **Fast.** Environments are written batch-first: `env_lib.make_vec(id, 1024)`
-  advances 1024 copies with a few array operations, TBD agent-steps per second
-  on one CPU core. Single environments are vectorised over agents
-  (Kuramoto with 50 oscillators: TBD per step).
+- **Fast.** Environments are written batch-first: `env_lib.make_vec(id, 256)`
+  advances all copies with a few array operations, 2 to 3 million agent-steps
+  per second on one CPU core and 33 to 44 times the throughput of Gymnasium's
+  `SyncVectorEnv`. Evaluating 1024 PowerGrid episodes takes about a second.
 - **Convenient.** One catalogue (`env_lib.catalog()`, `env-lib list`), one
   command to run, record, evaluate or benchmark any environment, adapters for
   single-agent libraries and the PettingZoo parallel API, and
@@ -144,9 +144,18 @@ Every environment ships a decentralised baseline, returned by
 
 | Environment | Baseline controller | Random | Baseline |
 |---|---|---:|---:|
-| TBD | | | |
+| `PowerGrid-v0` | droop control, u_i = -k omega_i | -569 | -0.8 |
+| `Platoon-v0` | CACC, u_i = k_p e_i + k_d dv_i + k_a a_(i-1) | -5270 | -47 |
+| `Consensus-v0` | Laplacian protocol | -17178 | -1414 |
+| `Formation-v0` | Laplacian protocol on formation offsets | -18011 | -1608 |
+| `KuramotoOscillator-FreqSync-Constant-v0` | frequency compensation and phase feedback | -117 | -104 |
+| `AJLATT-v0` (no collision termination) | encircle the target belief | -33113 | -7109 |
+| `Pistonball-v0` | ramp towards the ball | -205 | 841 |
+| `LineMsg-v0` | always relay | 43 | 95 |
+| `WirelessComm-v0` | collision-free access schedule | 388 | 924 |
 
-Mean return over seeded episodes, higher is better (`env-lib evaluate`).
+Mean return over 64 seeded episodes (8 for AJLATT, 16 for Pistonball),
+higher is better, measured with `env_lib.evaluate` on vector environments.
 
 ## Design
 
@@ -173,10 +182,42 @@ Mean return over seeded episodes, higher is better (`env-lib evaluate`).
 
 ## Performance
 
-Measured with `benchmarks/benchmark_envs.py` and `benchmarks/benchmark_vector.py`
-on one CPU core (`OMP_NUM_THREADS=1`).
+Measured on one core of an Intel Xeon at 2.8 GHz (`OMP_NUM_THREADS=1`,
+Python 3.11, NumPy 2.4). Reproduce with `benchmarks/benchmark_vector.py` and
+`benchmarks/benchmark_envs.py`.
 
-TBD
+**Batched simulation.** Environment steps per second with random actions,
+automatic resets included:
+
+| Environment | agents | 1 copy | 256 copies, native | 256 copies, `SyncVectorEnv` | speed-up | agent-steps/s (256) |
+|---|---:|---:|---:|---:|---:|---:|
+| `PowerGrid-v0` | 16 | 3.3k | 134k | 3.1k | 43x | 2.1M |
+| `Platoon-v0` | 8 | 7.1k | 295k | 7.4k | 40x | 2.4M |
+| `Consensus-v0` | 8 | 7.9k | 345k | 8.7k | 40x | 2.8M |
+| `Formation-v0` | 8 | 7.9k | 313k | 8.3k | 38x | 2.5M |
+| `KuramotoOscillator-v0` | 10 | 6.9k | 316k | 9.6k | 33x | 3.2M |
+
+`SyncVectorEnv` stays at a few thousand steps per second whatever the batch
+size; the native implementations keep scaling (Platoon reaches 4.2 million
+agent-steps per second with 1024 copies). Every copy of a native vector
+environment reproduces the single environment started from the same state.
+
+**Single environments.** Mean time per step, and the speed-up over the
+implementations that preceded version 1.0:
+
+| Environment | before 1.0 | 1.1 | speed-up |
+|---|---:|---:|---:|
+| Kuramoto, NumPy, 50 oscillators | 2.36 ms | 0.09 ms | 25x |
+| Kuramoto, PyTorch, 50 oscillators x 8 systems | 10.3 ms | 0.45 ms | 23x |
+| WirelessComm, 12x12 | 0.56 ms | 0.06 ms | 9x |
+| Pistonball, 20 pistons | 1.11 ms | 0.08 ms | 14x |
+| AJLATT, `obstacles04`, 4 robots | 90 ms | 4.7 ms | 19x |
+| PowerGrid, 16 buses | new | 0.25 ms | |
+| Platoon, 8 followers | new | 0.13 ms | |
+
+Rendering an `rgb_array` dashboard frame takes 15 to 50 ms. Refactors that were
+not meant to change results were checked against the previous implementation:
+the AJLATT, Kuramoto and Consensus speed-ups of 1.1 are bitwise identical.
 
 ## Documentation
 

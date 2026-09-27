@@ -56,6 +56,11 @@ class EnvSpec:
         Name of the constructor argument that sets the episode length
         (``max_steps``, ``max_iter``, ...). :func:`make` and :func:`make_vec`
         translate ``max_episode_steps`` into it.
+    per_agent_rewards:
+        The environment returns per-agent reward and termination arrays
+        instead of scalars; :func:`make_vec` then wraps the copies of
+        Gymnasium's Sync/Async vector classes in
+        :class:`~env_lib.wrappers.TeamReward`.
     disable_env_checker:
         Skip Gymnasium's single-agent passive checker (for environments that
         return per-agent reward arrays).
@@ -71,6 +76,7 @@ class EnvSpec:
     requires: str | None = None
     vector_entry_point: str | None = None
     limit_kwarg: str = "max_steps"
+    per_agent_rewards: bool = False
     disable_env_checker: bool = False
 
 
@@ -245,6 +251,7 @@ ENV_SPECS: list[EnvSpec] = [
         "multi-robot target tracking",
         family="ajlatt",
         limit_kwarg="max_episode_steps",
+        per_agent_rewards=True,
         disable_env_checker=True,
     ),
 ]
@@ -335,6 +342,7 @@ def make_vec(
     num_envs: int = 1,
     vectorization_mode: str | None = None,
     *,
+    autoreset_mode: Any = None,
     vector_kwargs: dict[str, Any] | None = None,
     wrappers: Any = None,
     **kwargs: Any,
@@ -352,11 +360,20 @@ def make_vec(
         implementation when it has one (``EnvSpec.vector_entry_point``) and
         :class:`gymnasium.vector.SyncVectorEnv` otherwise. ``"sync"``,
         ``"async"`` and ``"vector_entry_point"`` force a mode.
+    autoreset_mode:
+        ``"next_step"`` (Gymnasium's default), ``"same_step"`` or
+        ``"disabled"`` (``gymnasium.vector.AutoresetMode`` members and the
+        spellings ``"NextStep"``, ... are accepted too), for every
+        vectorisation mode.
     vector_kwargs:
-        Arguments of the Sync/Async vector class (not allowed for the native
-        implementation, which takes ``autoreset_mode`` through ``kwargs``).
+        Further arguments of the Sync/Async vector class (not allowed for the
+        native implementation).
     wrappers:
-        Wrappers applied to every single environment (Sync/Async only).
+        Wrappers applied to every single environment (Sync/Async only). For
+        environments with per-agent reward arrays (``EnvSpec.per_agent_rewards``,
+        AJLATT) :class:`~env_lib.wrappers.TeamReward` is applied when no
+        wrappers are given, because Gymnasium's vector classes need scalar
+        rewards; the per-agent rewards stay in ``infos["agent_rewards"]``.
     **kwargs:
         Environment constructor arguments (``max_episode_steps`` as in
         :func:`make`).
@@ -370,13 +387,55 @@ def make_vec(
     """
     register_envs()
     target, kwargs = _resolve(env_id, kwargs)
+    try:
+        spec: EnvSpec | None = get_spec(env_id)
+    except KeyError:
+        spec = None
+    mode = vectorization_mode
+    if mode is None:
+        has_native = gym.spec(env_id).vector_entry_point is not None
+        mode = "vector_entry_point" if has_native else "sync"
+    native = str(getattr(mode, "value", mode)) == "vector_entry_point"
+    vector_kwargs = dict(vector_kwargs or {})
+    if autoreset_mode is not None:
+        if native:
+            kwargs["autoreset_mode"] = autoreset_mode
+        else:
+            vector_kwargs["autoreset_mode"] = _gymnasium_autoreset_mode(autoreset_mode)
+    if not native and wrappers is None and spec is not None and spec.per_agent_rewards:
+        from env_lib.wrappers import TeamReward
+
+        wrappers = [TeamReward]
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message=r".*is out of date", category=DeprecationWarning)
         return gym.make_vec(
             target,
             num_envs=num_envs,
-            vectorization_mode=vectorization_mode,
+            vectorization_mode=mode,
             vector_kwargs=vector_kwargs,
             wrappers=wrappers,
             **kwargs,
         )
+
+
+def _gymnasium_autoreset_mode(value: Any) -> Any:
+    """Convert an autoreset mode to ``gymnasium.vector.AutoresetMode``."""
+    try:
+        from gymnasium.vector import AutoresetMode
+    except ImportError:  # Gymnasium 1.0: only next-step autoreset
+        raw = str(getattr(value, "value", value)).replace("_", "").lower()
+        if raw != "nextstep":
+            raise ValueError(
+                "Gymnasium 1.0 vector environments only support next-step autoreset; "
+                "upgrade Gymnasium or use a native vector environment"
+            ) from None
+        return None
+    if isinstance(value, AutoresetMode):
+        return value
+    raw = str(value).replace("_", "").lower()
+    for member in AutoresetMode:
+        if member.value.lower() == raw:
+            return member
+    raise ValueError(
+        f"autoreset_mode must be one of 'next_step', 'same_step', 'disabled', got {value!r}"
+    )

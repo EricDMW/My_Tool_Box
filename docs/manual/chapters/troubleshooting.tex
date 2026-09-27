@@ -107,6 +107,9 @@ resulting error names the extra that provides them
       system package \code{python3-tk} or \code{conda install tk}
       (Section~\ref{sec:install-tk}) \\
     \code{No module named 'pytest'} or \code{'ruff'} & \code{pip install -e ".[all,dev]"} \\
+    \code{to\_parallel(...)} is not an instance of PettingZoo's \code{ParallelEnv}
+      (\code{env\_lib.wrappers.PETTINGZOO\_AVAILABLE} is \code{False}) &
+      \code{pip install pettingzoo} (not an extra; Section~\ref{sec:install-pettingzoo}) \\
     \bottomrule
   \end{tabularx}
 \end{table}
@@ -253,6 +256,96 @@ video codec is unavailable. \code{save\_animation} rejects other suffixes with
 a \code{ValueError}; frames must all have the same shape
 \code{(H, W, 3)} or \code{(H, W, 4)}.
 
+\section{Vector environments}\label{sec:trouble-vector}
+
+\paragraph{A Sync instead of a native vector environment.}
+\code{env\_lib.make\_vec} uses a native batched implementation only for the ids
+that register one: the NumPy \envid{KuramotoOscillator-*} ids,
+\envid{Consensus-v0}, \envid{Formation-v0}, \envid{PowerGrid-v0} and
+\envid{Platoon-v0}. For every other id it returns Gymnasium's
+\code{SyncVectorEnv}, which steps one Python environment per copy, so its cost
+grows linearly with \code{num\_envs}. \code{env-lib list -{}-native} lists the
+native ids, and \code{env\_lib.get\_spec(id).vector\_entry\_point} is \code{None}
+for the others; forcing \code{vectorization\_mode="vector\_entry\_point"} for
+such an id raises \code{gymnasium.error.Error} (\code{Cannot create vectorized
+environment ... because it doesn't have a vector entry point defined}). A
+\code{SyncVectorEnv} does not have the methods of the native classes, so that
+the call \code{envs.laplacian\_policy()}, for example, raises an
+\code{AttributeError}; the controller returned by
+\code{env\_lib.baseline\_policy(envs)} works with both kinds of vector
+environment.
+
+\paragraph{AJLATT in Sync and Async vector environments.}
+\code{SyncVectorEnv} and \code{AsyncVectorEnv} store one scalar reward per copy,
+but AJLATT returns per-robot reward arrays. \code{env\_lib.make\_vec} therefore
+wraps every copy in \code{TeamReward} (the per-robot rewards stay in
+\code{infos["agent\_rewards"]}). If you pass your own \code{wrappers}, include
+\code{TeamReward}; otherwise a step fails with \code{ValueError: setting an
+array element with a sequence}. \code{gymnasium.make\_vec} does not add the
+wrapper.
+
+\paragraph{Where is the last observation of an episode?}
+It depends on the autoreset mode (Table~\ref{tab:workflow-autoreset}). With the
+default \code{"next\_step"} mode, the observation returned together with
+\code{terminated} or \code{truncated} is the last one of the episode; on the
+\emph{next} \code{step()} the copy ignores its action, returns reward 0, both
+flags \code{False}, the first observation of the new episode and, in
+\code{infos}, the rows of its reset info. With \code{"same\_step"} the returned
+observation already belongs to the new episode, and the last observation and
+info are in \code{infos["final\_obs"]} (an object array with \code{None} for the
+copies that did not finish) and \code{infos["final\_info"]}, masked by
+\code{infos["\_final\_obs"]} and \code{infos["\_final\_info"]}. With
+\code{"disabled"} nothing is reset; reset the finished copies with
+\code{envs.reset(options=\{"reset\_mask": terminated | truncated\})}. When
+you store transitions for learning, skip the \code{"next\_step"} reset step (its
+observation is not a successor of the previous one); \code{env\_lib.evaluate}
+does this.
+
+\paragraph{Errors when selecting the autoreset mode.}
+Pass the mode as \code{env\_lib.make\_vec(id, n, autoreset\_mode="same\_step")};
+this works for native, Sync and Async environments. Passing
+\code{vector\_kwargs} to a native environment raises
+\code{gymnasium.error.Error} (\code{Custom vector environment can be passed
+arguments only through kwargs}), and \code{gymnasium.make\_vec} with Sync or
+Async environments accepts only \code{gymnasium.vector.AutoresetMode} members
+or their values (\code{"SameStep"}), not \code{"same\_step"}. Gymnasium~1.0 has
+no \code{AutoresetMode}, and its Sync and Async environments always use
+next-step autoreset.
+
+\paragraph{Copies do not match single environments.}
+A native vector environment draws the initial states of all copies from one
+generator, so copy $i$ does not reproduce a single environment reset with seed
+$s + i$, whereas \code{SyncVectorEnv} seeds copy $i$ with $s + i$. To compare a
+copy with a single environment, start both from the same state through the
+reset options (Table~\ref{tab:envlib-options}), or use
+\code{vectorization\_mode="sync"}.
+
+\paragraph{\code{ResetNeededError} from a partial first reset.}
+The first \code{reset()} of a native vector environment must reset every copy;
+\code{reset(options=\{"reset\_mask": mask\})} with some entries \code{False}
+before that raises \code{ResetNeededError}.
+
+\section{Warnings about unknown reset options}\label{sec:trouble-reset-options}
+
+\paragraph{Symptom.} \code{reset()} prints a \code{UserWarning} such as
+\code{ConsensusEnv.reset(): ignoring unknown reset option(s) ['position'];
+supported: ['positions', 'velocities']}.
+
+\paragraph{Cause.} Since version 1.1 the environments with reset options
+(Kuramoto, Consensus, PowerGrid, Platoon and their vector versions) ignore keys
+they do not know, with this warning, instead of raising \code{ValueError}; the
+values of known keys are still validated strictly
+(Section~\ref{sec:envlib-reset-options}). This lets generic tools pass options
+of their own, as PettingZoo's \code{parallel\_api\_test} does.
+
+\paragraph{Solution.} Check the key against the supported ones printed in the
+message: a misspelt key, as in the example, means that the option had no effect
+and the initial state was sampled as usual. If a tool passes options on
+purpose, silence only its keys, for example
+\code{warnings.filterwarnings("ignore", message=r".*reset option.*'options'",
+category=UserWarning)}. LineMsg, WirelessComm, Pistonball and AJLATT have no
+reset options and ignore \code{options} without a warning.
+
 \section{Reproducibility and seeding}\label{sec:trouble-seeding}
 
 The environments are deterministic given their seeds and never use global
@@ -272,10 +365,16 @@ of randomness. Seed each of them:
     structure in the constructor, independent of \code{reset}: the
     Erd\H{o}s-R\'enyi graph of \code{ConsensusEnv} (\code{graph\_seed}; with
     the default \code{None} two instances may differ, even in their
-    observation size) and the random topology of the Kuramoto environments
-    (\code{topology\_seed=42}). AJLATT accepts a default seed in its
-    configuration (\code{seed=...}), used by the first \code{reset()} without
-    a seed.
+    observation size), the random topology of the Kuramoto environments
+    (\code{topology\_seed=42}), the PowerGrid network
+    (\code{network\_seed=0}) and the Platoon vehicles
+    (\code{vehicle\_seed=0}); with \code{network\_seed=None} or
+    \code{vehicle\_seed=None} every instance draws fresh entropy. AJLATT
+    accepts a default seed in its configuration (\code{seed=...}), used by the
+    first \code{reset()} without a seed.
+  \item \emph{Vector environments.} \code{envs.reset(seed=s)} makes a batch
+    reproducible; the copies of a native vector environment share one
+    generator (Section~\ref{sec:trouble-vector}).
   \item \emph{Networks.} Call \code{torch.manual\_seed(s)} before creating
     networks and before training. \code{VariationalEncoder} samples its noise
     from PyTorch's default generator. On GPUs some operations are
@@ -320,34 +419,79 @@ reproduce its behaviour before version 1.0 closely with
     several training processes share a machine, thread contention can make
     training much slower; limit the threads with \code{torch.set\_num\_threads(1)}
     or the environment variable \code{OMP\_NUM\_THREADS=1} and compare.
-  \item \emph{Measure.} \code{benchmarks/benchmark\_envs.py}
-    (Section~\ref{sec:examples-benchmarks}) measures step and frame times on
-    your machine; \code{python -m cProfile -s cumtime script.py} shows where
-    time goes in your own code.
+  \item \emph{Simulate batches natively.} For many copies of an environment
+    with a native vector implementation, \code{env\_lib.make\_vec} advances
+    all of them with one set of array operations; a \code{SyncVectorEnv} steps
+    them one by one, and an \code{AsyncVectorEnv} pays inter-process
+    communication on every step, which only an expensive step (AJLATT,
+    Pistonball) outweighs.
+  \item \emph{Choose the batch size by measurement.} The throughput of a
+    native vector environment (environment steps per second) grows with the
+    number of copies while the fixed cost per call dominates, then levels off
+    and can drop once the arrays no longer fit into the CPU caches: for
+    PowerGrid with 128 buses, 1024 copies gave a lower throughput than 64
+    (Table~\ref{tab:power-grid-throughput}; Platoon behaves similarly,
+    Table~\ref{tab:platoon-throughput}). Run
+    \code{env-lib bench ID -{}-num-envs B} for a few values of \code{B} with your
+    constructor arguments (\code{-{}-kwarg}) and pick the smallest batch near the
+    maximum.
+  \item \emph{Pin the BLAS threads.} Some kernels of the native vector
+    environments use matrix products (the coupling terms of Kuramoto and of
+    PowerGrid with small networks), which NumPy passes to its BLAS library;
+    depending on the installation, BLAS starts one thread per core. For the
+    small matrices of these environments the threads bring little, and when
+    several processes share a machine (parallel runs, \code{AsyncVectorEnv}
+    workers) they compete for the cores. Start Python with
+    \code{OMP\_NUM\_THREADS=1} (for OpenBLAS also
+    \code{OPENBLAS\_NUM\_THREADS=1}, for MKL \code{MKL\_NUM\_THREADS=1}) and
+    compare with \code{env-lib bench}; pinned threads also make timings more
+    reproducible.
+  \item \emph{Measure.} \code{env-lib bench} measures the throughput of the
+    single, native vector and Sync (and Async) implementations,
+    \code{benchmarks/benchmark\_envs.py} (Section~\ref{sec:examples-benchmarks})
+    measures step and frame times on your machine, and
+    \code{python -m cProfile -s cumtime script.py} shows where time goes in
+    your own code.
 \end{itemize}
 
 \section{Other common errors}\label{sec:trouble-other}
 
 \begin{description}[leftmargin=0.6cm,style=nextline]
   \item[\code{step()} raises before the first \code{reset()}]
-    Every environment requires \code{reset()} before the first
-    \code{step()}. Otherwise it raises \code{env\_lib.ResetNeededError},
-    which can be caught either as a \code{RuntimeError} or as Gymnasium's
-    \code{ResetNeeded} error. Environments created with
-    \code{gymnasium.make} raise Gymnasium's own \code{ResetNeeded} from the
-    \code{OrderEnforcing} wrapper.
+    Every environment, including the native vector environments, requires
+    \code{reset()} before the first \code{step()}. Otherwise it raises
+    \code{env\_lib.ResetNeededError}, which can be caught either as a
+    \code{RuntimeError} or as Gymnasium's \code{ResetNeeded} error.
+    Environments created with \code{gymnasium.make} raise Gymnasium's own
+    \code{ResetNeeded} from the \code{OrderEnforcing} wrapper.
   \item[An episode is longer or shorter than expected]
     Each environment enforces its own episode limit through a constructor
     argument (\code{max\_steps}, \code{max\_iter}, \code{max\_cycles} or
-    \code{max\_episode\_steps}); pass it to the constructor or to
-    \code{env\_lib.make}. Passing \code{max\_episode\_steps} to
-    \code{gymnasium.make} adds a second \code{TimeLimit} wrapper, and the
-    shorter of the two limits applies.
+    \code{max\_episode\_steps}; \code{env\_lib.get\_spec(id).limit\_kwarg}
+    names it). Pass it to the constructor, or pass
+    \code{max\_episode\_steps} to \code{env\_lib.make} or
+    \code{env\_lib.make\_vec}, which set the same argument; giving both with
+    different values raises \code{ValueError}. Only \code{gymnasium.make} called
+    directly with \code{max\_episode\_steps} (and \code{gymnasium.make\_vec} in
+    the Sync or Async mode) adds a second \code{TimeLimit} wrapper, and the
+    shorter of the two limits applies; \code{gymnasium.make\_vec} passes the
+    argument on to a native vector class, which rejects it with
+    \code{TypeError}. In version 1.0, \code{env\_lib.make} behaved like
+    \code{gymnasium.make} here, and for AJLATT the value did not reach the
+    environment at all (Section~\ref{sec:migration-11}).
   \item[\code{AttributeError} for an environment method]
     \code{gymnasium.make} and \code{env\_lib.make} return a wrapped
     environment. Methods and attributes that only the environment class
     defines are reached through \code{env.unwrapped}; for example, the
-    consensus controller is \code{env.unwrapped.laplacian\_policy()}.
+    consensus controller is \code{env.unwrapped.laplacian\_policy()}. The
+    function \code{env\_lib.baseline\_policy} needs no such access: it accepts
+    wrapped, flattened and vectorised environments.
+  \item[\code{TypeError} from \code{baseline\_policy}]
+    Keyword arguments set the gains of the controller of the environment's
+    family; an unknown name raises \code{TypeError} with the list of valid
+    names (\code{env-lib baselines} lists the controllers). A wrapper that
+    changes the spaces beyond a reshape, or an environment that is not part of
+    \pkg{env\_lib}, raises \code{TypeError} as well.
   \item[\code{render()} returns \code{None} with a warning]
     The environment was created without a render mode. Pass
     \code{render\_mode="rgb\_array"} (or \code{"human"}) to the constructor or

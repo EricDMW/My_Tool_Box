@@ -409,6 +409,43 @@ python examples/consensus_demo.py --task formation --shape wedge \
 \end{shellcode}
 
 % ---------------------------------------------------------------------------
+\section{Native vector environment}\label{sec:consensus-vector}
+
+\code{env\_lib.make\_vec("Consensus-v0", B)} and \code{make\_vec("Formation-v0", B)}
+return a \code{ConsensusVectorEnv}, which simulates $B$ copies with the same
+array kernels as the single environment. It takes the constructor arguments of
+\code{ConsensusEnv} plus \code{num\_envs} and \code{autoreset\_mode}, supports
+every task, topology (proximity graphs are rebuilt per copy and step),
+dynamics and formation shape, and returns observations of shape
+$(B, N, d)$, team rewards of shape $(B,)$ and batched info arrays with a
+leading $B$ axis. Each copy reproduces a single environment started from the
+same state bit for bit:
+
+\begin{pycode}
+import numpy as np
+import env_lib
+
+envs = env_lib.make_vec("Formation-v0", num_envs=4)
+obs, _ = envs.reset(seed=0)                     # (4, 8, 16)
+single = env_lib.make("Formation-v0").unwrapped
+first, _ = single.reset(options={"positions": envs.unwrapped.positions[0]})
+assert np.array_equal(first, obs[0])
+
+action = envs.unwrapped.laplacian_policy()      # batched baseline, (4, 8, 2)
+obs, reward, terminated, truncated, info = envs.step(action)
+assert np.array_equal(single.step(action[0])[0], obs[0])
+\end{pycode}
+
+\code{reset(options=...)} accepts \code{"positions"} and \code{"velocities"}
+either for all copies (shape $(N, 2)$) or per copy (shape $(B, N, 2)$), and
+combines with \code{"reset\_mask"}. Erdos-Renyi graphs are sampled once per
+copy from \code{numpy.random.default\_rng(graph\_seed)}; copy 0 has the graph of
+a single environment with the same \code{graph\_seed}. The default
+\code{max\_neighbors} is then the maximum degree over all copies, so pass
+\code{max\_neighbors} explicitly when observations must have the same width as
+a single environment's. \code{render()} draws copy 0. Chapter~\ref{chap:workflow}
+covers autoreset modes, seeding and throughput.
+
 \section{Reproducibility and performance}\label{sec:consensus-perf}
 
 The initial positions and the process noise are drawn from

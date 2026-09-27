@@ -7,10 +7,13 @@
 \usepackage{lmodern}
 \usepackage[scaled=0.95]{helvet}
 \renewcommand{\familydefault}{\sfdefault}
+% Latin Modern for mathematics (the T1 sans text font has no Greek capitals).
+\usefonttheme[onlymath]{serif}
 \usepackage{amsmath}
 \usepackage{booktabs}
 \usepackage{tabularx}
 \usepackage{listings}
+\usepackage[listings]{tcolorbox}
 \usepackage{tikz}
 \usetikzlibrary{positioning,shapes.misc,arrows.meta,calc,fit,backgrounds}
 \usepackage{pgfplots}
@@ -81,13 +84,18 @@
   morekeywords={as},
 }
 \lstdefinestyle{sh}{
+  language={},
   basicstyle=\ttfamily\fontsize{7.3}{8.9}\selectfont\color{white},
-  backgroundcolor=\color{panel},
-  frame=single,framerule=0pt,
   columns=fullflexible,keepspaces=true,
-  xleftmargin=4pt,xrightmargin=4pt,aboveskip=2pt,belowskip=2pt,
 }
 \lstset{style=py}
+% Rounded code panels (one box per listing, no per-line seams).
+\newtcblisting{pycode}{listing only,colback=paper,colframe=rule,boxrule=0.4pt,arc=3pt,
+  left=5pt,right=5pt,top=3pt,bottom=3pt,
+  listing options={style=py,backgroundcolor={},frame=none,xleftmargin=0pt,xrightmargin=0pt}}
+\newtcblisting{shcode}{listing only,colback=panel,colframe=panel,boxrule=0pt,arc=3pt,
+  left=5pt,right=5pt,top=3pt,bottom=3pt,
+  listing options={style=sh,backgroundcolor={},frame=none,xleftmargin=0pt,xrightmargin=0pt}}
 
 \tikzset{
   box/.style={rounded corners=3pt,draw=#1!55,fill=#1!7,line width=0.6pt,
@@ -138,7 +146,7 @@
   \centering
   \stat{accent}{\NumFamilies}{environment families\\(\NumIds{} registered ids)}\hfill
   \stat{green}{\NumContinuous}{families with continuous\\states and actions}\hfill
-  \stat{orange}{\NumThroughput}{agent-steps per second\\(native batch, one CPU core)}\hfill
+  \stat{orange}{\NumThroughput}{agent-steps per second\\(256 copies, one CPU core)}\hfill
   \stat{purple}{\NumTests}{tests, CI on\\Python 3.9 to 3.12}
 
   \vspace{14pt}
@@ -171,9 +179,9 @@
       4/{Results others can reproduce}/{Seeded generators only, headless rendering and GIF/MP4 export, plotting
         and parameter tools in the same package.}/purple%
     }{
-      \node[box=\col,minimum height=0.86cm,text width=3.3cm,font=\footnotesize\bfseries,anchor=west]
+      \node[box=\col,minimum height=0.86cm,text width=3.55cm,font=\footnotesize\bfseries,anchor=west]
         (n\i) at (0,-\i*1.08) {\need};
-      \node[anchor=west,text width=9.3cm,font=\footnotesize,align=left] (f\i) at (4.35,-\i*1.08) {\feat};
+      \node[anchor=west,text width=9.1cm,font=\footnotesize,align=left] (f\i) at (4.6,-\i*1.08) {\feat};
       \draw[arrow,color=\col] (n\i.east) -- ++(0.5,0);
     }
   \end{tikzpicture}
@@ -267,37 +275,38 @@
 % ---------------------------------------------------------------------------
 \begin{frame}[fragile]{One interface, from a single run to large batches}
   \begin{columns}[T,onlytextwidth]
-    \column{0.55\textwidth}
-    \footnotesize\textbf{Python}
-\begin{lstlisting}
+    \column{0.57\textwidth}
+    \footnotesize\textbf{Python}\\[2pt]
+\begin{pycode}
 import env_lib
 
 env = env_lib.make("PowerGrid-v0")
-obs, info = env.reset(seed=0)       # (n_agents, obs_dim)
+obs, info = env.reset(seed=0)    # (agents, obs_dim)
 policy = env_lib.baseline_policy(env)
 obs, r, term, trunc, info = env.step(policy(obs))
-info["agent_rewards"]               # (n_agents,)
+info["agent_rewards"]            # (agents,)
 
 envs = env_lib.make_vec("PowerGrid-v0", num_envs=1024)
-obs, _ = envs.reset(seed=0)         # (1024, n_agents, obs_dim)
-print(env_lib.evaluate(envs, policy, n_episodes=1000))
-\end{lstlisting}
-    \column{0.42\textwidth}
-    \footnotesize\textbf{Existing learners}
-\begin{lstlisting}
+obs, _ = envs.reset(seed=0)      # (1024, agents, dim)
+print(env_lib.evaluate(envs, policy, n_episodes=1024))
+\end{pycode}
+    \column{0.39\textwidth}
+    \footnotesize\textbf{Existing learners}\\[2pt]
+\begin{pycode}
 from env_lib.wrappers import (
     FlattenJointSpaces, to_parallel)
-flat = FlattenJointSpaces(env)   # SB3, CleanRL
-par = to_parallel(env)           # PettingZoo API
-\end{lstlisting}
+flat = FlattenJointSpaces(env) # SB3
+par = to_parallel(env)  # PettingZoo
+\end{pycode}
     \vspace{6pt}
-    \textbf{Shell}
-\begin{lstlisting}[style=sh]
+    \textbf{Shell}\\[2pt]
+\begin{shcode}
 $ env-lib list --continuous
 $ env-lib describe Platoon-v0
-$ env-lib run Formation-v0 --gif run.gif
-$ env-lib bench PowerGrid-v0 --num-envs 1024
-\end{lstlisting}
+$ env-lib run Platoon-v0 --gif f.gif
+$ env-lib evaluate PowerGrid-v0
+$ env-lib bench Platoon-v0
+\end{shcode}
   \end{columns}
 \end{frame}
 
@@ -383,7 +392,7 @@ $ env-lib bench PowerGrid-v0 --num-envs 1024
   \end{tabularx}
 
   \vspace{8pt}
-  \muted{Mean return over \NumEvalEpisodes{} seeded episodes (higher is better).
+  \muted{Mean return over \NumEvalEpisodes{} seeded episodes (8 for AJLATT, 16 for Pistonball; higher is better).
   \code{env\_lib.baseline\_policy(env)} returns the controller as a function of the observation,
   so the same call drives one environment or a batch of thousands.}
 \end{frame}
@@ -434,19 +443,22 @@ $ env-lib bench PowerGrid-v0 --num-envs 1024
 % ---------------------------------------------------------------------------
 \begin{frame}[fragile]{Get started}
   \begin{columns}[c,onlytextwidth]
-    \column{0.56\textwidth}
-\begin{lstlisting}[style=sh]
-$ git clone https://github.com/EricDMW/My_Tool_Box.git
+    \column{0.55\textwidth}
+\begin{shcode}
+$ git clone https://github.com/EricDMW/My_Tool_Box
 $ cd My_Tool_Box && pip install -e ".[all]"
 $ env-lib list
-$ env-lib run Platoon-v0 --policy baseline --gif platoon.gif
-\end{lstlisting}
-    \vspace{6pt}
+$ env-lib run Platoon-v0 --gif platoon.gif
+\end{shcode}
+    \vspace{8pt}
     \small
-    Handbook: \code{docs/manual/main.pdf}\\
-    Examples: \code{examples/} (one script per environment)\\
-    Changes: \code{CHANGELOG.md}
-    \column{0.40\textwidth}
+    \begin{tabular}{@{}ll@{}}
+      Slides & \code{docs/slides/my\_tool\_box\_slides.pdf}\\
+      Handbook & \code{docs/manual/main.pdf}\\
+      Examples & \code{examples/} (one script per environment)\\
+      Changes & \code{CHANGELOG.md}\\
+    \end{tabular}
+    \column{0.42\textwidth}
     \centering
     \includegraphics[width=\linewidth]{\FigPlatoon}
   \end{columns}

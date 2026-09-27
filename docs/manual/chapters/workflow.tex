@@ -9,7 +9,7 @@
 
 The previous chapters describe the environments one by one. This chapter
 describes the layer that connects them to a research workflow, new in version
-1.1: batched simulation of many environment copies, a catalog and a command
+1.1: batched simulation of many environment copies, a catalogue and a command
 line to discover and try the environments, wrappers that plug them into
 single-agent and multi-agent reinforcement learning libraries, a classical
 baseline controller for every environment, and tools to evaluate policies and
@@ -46,6 +46,7 @@ print(result)                                          # mean return, 95% CI, ..
 % ---------------------------------------------------------------------------
 \section{Vector environments}\label{sec:workflow-vector}
 
+% norun
 \begin{pycode}
 env_lib.make_vec(env_id, num_envs=1, vectorization_mode=None, *,
                  vector_kwargs=None, wrappers=None, **kwargs)
@@ -78,10 +79,14 @@ lists them. Batched shapes, with $n$ agents:
 \end{itemize}
 
 \paragraph{Autoreset.} A copy whose episode ended is reset automatically
-according to the \code{autoreset\_mode} constructor argument (a keyword argument
-of \code{make\_vec} for native environments, and
-\code{vector\_kwargs=\{"autoreset\_mode": ...\}} for Sync/Async), see
-Table~\ref{tab:workflow-autoreset}.
+according to the \code{autoreset\_mode} argument of \code{make\_vec}, see
+Table~\ref{tab:workflow-autoreset}. It accepts \code{"next\_step"},
+\code{"same\_step"}, \code{"disabled"}, Gymnasium's spellings
+(\code{"NextStep"}, \dots) or a member of \code{gymnasium.vector.AutoresetMode},
+and works for every vectorisation mode: \code{make\_vec} passes it to the
+native class or converts it for Gymnasium's Sync and Async classes.
+Gymnasium~1.0, which has no \code{AutoresetMode}, supports only
+\code{"next\_step"} for Sync and Async environments.
 
 \begin{table}[htbp]
   \centering\small
@@ -117,38 +122,47 @@ surface directly). Use \code{"async"}, which steps the copies in worker
 processes, only when a single step is expensive compared with the
 inter-process communication, as for AJLATT and Pistonball on a machine with
 several cores. Sync and Async environments need a scalar reward per copy:
-wrap environments that return per-agent reward arrays (AJLATT) with
-\code{TeamReward} through \code{wrappers=[TeamReward]}
+for environments that return per-agent reward arrays (AJLATT,
+\code{EnvSpec.per\_agent\_rewards}) \code{make\_vec} applies
+\code{TeamReward} to every copy unless \code{wrappers} is given; the per-agent
+rewards stay in \code{infos["agent\_rewards"]}
 (Section~\ref{sec:workflow-wrappers}).
 
-\code{env-lib bench ID -{}-num-envs 256 -{}-steps 200} measures the throughput of
-the three modes (Section~\ref{sec:workflow-cli}). Table~\ref{tab:workflow-throughput}
-collects reference values.
+\code{env-lib bench ID -{}-num-envs 256} compares the three modes for one
+environment (Section~\ref{sec:workflow-cli}), and
+\code{benchmarks/benchmark\_vector.py} measures native and Sync throughput for
+1 to 1024 copies. Table~\ref{tab:workflow-throughput} lists reference values.
 
-% TODO(lead): fill in the throughput table from
-%   env-lib bench <ID> --num-envs 256 --steps 200
-% on the reference machine (and state the machine in the caption).
 \begin{table}[htbp]
   \centering\small
-  \caption{Throughput in environment steps per second (\textbf{TODO}: values to
-    be measured with \code{env-lib bench}; $B = 256$ copies, random actions).}
+  \caption{Throughput in environment steps per second with random actions and
+    automatic resets, measured with \code{benchmarks/benchmark\_vector.py} on one
+    core of an Intel Xeon at 2.8~GHz (\code{OMP\_NUM\_THREADS=1}, Python~3.11,
+    NumPy~2.4). The last column counts agent-steps (copies times agents).}
   \label{tab:workflow-throughput}
-  \begin{tabular}{@{}lrrrr@{}}
+  \begin{tabular}{@{}lrrrrr@{}}
     \toprule
-    Environment & single & native ($B = 256$) & sync ($B = 256$) & native / single \\
+    Environment & 1 copy & native, $B = 256$ & sync, $B = 256$ & speed-up & agent-steps/s \\
     \midrule
-    \envid{Consensus-v0}          & TODO & TODO & TODO & TODO \\
-    \envid{Formation-v0}          & TODO & TODO & TODO & TODO \\
-    \envid{KuramotoOscillator-v0} & TODO & TODO & TODO & TODO \\
-    \envid{PowerGrid-v0}          & TODO & TODO & TODO & TODO \\
-    \envid{Platoon-v0}            & TODO & TODO & TODO & TODO \\
+    \envid{Consensus-v0}          & 7\,864 & 345\,252 & 8\,695 & 39.7 & $2.76\times10^{6}$ \\
+    \envid{Formation-v0}          & 7\,859 & 312\,695 & 8\,286 & 37.7 & $2.50\times10^{6}$ \\
+    \envid{KuramotoOscillator-v0} & 6\,895 & 315\,715 & 9\,625 & 32.8 & $3.16\times10^{6}$ \\
+    \envid{PowerGrid-v0}          & 3\,286 & 133\,637 & 3\,074 & 43.5 & $2.14\times10^{6}$ \\
+    \envid{Platoon-v0}            & 7\,128 & 295\,176 & 7\,370 & 40.1 & $2.36\times10^{6}$ \\
     \bottomrule
   \end{tabular}
 \end{table}
 
+The Sync throughput stays at a few thousand steps per second whatever the
+number of copies, because every copy is a separate Python object stepped in a
+loop. The native throughput grows with $B$ until the arrays no longer fit in
+the processor caches; with 1024 copies it is between $1.1\times10^{5}$
+(PowerGrid) and $5.3\times10^{5}$ (Platoon) steps per second.
+
 % ---------------------------------------------------------------------------
 \section{Discovering environments}\label{sec:workflow-catalog}
 
+% norun
 \begin{pycode}
 env_lib.catalog(*, family=None, action_type=None, observation_type=None,
                 native_vector=None, available_only=False, inspect=True)
@@ -232,7 +246,7 @@ unknown id are reported on standard error with exit status 2.
     \toprule
     Command & Purpose \\
     \midrule
-    \code{list [-{}-continuous|-{}-discrete] [-{}-family F ...] [-{}-native] [-{}-available] [-{}-markdown] [-{}-no-inspect]} & catalog table (Section~\ref{sec:workflow-catalog}) \\
+    \code{list [-{}-continuous|-{}-discrete] [-{}-family F ...] [-{}-native] [-{}-available] [-{}-markdown] [-{}-no-inspect]} & catalogue table (Section~\ref{sec:workflow-catalog}) \\
     \code{describe ID} & \code{env\_lib.describe(ID)} \\
     \code{baselines} & baseline controller of every family \\
     \code{run ID [-{}-steps N] [-{}-policy baseline|random] [-{}-seed S] [-{}-gif PATH] [-{}-fps F] [-{}-theme light|dark] [-{}-kwarg K=V ...]} & roll out one episode, print the team return, the per-agent returns and the final info; record a GIF (or MP4) with \code{record\_episode} \\
@@ -295,10 +309,14 @@ expect; they then learn one centralised policy for the team. \code{Box},
 (\code{Discrete} is passed through); other spaces raise \code{TypeError}.
 Rewards and flags are passed through, so environments with per-agent reward
 arrays (AJLATT) are combined with \code{TeamReward}. The flattened environments
-pass Gymnasium's \code{check\_env} (tested for Consensus, Kuramoto, LineMsg,
-WirelessComm and AJLATT); Stable-Baselines3 itself is not part of the test
-suite. A typical use:
+pass Gymnasium's \code{check\_env}: the test suite checks the flattened
+Consensus, Kuramoto, LineMsg and WirelessComm environments and
+\code{TeamReward} on AJLATT, and the flattened PowerGrid, Platoon and
+\code{TeamReward}-wrapped AJLATT environments pass as well. Stable-Baselines3
+itself is not part of the test suite. A typical use (not executed here, since
+Stable-Baselines3 is not a dependency):
 
+% norun
 \begin{pycode}
 import env_lib
 from env_lib.wrappers import FlattenJointSpaces, TeamReward
@@ -352,21 +370,26 @@ the joint observation (a flat observation, as in Kuramoto, gives the single agen
 \end{itemize}
 
 \begin{pycode}
+import env_lib
 from env_lib.wrappers import to_parallel
 
 env = to_parallel("PowerGrid-v0", n_buses=24)
+policy = env_lib.baseline_policy(env)       # dictionaries in, dictionaries out
 observations, infos = env.reset(seed=0)
 while env.agents:
-    actions = {agent: my_policy(observations[agent]) for agent in env.agents}
+    actions = policy(observations)          # {agent: action}
     observations, rewards, terminations, truncations, infos = env.step(actions)
+print(len(rewards), sum(rewards.values()))  # 24 agents, last team reward
 env.close()
 \end{pycode}
 
-PettingZoo's \code{parallel\_api\_test} passes for the adapted LineMsg,
-WirelessComm, AJLATT and Pistonball environments. It resets with the dummy
-option \code{\{"options": 1\}}, which the consensus, Kuramoto, power-grid and
-platoon environments reject because they validate their reset options; with
-that option removed, the remaining checks pass for these environments as well.
+PettingZoo's \code{parallel\_api\_test} passes for the adapted environment of
+every family: \code{tests/envs/test\_wrappers.py} runs it on LineMsg (both
+action spaces), WirelessComm, AJLATT, Pistonball, Consensus, Kuramoto,
+PowerGrid and Platoon. The test resets with the dummy option
+\code{\{"options": 1\}}; the environments with reset options ignore such unknown
+keys with a \code{UserWarning} (Section~\ref{sec:envlib-reset-options}), and
+the others ignore \code{options} altogether.
 
 % ---------------------------------------------------------------------------
 \section{Baseline controllers}\label{sec:workflow-baselines}
@@ -472,6 +495,7 @@ robots that collide early collect a \emph{higher} return; with
 % ---------------------------------------------------------------------------
 \section{Evaluation and rollouts}\label{sec:workflow-evaluation}
 
+% norun
 \begin{pycode}
 env_lib.evaluate(env, policy=None, *, n_episodes=10, seed=None,
                  max_steps=None, deterministic_seeds=True)
@@ -526,6 +550,7 @@ EvaluationResult: Formation-v0, policy baseline:consensus, 64 episodes
   agent return  mean -1618.222, min -1863.161, max -1463.515 (8 agents)
 \end{textcode}
 
+% norun
 \begin{pycode}
 env_lib.rollout(env, policy=None, *, n_steps=None, n_episodes=None, seed=None)
 \end{pycode}

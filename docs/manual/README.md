@@ -1,8 +1,9 @@
 # My Tool Box User Manual
 
 This directory contains the LaTeX sources of the user manual for My Tool Box
-1.0, the multi-agent reinforcement-learning environments (`env_lib`) and
-research utilities (`toolkit`) of this repository.
+1.1, the multi-agent environments for networked control and reinforcement
+learning (`env_lib`) and the research utilities (`toolkit`) of this
+repository.
 
 ## Building
 
@@ -43,22 +44,28 @@ docs/manual/
   main.tex                  preamble, macros and chapter list
   build.sh                  build script (latexmk)
   chapters/
-    introduction.tex        overview, design principles, licence and citation
-    installation.tex        requirements, extras, verification, building the manual
-    envlib_overview.tex     common environment interface, registry, rendering
+    introduction.tex        purpose, overview, design principles, licence and citation
+    installation.tex        requirements, extras, env-lib check, building the manual
+    envlib_overview.tex     common environment interface, registry and metadata,
+                            reset options, graph utilities, rendering, registered ids
     kos_env.tex             Kuramoto oscillator networks (NumPy and PyTorch)
     networked_envs.tex      LineMsg and WirelessComm
     pistonball_env.tex      Pistonball
     consensus_env.tex       consensus and formation control
+    power_grid_env.tex      power-grid frequency control (PowerGrid-v0)
+    platoon_env.tex         vehicle platoon control (Platoon-v0)
     ajlatt_env.tex          multi-robot localisation and target tracking
+    workflow.tex            vector environments, catalogue, env-lib command line,
+                            wrappers, baseline controllers, evaluation
     toolkit_overview.tex    toolkit structure and parakit
     plotkit.tex             plotting
     neural_toolkit.tex      PyTorch networks and tabular tools
-    examples.tex            example scripts, recording, benchmarks, contributing
+    examples.tex            example scripts, env-lib command line, recording,
+                            benchmarks, contributing
     troubleshooting.tex     common problems and solutions
   appendices/
-    api_reference.tex       signatures of the public API
-    migration.tex           migrating code written for versions before 1.0
+    api_reference.tex       signatures of the public API and the env-lib commands
+    migration.tex           migrating from 1.0 to 1.1 and from versions before 1.0
   figures/                  images included by the chapters
   output/                   build products (not tracked)
 ```
@@ -83,7 +90,13 @@ the appendices.
   decorative symbols.
 - Code examples must run against the current API. Check them in a headless
   environment (`MPLBACKEND=Agg`) before committing, and check the build log for
-  errors, undefined references and overfull boxes.
+  errors, undefined references and overfull boxes. Mark a listing that is not
+  meant to run on its own (a signature summary, or code that needs a package
+  that is not a dependency) with a `% norun` comment on the line before
+  `\begin{pycode}`.
+- Do not quote performance numbers that were not measured. Where a number is
+  still to be measured, leave the comment `% TODO(lead): number` and a visible
+  `\textbf{TBD}` placeholder.
 
 ## Licence
 

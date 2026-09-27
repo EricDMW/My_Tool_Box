@@ -64,12 +64,34 @@ benchmarking every environment.
   Erdos-Renyi, small-world, random geometric), Laplacian, algebraic
   connectivity, `k`-hop neighbourhoods and plotting layouts.
 - Registry records (`env_lib.get_spec(id)`, `EnvSpec`) carry the family,
-  observation and action types, required extra, native vector entry point
-  and the name of the episode-limit argument.
+  observation and action types, required extra, native vector entry point,
+  the name of the episode-limit argument and whether rewards are per-agent
+  arrays.
+- `make_vec(..., autoreset_mode=...)` works for native, Sync and Async vector
+  environments alike, and Sync/Async copies of environments with per-agent
+  reward arrays (AJLATT) are wrapped in `TeamReward` automatically.
 
 ### Performance
 
-PERF_PLACEHOLDER
+Measured on one core (`OMP_NUM_THREADS=1`) with `benchmarks/benchmark_vector.py`
+and `benchmarks/benchmark_envs.py`:
+
+- Native vector environments run 33 to 44 times faster than
+  `SyncVectorEnv` at 256 copies (2 to 3 million agent-steps per second,
+  automatic resets included). Every copy reproduces the single environment
+  started from the same state bit for bit.
+- AJLATT: about 2x faster per step (8.2 to 4.1 ms on `obstacles04` with
+  random actions), with bitwise-identical results. The Newton
+  covariance-intersection solver calls LAPACK directly with scalar
+  bookkeeping, all robots' rays are cast in one exact batched Bresenham pass
+  (4x faster ray casting), and the observation is vectorised over robots.
+- PyTorch Kuramoto: 1.1x to 1.4x faster (fewer host-device copies, prebuilt
+  scatter indices, persistent buffers, `torch.no_grad`), bitwise identical.
+- Rendering: the RGBA-to-RGB frame copy is about 2 ms faster per frame,
+  pixel-identical.
+- `benchmarks/benchmark_vector.py` (new) measures native and Sync throughput
+  for 1 to 1024 copies; `benchmark_envs.py` gained PowerGrid and Platoon rows
+  and `--torch-threads`.
 
 ### Changed
 
@@ -80,11 +102,12 @@ PERF_PLACEHOLDER
   for AJLATT the value previously never reached the configuration.
 - Unknown keys in `reset(options=...)` now issue a `UserWarning` and are
   ignored (Consensus, Kuramoto; values of known keys are still validated), so
-  generic tools that pass their own options work.
+  generic tools that pass their own options work. `reset` of the Consensus and
+  Kuramoto environments accepts initial states for the batch-first kernels.
+- AJLATT: `get_reward` no longer fails on NaN pose estimates;
+  `GridMap.closest_obstacles` accepts several fields of view.
 - The AJLATT example's encircling heuristic moved into the package as
   `env_lib.baselines.ajlatt_encircle` (used by `baseline_policy`).
-- `env_lib.catalog` is a callable module: `env_lib.catalog(...)` returns the
-  catalogue and `env_lib.catalog.describe` remains accessible.
 
 ### Documentation
 

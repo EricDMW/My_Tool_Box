@@ -290,7 +290,7 @@ Invalid values raise \code{ValueError} and arguments of the wrong type
 % ---------------------------------------------------------------------------
 \section{Reset options, info dictionary and properties}\label{sec:power-grid-info}
 
-\code{reset(seed=None, options=None)} starts from the equilibrium with zero
+\code{reset(*, seed=None, options=None)} starts from the equilibrium with zero
 frequency deviation and random initial steps. The options
 \code{"theta"}, \code{"omega"} and \code{"disturbance"} (arrays of shape
 \code{(n,)}) set the initial angles, frequency deviations and step disturbance
@@ -400,7 +400,7 @@ a uniform gain.
 
 The native vector environment
 \begin{pycode}
-PowerGridVectorEnv(num_envs, autoreset_mode="next_step", **kwargs)
+PowerGridVectorEnv(num_envs=1, *, autoreset_mode="next_step", render_mode=None, **kwargs)
 \end{pycode}
 accepts every keyword argument of \code{PowerGridEnv} and simulates
 \code{num\_envs} grids as one batch; \code{env\_lib.make\_vec} returns it for

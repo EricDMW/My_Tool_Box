@@ -32,7 +32,7 @@ My Tool Box is a standard Python project described by a single
     \pkg{numpy}      & 1.23 & all numerical code \\
     \pkg{scipy}      & 1.9  & AJLATT estimation, plotkit smoothing \\
     \pkg{matplotlib} & 3.6  & environment renderers, plotkit \\
-    \pkg{gymnasium}  & 0.29 & environment API and registration \\
+    \pkg{gymnasium}  & 1.0  & environment API, registration, vector environments \\
     \pkg{pyyaml}     & 6.0  & AJLATT map files and map specifications \\
     \bottomrule
   \end{tabular}
@@ -113,6 +113,21 @@ pip install ".[all]"
 
 GPU use is covered in Section~\ref{sec:trouble-torch}.
 
+\subsection{PettingZoo}\label{sec:install-pettingzoo}
+
+The adapter \code{env\_lib.wrappers.to\_parallel} exposes every environment
+through the PettingZoo Parallel API (Section~\ref{sec:workflow-wrappers}).
+PettingZoo is neither a dependency nor an extra: the adapter implements the
+protocol itself. When PettingZoo is installed, the adapter subclasses
+\code{pettingzoo.utils.env.ParallelEnv}, so \code{isinstance} checks and
+PettingZoo's own utilities, such as \code{parallel\_api\_test}, accept it.
+Install it only if your multi-agent library needs it:
+
+\begin{shellcode}
+pip install pettingzoo
+python -c "import env_lib.wrappers as w; print(w.PETTINGZOO_AVAILABLE)"
+\end{shellcode}
+
 \subsection{Tk}\label{sec:install-tk}
 
 Tk is not installable with \code{pip}. It is needed only for the
@@ -151,8 +166,9 @@ package is installed correctly:
 # 1. Versions of both import packages
 python -c "import env_lib, toolkit; print(env_lib.__version__, toolkit.__version__)"
 
-# 2. Registered environment ids
-python -c "import env_lib; print(env_lib.list_envs())"
+# 2. Table of the registered environments (the env-lib console script)
+env-lib list
+python -m env_lib list            # the same without the console script
 
 # 3. Create every environment and take a few random steps
 python examples/quickstart.py --steps 5
@@ -161,12 +177,19 @@ python examples/quickstart.py --steps 5
 pytest -q
 \end{shellcode}
 
-The first command prints \code{1.0.0 1.0.0}. The quick-start script prints one
-line per environment and skips, with a message, environments whose optional
+The first command prints \code{1.1.0 1.1.0}. \code{env-lib list} creates every
+environment once and prints one row per registered id (18 rows) with its
+family, number of agents, observation shape, action type and shape, whether
+\code{env\_lib.make\_vec} uses a native batched implementation, and the
+optional dependency it requires; an environment whose extra is not installed
+is marked \code{(missing)} instead of failing. \code{env-lib list -{}-no-inspect}
+skips creating the environments. The command line is described in
+Section~\ref{sec:workflow-cli}. The quick-start script prints one line per
+environment and skips, with a message, environments whose optional
 dependencies are missing. The test suite skips tests of missing optional
 dependencies in the same way.
 
-The installation also provides three console scripts:
+The installation provides four console scripts:
 
 \begin{center}
   \small
@@ -174,6 +197,7 @@ The installation also provides three console scripts:
     \toprule
     Command & Purpose \\
     \midrule
+    \code{env-lib}          & list, run, evaluate and benchmark the environments (Section~\ref{sec:workflow-cli}) \\
     \code{ajlatt-build-map} & build an AJLATT map from a YAML specification (Chapter~\ref{chap:ajlatt}) \\
     \code{ajlatt-plot-map}  & list and plot the bundled AJLATT maps (Chapter~\ref{chap:ajlatt}) \\
     \code{plotkit-gallery}  & gallery of plotkit figures (Section~\ref{sec:plotkit-cli}) \\
@@ -197,7 +221,8 @@ extra to install.
     \toprule
     Feature & Requires & Provided by \\
     \midrule
-    NumPy environments (Kuramoto, LineMsg, WirelessComm, Consensus, AJLATT),
+    NumPy environments (Kuramoto, LineMsg, WirelessComm, Consensus, PowerGrid,
+      Platoon, AJLATT),
       \code{rgb\_array} rendering, GIF export & core only & core \\
     \code{PistonballEnv} & \pkg{pymunk} & \code{pistonball} \\
     Pistonball rendering and \code{ManualPolicy} & \pkg{pygame} & \code{pistonball} \\
@@ -207,6 +232,10 @@ extra to install.
     \pkg{toolkit.plotkit} & core only & core \\
     Plotting pandas, PyTorch, TensorFlow or JAX data & the respective library & not required \\
     \pkg{toolkit.parakit} headless API & standard library & core \\
+    \code{env-lib} command line, catalogue, vector environments, baselines,
+      evaluation & core only & core \\
+    \code{to\_parallel} as a \code{pettingzoo.utils.env.ParallelEnv} subclass &
+      \pkg{pettingzoo} (the adapter works without it) & not required \\
     \pkg{parakit} editor window & Tk and a display & system package \\
     \code{render\_mode="human"} (matplotlib environments) &
       an interactive backend (TkAgg, QtAgg, \ldots) and a display & system package or \pkg{PyQt}/\pkg{PySide} \\
@@ -220,6 +249,11 @@ extra to install.
 To upgrade a clone, pull the latest sources and reinstall:
 \code{git pull} followed by \code{pip install ".[all]"} (or
 \code{pip install -e ".[all,dev]"} for an editable installation).
+Reinstalling also runs again the step that generates the console scripts, so
+an editable installation made with version 1.0 gains the \code{env-lib}
+command only after this step. Version 1.1 requires Gymnasium 1.0 or newer;
+\code{pip} upgrades an older Gymnasium automatically, which may affect other
+projects in the same environment (Section~\ref{sec:migration-11}).
 \code{pip uninstall my-tool-box} removes the package. Users of versions before
 1.0, which were installed from two separate project folders, should first
 uninstall the old distributions and then follow Appendix~\ref{app:migration}.
