@@ -903,9 +903,13 @@ minibatch permutations). The networks are built inside
 \code{torch.random.fork\_rng}, seeded from the same sequence, so network
 initialisation is reproducible while PyTorch's global random state is restored
 afterwards. Apart from this temporary, forked seeding, no code of the package
-seeds or draws from the global NumPy or PyTorch generators, and none changes
-the number of PyTorch threads; the scripts and \code{marl-train} set the
-thread count themselves. With the same seed and the same machine, training is identical
+seeds or draws from the global NumPy or PyTorch generators.
+\code{Algorithm.learn} runs with the current number of PyTorch threads;
+\code{train}, \code{train\_preset}, \code{compare} and \code{marl-train}
+use one thread by default (\code{threads=1}), which is several times faster
+for these small networks, and restore the previous setting when they return.
+Wrap your own calls of \code{learn} in \code{with torch\_threads(1):} for the
+same effect. With the same seed and the same machine, training is identical
 (the tests check this for every algorithm); \code{seed=None} draws fresh
 entropy.
 

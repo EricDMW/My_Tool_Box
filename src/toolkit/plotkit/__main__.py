@@ -230,7 +230,7 @@ def _backend_is_interactive() -> bool:
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python -m toolkit.plotkit",
+        prog="plotkit-gallery",
         description="Gallery of plotkit plots with synthetic data.",
     )
     parser.add_argument(

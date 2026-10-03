@@ -148,7 +148,7 @@
   \stat{accent}{\NumFamilies}{environment families\\(\NumIds{} registered ids)}\hfill
   \stat{green}{\NumAlgorithms}{classical MARL algorithms\\trained on the environments}\hfill
   \stat{orange}{\NumThroughput}{agent-steps per second\\(256 copies, one CPU core)}\hfill
-  \stat{purple}{\NumTests}{tests, CI on\\Python 3.9 to 3.12}
+  \stat{purple}{\NumTests}{tests, CI on\\Python 3.9 to 3.13}
 
   \vspace{14pt}
   \begin{columns}[T,onlytextwidth]
@@ -407,7 +407,7 @@ $ env-lib bench Platoon-v0
   \end{tabularx}
 
   \vspace{8pt}
-  \muted{Mean return over \NumEvalEpisodes{} seeded episodes (8 for AJLATT, 16 for Pistonball; higher is better).
+  \muted{Mean return on the same \NumEvalEpisodes{} seeded episodes (\code{benchmark\_baselines.py}; higher is better).
   \code{env\_lib.baseline\_policy(env)} returns the controller as a function of the observation,
   so the same call drives one environment or a batch of thousands.}
 \end{frame}
@@ -482,7 +482,7 @@ $ marl-train compare PowerGrid-v0 \
         (\code{torch}, \code{pistonball}, \code{video}); lazy imports keep \code{import env\_lib} light;
         console scripts.},
       7.05/0/green/CORRECTNESS/{\NumTests{} tests: Gymnasium API contract, seeded determinism, batch versus single
-        equivalence, physics sanity checks; continuous integration on Python 3.9 to 3.12.},
+        equivalence, physics sanity checks; continuous integration on Python 3.9 to 3.13.},
       0/-2.55/orange/REPRODUCIBILITY/{Randomness only from seeded generators, never global state; headless
         rendering; rollouts saved as \code{.npz}; parameters saved and reloaded with \code{parakit}.},
       7.05/-2.55/purple/DOCUMENTATION/{Handbook of \NumHandbookPages{} pages with model equations, observation

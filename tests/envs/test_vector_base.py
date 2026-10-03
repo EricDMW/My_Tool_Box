@@ -118,10 +118,8 @@ def test_action_validation():
 
 def test_autoreset_mode_spellings():
     assert CounterVectorEnv(1, autoreset_mode="SameStep").autoreset_mode == "same_step"
-    try:
-        from gymnasium.vector import AutoresetMode
-    except ImportError:  # Gymnasium 1.0
-        return
+    from gymnasium.vector import AutoresetMode
+
     env = CounterVectorEnv(1, autoreset_mode=AutoresetMode.DISABLED)
     assert env.autoreset_mode == "disabled"
     assert env.metadata["autoreset_mode"] is AutoresetMode.DISABLED

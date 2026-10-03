@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,8 @@ name = "my-tool-box"
 dynamic = ["version"]
 description = "Multi-agent reinforcement learning environments (env_lib), classical MARL algorithms (marl_algorithms) and research utilities (toolkit)."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Dongming Wang", email = "wdong025@ucr.edu" }]
 requires-python = ">=3.9"
 keywords = [
@@ -25,7 +26,6 @@ keywords = [
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
@@ -33,6 +33,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Scientific/Engineering :: Visualization",
 ]
@@ -40,16 +41,18 @@ dependencies = [
     "numpy>=1.23",
     "scipy>=1.9",
     "matplotlib>=3.6",
-    "gymnasium>=1.0",
+    "pillow>=9.0",
+    "cycler>=0.11",
+    "gymnasium>=1.1",
     "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
 pistonball = ["pygame>=2.1", "pymunk>=6.4"]
 torch = ["torch>=2.0"]
-video = ["imageio>=2.20", "imageio-ffmpeg>=0.4"]
+video = ["imageio>=2.20", "imageio-ffmpeg>=0.5.1"]
 all = ["my-tool-box[pistonball,torch,video]"]
-dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.5"]
+dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.13"]
 
 [project.urls]
 Repository = "https://github.com/EricDMW/My_Tool_Box"

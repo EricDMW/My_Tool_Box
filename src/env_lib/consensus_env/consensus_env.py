@@ -27,7 +27,7 @@ from gymnasium import spaces
 from env_lib.consensus_env._core import ConsensusKernel
 from env_lib.consensus_env._core import batched_connected as _batched_connected
 from env_lib.errors import ResetNeededError
-from env_lib.utils.rendering import validate_render_mode
+from env_lib.utils.render_modes import state_without_renderer, validate_render_mode
 
 __all__ = [
     "DYNAMICS",
@@ -591,6 +591,10 @@ class ConsensusEnv(gym.Env):
         "rel_velocity": slice(2, 4),
         "mask": slice(4, 5),
     }
+
+    def __getstate__(self) -> dict[str, Any]:
+        # Pickle and deep-copy without the renderer (rebuilt on the next render()).
+        return state_without_renderer(self)
 
     def __init__(
         self,

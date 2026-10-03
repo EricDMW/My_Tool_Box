@@ -17,16 +17,33 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install "ruff>=0.5"
+      - run: pip install "ruff>=0.13"
       - run: ruff check src tests examples benchmarks
       - run: ruff format --check src tests examples benchmarks
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check --strict dist/*
+      - name: Install the wheel and run the quick start
+        run: |
+          python -m venv /tmp/wheel-env
+          /tmp/wheel-env/bin/pip install dist/*.whl
+          cd /tmp && /tmp/wheel-env/bin/python -c "import env_lib; env = env_lib.make('Formation-v0'); env.reset(seed=0); print(env_lib.__version__)"
+          /tmp/wheel-env/bin/env-lib list
 
   test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     env:
       MPLBACKEND: Agg
       SDL_VIDEODRIVER: dummy
@@ -52,8 +69,9 @@ jobs:
           env-lib list
           env-lib evaluate Formation-v0 --episodes 8 --num-envs 8
           python benchmarks/benchmark_envs.py --steps 20 --render-steps 2
+          python benchmarks/benchmark_baselines.py --only LineMsg-v0 PowerGrid-v0 --episodes 8
           python benchmarks/benchmark_vector.py --quick
           marl-train list
           python examples/algorithms/marl_training_demo.py --quick --plot ''
           python examples/algorithms/baseline_comparison.py --quick --seeds 0 --episodes 16 --plot ''
-          marl-train compare LineMsg-v0 --algos iql vdn --steps 1000 --num-envs 8 --episodes 8
+          marl-train compare LineMsg-v0 --algos iql vdn --steps 3000 --num-envs 8 --episodes 8

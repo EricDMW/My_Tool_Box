@@ -18,6 +18,7 @@ still emits it; it can be ignored).
 
 from __future__ import annotations
 
+import re
 import warnings
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -334,7 +335,21 @@ def make(env_id: str, **kwargs: Any) -> gym.Env:
         # Version suffixes of env_lib ids denote configurations, not revisions;
         # Gymnasium's "out of date" notice for -v0 ids is therefore misleading.
         warnings.filterwarnings("ignore", message=r".*is out of date", category=DeprecationWarning)
-        return gym.make(target, **kwargs)
+        try:
+            return gym.make(target, **kwargs)
+        except TypeError as exc:
+            raise _argument_error(env_id, exc) from exc
+
+
+def _argument_error(env_id: str, exc: TypeError) -> TypeError:
+    """Name the environment and the argument instead of an internal function."""
+    match = re.search(r"unexpected keyword argument '([^']+)'", str(exc))
+    if match is None:
+        return exc
+    return TypeError(
+        f"{env_id} does not accept the argument {match.group(1)!r}; "
+        f"`env-lib describe {env_id}` lists its parameters"
+    )
 
 
 def make_vec(
@@ -386,6 +401,8 @@ def make_vec(
     >>> obs.shape                                                   # (256, 8, 16)
     """
     register_envs()
+    if isinstance(num_envs, bool) or int(num_envs) != num_envs or num_envs < 1:
+        raise ValueError(f"num_envs must be a positive integer, got {num_envs!r}")
     target, kwargs = _resolve(env_id, kwargs)
     try:
         spec: EnvSpec | None = get_spec(env_id)
@@ -408,28 +425,23 @@ def make_vec(
         wrappers = [TeamReward]
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message=r".*is out of date", category=DeprecationWarning)
-        return gym.make_vec(
-            target,
-            num_envs=num_envs,
-            vectorization_mode=mode,
-            vector_kwargs=vector_kwargs,
-            wrappers=wrappers,
-            **kwargs,
-        )
+        try:
+            return gym.make_vec(
+                target,
+                num_envs=num_envs,
+                vectorization_mode=mode,
+                vector_kwargs=vector_kwargs,
+                wrappers=wrappers,
+                **kwargs,
+            )
+        except TypeError as exc:
+            raise _argument_error(env_id, exc) from exc
 
 
 def _gymnasium_autoreset_mode(value: Any) -> Any:
     """Convert an autoreset mode to ``gymnasium.vector.AutoresetMode``."""
-    try:
-        from gymnasium.vector import AutoresetMode
-    except ImportError:  # Gymnasium 1.0: only next-step autoreset
-        raw = str(getattr(value, "value", value)).replace("_", "").lower()
-        if raw != "nextstep":
-            raise ValueError(
-                "Gymnasium 1.0 vector environments only support next-step autoreset; "
-                "upgrade Gymnasium or use a native vector environment"
-            ) from None
-        return None
+    from gymnasium.vector import AutoresetMode
+
     if isinstance(value, AutoresetMode):
         return value
     raw = str(value).replace("_", "").lower()

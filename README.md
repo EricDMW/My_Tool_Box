@@ -3,8 +3,8 @@
 **Networked multi-agent control environments, classical MARL algorithms and research utilities for Python.**
 
 [![CI](https://github.com/EricDMW/My_Tool_Box/actions/workflows/ci.yml/badge.svg)](https://github.com/EricDMW/My_Tool_Box/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-2563EB)
-![Gymnasium](https://img.shields.io/badge/gymnasium-%E2%89%A5%201.0-059669)
+![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-2563EB)
+![Gymnasium](https://img.shields.io/badge/gymnasium-%E2%89%A5%201.1-059669)
 ![License](https://img.shields.io/badge/license-MIT-6B7280)
 
 My Tool Box simulates systems in which many agents act on continuous physical
@@ -19,12 +19,13 @@ package covers the rest of a study: publication-quality plots, neural-network
 building blocks and reproducible experiment parameters.
 
 <p align="center">
-  <img src="docs/images/hero.gif" width="820" alt="Platoon-v0 under cooperative adaptive cruise control">
+  <img src="https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/images/hero.gif" width="820" alt="Platoon-v0 under cooperative adaptive cruise control">
 </p>
 
-**Introduction slides:** [`docs/slides/my_tool_box_slides.pdf`](docs/slides/my_tool_box_slides.pdf)
-&nbsp;&middot;&nbsp; **Handbook:** [`docs/manual/main.pdf`](docs/manual/main.pdf)
-&nbsp;&middot;&nbsp; **Changes:** [`CHANGELOG.md`](CHANGELOG.md)
+**Paper:** [`docs/paper/my_tool_box_paper.pdf`](https://github.com/EricDMW/My_Tool_Box/blob/main/docs/paper/my_tool_box_paper.pdf)
+&nbsp;&middot;&nbsp; **Introduction slides:** [`docs/slides/my_tool_box_slides.pdf`](https://github.com/EricDMW/My_Tool_Box/blob/main/docs/slides/my_tool_box_slides.pdf)
+&nbsp;&middot;&nbsp; **Handbook:** [`docs/manual/main.pdf`](https://github.com/EricDMW/My_Tool_Box/blob/main/docs/manual/main.pdf)
+&nbsp;&middot;&nbsp; **Changes:** [`CHANGELOG.md`](https://github.com/EricDMW/My_Tool_Box/blob/main/CHANGELOG.md)
 
 ## Highlights
 
@@ -38,7 +39,7 @@ building blocks and reproducible experiment parameters.
   observation layouts, units and bounds.
 - **Fast.** Environments are written batch-first: `env_lib.make_vec(id, 256)`
   advances all copies with a few array operations, 2 to 3 million agent-steps
-  per second on one CPU core and 33 to 44 times the throughput of Gymnasium's
+  per second on one CPU core and 33 to 43 times the throughput of Gymnasium's
   `SyncVectorEnv`. Evaluating 1024 PowerGrid episodes takes about a second.
 - **Convenient.** One catalogue (`env_lib.catalog()`, `env-lib list`), one
   command to run, record, evaluate or benchmark any environment, adapters for
@@ -63,7 +64,7 @@ building blocks and reproducible experiment parameters.
 
 ## Installation
 
-Python 3.9 or newer. From a clone of the repository:
+Python 3.9 to 3.13. From a clone of the repository:
 
 ```bash
 git clone https://github.com/EricDMW/My_Tool_Box.git
@@ -71,7 +72,8 @@ cd My_Tool_Box
 pip install -e ".[all]"
 ```
 
-The core install needs only NumPy, SciPy, matplotlib, Gymnasium and PyYAML.
+The core install needs only NumPy, SciPy, matplotlib (with Pillow), Gymnasium 1.1 or
+newer and PyYAML.
 Heavier dependencies are extras:
 
 | Extra | Adds | Needed for |
@@ -125,6 +127,8 @@ episodes ([details](#using-the-algorithms-as-baselines)):
 ```python
 from marl_algorithms import compare
 
+# my_policy: your method, mapping a batch of observations
+# (num_envs, n_agents, obs_dim) to actions (see below for a full example)
 report = compare("PowerGrid-v0", seeds=(0, 1, 2), policies={"mine": my_policy})
 print(report)        # rows: random, baseline (classical), ippo, mappo, maddpg, matd3, mine
 ```
@@ -165,31 +169,57 @@ per agent as `(n_agents, obs_dim)`; the table lists the default configuration.
 | `LineMsg-v0` | relay a message along a line of lossy links | relay or not | 10 |
 | `WirelessComm-v0`, `-v1` | deliver packets through shared access points | idle or one of four access points | 36 / 16 |
 
+**Reward modes.** Two families let you choose how the reward is paid; the
+defaults keep the original rewards of the registered ids.
+
+| Setting | Values (default first) |
+|---|---|
+| Kuramoto `reward_mode` | `"dense"`: signal every step; `"penalty"`: signal minus its maximum, so synchronising sooner earns more; `"progress"`: change of the signal; `"terminal"`: final signal only; `"sparse"`: synchronisation bonus only |
+| Kuramoto `terminate_on_sync`, `control_cost` | end the episode on synchronisation (`True`); penalty on control effort (`0`) |
+| AJLATT `reward_mode` | `"cost"`: negative tracking cost and penalties; `"bounded"`: `exp(-cost / cost_scale)`, positive while tracking well |
+| AJLATT `terminate_on_collision`, `collision_termination_penalty`, `team_reward_weight` | a collision ends the robot's episode (`True`); extra penalty when it does (`0`); mix of individual and team reward (`0`) |
+
+```python
+env = env_lib.make("KuramotoOscillator-v0", reward_mode="terminal")      # terminal reward only
+env = env_lib.make("AJLATT-v0", terminate_on_collision=False)            # penalised, not stopped
+env = env_lib.make("AJLATT-v0", reward_mode="bounded", team_reward_weight=0.5)
+```
+
+With the defaults, a learner can raise its return by ending episodes early
+(the Kuramoto signal is paid every step until synchronisation ends the
+episode; AJLATT pays only negative rewards until a collision ends it);
+`env-lib describe` flags both. For training, prefer `reward_mode="penalty"`
+(Kuramoto) and `reward_mode="bounded"` or `terminate_on_collision=False`
+(AJLATT).
+
 | Power grid (`PowerGrid-v0`) | Vehicle platoon (`Platoon-v0`) |
 |---|---|
-| ![PowerGrid](docs/manual/figures/power_grid.png) | ![Platoon](docs/manual/figures/platoon.png) |
+| ![PowerGrid](https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/manual/figures/power_grid.png) | ![Platoon](https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/manual/figures/platoon.png) |
 | **Formation control (`Formation-v0`)** | **Multi-robot target tracking (`AJLATT-v0`)** |
-| ![Formation](docs/manual/figures/formation.png) | ![AJLATT](docs/manual/figures/ajlatt.png) |
+| ![Formation](https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/manual/figures/formation.png) | ![AJLATT](https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/manual/figures/ajlatt.png) |
 | **Kuramoto synchronisation** | **Wireless access grid** |
-| ![Kuramoto](docs/manual/figures/kuramoto.png) | ![WirelessComm](docs/manual/figures/wireless.png) |
+| ![Kuramoto](https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/manual/figures/kuramoto.png) | ![WirelessComm](https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/manual/figures/wireless.png) |
 
 Every environment ships a decentralised baseline, returned by
 `env_lib.baseline_policy(env)`:
 
 | Environment | Baseline controller | Random | Baseline |
 |---|---|---:|---:|
-| `PowerGrid-v0` | droop control, u_i = -k omega_i | -569 | -0.8 |
-| `Platoon-v0` | CACC, u_i = k_p e_i + k_d dv_i + k_a a_(i-1) | -5270 | -47 |
-| `Consensus-v0` | Laplacian protocol | -17178 | -1414 |
-| `Formation-v0` | Laplacian protocol on formation offsets | -18011 | -1608 |
-| `KuramotoOscillator-FreqSync-Constant-v0` | frequency compensation and phase feedback | -117 | -104 |
-| `AJLATT-v0` (no collision termination) | encircle the target belief | -33113 | -7109 |
-| `Pistonball-v0` | ramp towards the ball | -205 | 841 |
-| `LineMsg-v0` | always relay | 43 | 95 |
-| `WirelessComm-v0` | collision-free access schedule | 388 | 924 |
+| `PowerGrid-v0` | droop control, u_i = -k omega_i | -562.1 | -0.76 |
+| `Platoon-v0` | CACC, u_i = k_p e_i + k_d dv_i + k_a a_(i-1) | -5,604 | -46.3 |
+| `Consensus-v0` | Laplacian protocol | -17,327 | -1,414 |
+| `Formation-v0` | Laplacian protocol on formation offsets | -18,166 | -1,608 |
+| `KuramotoOscillator-v0` (`reward_mode="penalty"`) | frequency compensation and phase feedback | 3.22 | 6.86 |
+| `KuramotoOscillator-FreqSync-Constant-v0` | frequency compensation and phase feedback | -128.1 | -112.0 |
+| `AJLATT-v0` (no collision termination) | encircle the target belief | -34,273 | -7,415 |
+| `AJLATT-v0` (`reward_mode="bounded"`) | encircle the target belief | 39.9 | 223.6 |
+| `Pistonball-v0` | ramp towards the ball | -253.7 | 801.3 |
+| `LineMsg-v0` | always relay | 42.7 | 95.0 |
+| `WirelessComm-v0` | collision-free access schedule | 388.0 | 923.8 |
 
-Mean return over 64 seeded episodes (8 for AJLATT, 16 for Pistonball),
-higher is better, measured with `env_lib.evaluate` on vector environments.
+Mean return on the same 64 seeded episodes (the first episode of every copy of
+a 64-copy vector environment reset with seed 0), higher is better; reproduce
+with `python benchmarks/benchmark_baselines.py`, which covers all 18 ids.
 
 ## Multi-agent reinforcement learning algorithms
 
@@ -247,7 +277,7 @@ listed) stays near random because a collision costs the sending agent nothing,
 while VDN reaches the collision-free schedule.
 
 <p align="center">
-  <img src="docs/images/marl_training.png" width="900" alt="Learning curves of MAPPO, MADDPG, QMIX and VDN">
+  <img src="https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/images/marl_training.png" width="900" alt="Learning curves of MAPPO, MADDPG, QMIX and VDN">
 </p>
 
 ### Using the algorithms as baselines
@@ -289,11 +319,11 @@ my method  policy          -0.675      -      -          -          -
 
 `std` is the standard deviation over the training seeds. Here "my method" is a
 distributed droop controller that also reacts to the neighbours' mean
-frequency deviation ([`examples/algorithms/baseline_comparison.py`](examples/algorithms/baseline_comparison.py),
+frequency deviation ([`examples/algorithms/baseline_comparison.py`](https://github.com/EricDMW/My_Tool_Box/blob/main/examples/algorithms/baseline_comparison.py),
 about six minutes on one core):
 
 <p align="center">
-  <img src="docs/images/baseline_comparison.png" width="560" alt="Mean return of the proposed controller, MAPPO, IPPO and the classical controller on PowerGrid-v0">
+  <img src="https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/images/baseline_comparison.png" width="560" alt="Mean return of the proposed controller, MAPPO, IPPO and the classical controller on PowerGrid-v0">
 </p>
 
 The same from the shell, where `--csv`, `--markdown` and `--save-dir` export
@@ -317,13 +347,22 @@ A few rules of thumb:
   modified algorithm of this package is passed as the trained object.
 - With training seed 0 and the default evaluation seed 1, the numbers match
   the results table above.
+- `train`, `train_preset` and `compare` use one PyTorch thread (`threads=1`),
+  several times faster for these small networks, and restore the previous
+  setting afterwards; wrap your own `algo.learn(...)` calls in
+  `with marl_algorithms.torch_threads(1):`.
+- On the Kuramoto ids (except `FreqSync`) and AJLATT the default rewards let
+  a learner raise its return by ending episodes early (see
+  [reward modes](#environments)); pass `env_kwargs={"reward_mode": "penalty"}`
+  (Kuramoto) or `{"reward_mode": "bounded"}` (AJLATT) to `train` or
+  `compare`.
 
 The handbook section "Using the algorithms as baselines" has more recipes.
 
 ## Design
 
 <p align="center">
-  <img src="docs/images/design.png" width="820" alt="Architecture: access layer, Gymnasium contract, environments, shared services">
+  <img src="https://raw.githubusercontent.com/EricDMW/My_Tool_Box/main/docs/images/design.png" width="820" alt="Architecture: access layer, Gymnasium contract, environments, shared services">
 </p>
 
 1. **One contract.** Every environment follows the Gymnasium API with joint
@@ -390,6 +429,10 @@ the AJLATT, Kuramoto and Consensus speed-ups of 1.1 are bitwise identical.
   baselines, evaluation), the multi-agent RL algorithms and their use as
   baselines, the toolkit, examples, troubleshooting, an API reference and a
   migration guide.
+- **Paper** (`docs/paper/my_tool_box_paper.pdf`, built by
+  `docs/paper/build.sh`; `--anonymous` for a double-blind version): the
+  environments, their usage and the integrated baselines, in the two-column
+  layout of the ICML template.
 - **Slides** (`docs/slides/my_tool_box_slides.pdf`, built by
   `docs/slides/build.sh`): a short introduction to the package.
 - **Examples** (`examples/`, see `examples/README.md`), grouped by topic:
@@ -408,12 +451,13 @@ ruff check src tests examples benchmarks           # lint
 ruff format src tests examples benchmarks          # format
 python benchmarks/benchmark_envs.py                # single-environment timings
 python benchmarks/benchmark_vector.py              # batched throughput
+python benchmarks/benchmark_baselines.py           # random vs classical controller, every id
 python benchmarks/benchmark_marl.py                # train and evaluate every MARL preset
 ```
 
 Tests run headless (`tests/conftest.py` selects matplotlib's Agg backend and
 SDL's dummy video driver). Continuous integration runs lint, tests and example
-smoke tests on Python 3.9 to 3.12.
+smoke tests on Python 3.9 to 3.13, and builds and installs the wheel.
 
 ## License
 

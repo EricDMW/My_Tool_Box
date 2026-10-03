@@ -12,7 +12,7 @@ The tables live in one module per algorithm family, together with the notes
 from tuning them: :mod:`~marl_algorithms.presets.ppo` (IPPO, MAPPO),
 :mod:`~marl_algorithms.presets.ddpg` (MADDPG, MATD3) and
 :mod:`~marl_algorithms.presets.q_learning` (IQL, VDN, QMIX). Every preset
-trains in one to two minutes on one CPU core.
+trains in under two minutes on one CPU core.
 """
 
 from __future__ import annotations
@@ -62,13 +62,15 @@ def train_preset(
     env_kwargs: dict[str, Any] | None = None,
     device: str = "cpu",
     callback: Callback | None = None,
+    threads: int | None = 1,
     **config: Any,
 ) -> tuple[Algorithm, TrainingLog]:
     """Train with the preset of ``algorithm`` on ``env_id``.
 
     ``total_steps``, ``num_envs`` and configuration overrides replace the
     preset's values; ``env_kwargs`` are merged into the preset's environment
-    arguments.
+    arguments. ``threads`` is passed to :func:`~marl_algorithms.registry.train`
+    (one PyTorch thread by default, restored afterwards).
 
     Raises
     ------
@@ -87,5 +89,6 @@ def train_preset(
         env_kwargs={**preset.get("env_kwargs", {}), **(env_kwargs or {})},
         device=device,
         callback=callback,
+        threads=threads,
         **{**preset.get("config", {}), **config},
     )

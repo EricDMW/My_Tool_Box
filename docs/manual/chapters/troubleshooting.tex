@@ -100,8 +100,8 @@ resulting error names the extra that provides them
       \code{pip install ".[pistonball]"} \\
     \code{Pistonball rendering requires pygame} & \code{pip install ".[pistonball]"} \\
     \code{toolkit.neural\_toolkit requires PyTorch} & \code{pip install ".[torch]"} \\
-    \code{No module named 'torch'} when creating \code{KuramotoOscillatorEnvTorch}
-      or a \envid{KuramotoOscillatorTorch-*} id & \code{pip install ".[torch]"} \\
+    \code{KuramotoOscillatorEnvTorch requires PyTorch} when creating a
+      \envid{KuramotoOscillatorTorch-*} id & \code{pip install ".[torch]"} \\
     \code{Video export requires imageio and imageio-ffmpeg} & \code{pip install ".[video]"} \\
     \code{The parakit GUI requires Tk (the 'tkinter' module)} &
       system package \code{python3-tk} or \code{conda install tk}
@@ -249,10 +249,12 @@ and imageio-ffmpeg}, or \pkg{imageio} reports that it cannot find an
 \code{ffmpeg} executable.
 
 \paragraph{Solution.} Install the \code{video} extra,
-\code{pip install ".[video]"}. The \pkg{imageio-ffmpeg} package ships its own
-\code{ffmpeg} binary, so no system installation is needed. GIF export uses
-Pillow, which is always installed with matplotlib, and is the fallback when a
-video codec is unavailable. \code{save\_animation} rejects other suffixes with
+\code{pip install ".[video]"}. The \pkg{imageio-ffmpeg} package (version
+0.5.1 or newer; older versions fail with recent setuptools) ships its own
+\code{ffmpeg} binary, so no system installation is needed.
+\code{env-lib run -{}-gif out.mp4} checks for the extra before the rollout.
+GIF export uses Pillow, a dependency of the base installation, and is the
+fallback when a video codec is unavailable. \code{save\_animation} rejects other suffixes with
 a \code{ValueError}; frames must all have the same shape
 \code{(H, W, 3)} or \code{(H, W, 4)}.
 
@@ -417,8 +419,11 @@ reproduce its behaviour before version 1.0 closely with
   \item \emph{Small networks on the CPU.} PyTorch uses several threads by
     default. For the small networks typical of these environments, and when
     several training processes share a machine, thread contention can make
-    training much slower; limit the threads with \code{torch.set\_num\_threads(1)}
-    or the environment variable \code{OMP\_NUM\_THREADS=1} and compare.
+    training much slower. \code{marl\_algorithms.train}, \code{train\_preset}
+    and \code{compare} already use one thread (\code{threads=1}); elsewhere
+    limit the threads with \code{marl\_algorithms.torch\_threads(1)},
+    \code{torch.set\_num\_threads(1)} or the environment variable
+    \code{OMP\_NUM\_THREADS=1} and compare.
   \item \emph{Simulate batches natively.} For many copies of an environment
     with a native vector implementation, \code{env\_lib.make\_vec} advances
     all of them with one set of array operations; a \code{SyncVectorEnv} steps
@@ -495,8 +500,10 @@ seeds rather than digit for digit. Compare several seeds before concluding
 that a change helps.
 
 \paragraph{Training is slower than the reported times.} The published times
-use one PyTorch thread (\code{torch.set\_num\_threads(1)}, the default of
-\code{marl-train} and of the demonstration script). With PyTorch's default
+use one PyTorch thread, the default of \code{train}, \code{train\_preset},
+\code{compare}, \code{marl-train} and the demonstration script. A direct call
+of \code{algo.learn} uses PyTorch's setting; wrap it in
+\code{with marl\_algorithms.torch\_threads(1):}. With PyTorch's default
 thread count, the small networks of these methods often train more slowly,
 especially when several runs share a machine.
 
@@ -506,7 +513,42 @@ exploration schedule for its environment; the defaults of the configuration
 classes are generic. Without a preset, normalise the observations, scale the
 rewards so that the team return per step is of order one, and check the
 learning curve of \code{TrainingLog.curve} before increasing
-\code{total\_steps}.
+\code{total\_steps}. An off-policy method whose budget ends before
+\code{warmup\_steps} warns that it takes no gradient step at all.
+
+\paragraph{The agent learns to end episodes early (Kuramoto, AJLATT).} Two
+families reward a behaviour other than the intended one, in their default
+reward settings, if a learner maximises the return literally. The Kuramoto ids
+other than the \code{FreqSync} ones pay the order parameter $r \in [0, 1]$ at
+every step (\code{reward\_mode="dense"}) and end the episode with
+\code{sync\_bonus} (10) once $r$ exceeds \code{sync\_threshold} (0.99), so an
+agent that stays just below the threshold for the whole episode (up to
+\code{max\_steps}, 1000) earns far more than one that synchronises. AJLATT
+pays negative rewards (\code{reward\_mode="cost"}) and ends the episode at the
+first collision, so an agent can avoid further penalties by colliding. The
+registered ids keep these defaults for compatibility; \code{env-lib describe}
+prints a caution. For training, choose another reward mode: for Kuramoto
+\code{reward\_mode="penalty"} (synchronising sooner earns more),
+\code{"progress"} or \code{"terminal"}, or \code{terminate\_on\_sync=False}
+(Section~\ref{sec:kuramoto-reward}); for AJLATT \code{reward\_mode="bounded"}
+or \code{terminate\_on\_collision=False}, which keeps the collision penalties
+(Section~\ref{sec:ajlatt-reward}). With \pkg{marl\_algorithms}, pass them as
+\code{env\_kwargs}. Evaluate with the metric you care about
+(\code{info["synchronized"]}, \code{info["tracking\_cost"]}) rather than the
+return alone.
+
+\paragraph{\code{ValueError} when evaluating or loading an algorithm.}
+\code{algo.evaluate} and \code{marl-train evaluate} check that the
+environment has the number of agents, observation size and action space the
+algorithm was trained for, and name the difference if not; a model trained on
+a variant (for example \code{n\_buses=32}) is evaluated on the same variant.
+Checkpoints record the environment id and keyword arguments of
+\code{train} in \code{algo.metadata}, and \code{marl-train evaluate} prints a
+note when they differ from the ones given. \code{Algorithm.load} raises
+\code{FileNotFoundError} for a missing path and \code{ValueError} for a file
+that is not a checkpoint of this package; load only files you trust, since
+checkpoints are pickled. \code{device="cuda"} (or \code{"mps"}) without such a
+device raises \code{ValueError} when the algorithm is created.
 
 \section{Other common errors}\label{sec:trouble-other}
 

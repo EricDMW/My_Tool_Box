@@ -513,6 +513,36 @@ def _wrap(label: str, text: str, width: int = 88) -> list[str]:
     return wrapped or [label]
 
 
+def _caution(spec: EnvSpec) -> str | None:
+    """Reward-design pitfall of a registered configuration, and the settings that avoid it."""
+    kwargs = spec.kwargs
+    if spec.family == "kuramoto":
+        if (
+            kwargs.get("reward_type", "order_parameter") == "frequency_synchronization"
+            or kwargs.get("reward_mode", "dense") != "dense"
+            or not kwargs.get("terminate_on_sync", True)
+        ):
+            return None
+        return (
+            "reward_mode='dense' pays the order parameter r at every step and the episode "
+            "ends once r > sync_threshold, so staying just below the threshold can earn more "
+            "than synchronising; to train, use reward_mode='penalty' (synchronising sooner "
+            "earns more), 'progress' or 'terminal', or terminate_on_sync=False"
+        )
+    if spec.family == "ajlatt":
+        if kwargs.get("reward_mode", "cost") != "cost" or not kwargs.get(
+            "terminate_on_collision", True
+        ):
+            return None
+        return (
+            "reward_mode='cost' pays only negative rewards and a collision ends the episode "
+            "(terminate_on_collision=True), so colliding early can earn more than tracking; "
+            "to train, use reward_mode='bounded' or terminate_on_collision=False "
+            "(collisions are still penalised)"
+        )
+    return None
+
+
 def describe(env_id: str) -> str:
     """Readable multi-line description of a registered environment.
 
@@ -586,6 +616,9 @@ def describe(env_id: str) -> str:
     lines += _wrap("vector", vector)
     baseline = list_baselines().get(spec.family)
     lines += _wrap("baseline", f"{baseline} (env_lib.baseline_policy)" if baseline else "none")
+    caution = _caution(spec)
+    if caution:
+        lines += _wrap("caution", caution)
     if spec.requires:
         modules = _EXTRA_MODULES.get(spec.requires, (spec.requires,))
         status = "installed" if all(_module_exists(m) for m in modules) else "not installed"

@@ -29,9 +29,10 @@ from typing import Any
 from env_lib.kos_env.kuramoto_env import KuramotoOscillatorEnv
 from env_lib.kos_env.vector import KuramotoOscillatorVectorEnv
 
+# KuramotoOscillatorEnvTorch needs torch; it is an attribute of this module but
+# not part of ``__all__``, so that ``from env_lib.kos_env import *`` works without it.
 __all__ = [
     "KuramotoOscillatorEnv",
-    "KuramotoOscillatorEnvTorch",
     "KuramotoOscillatorVectorEnv",
     "register",
 ]
@@ -64,4 +65,4 @@ def __getattr__(name: str) -> Any:
 
 
 def __dir__() -> list[str]:
-    return sorted(set(globals()) | set(__all__))
+    return sorted(set(globals()) | set(__all__) | {"KuramotoOscillatorEnvTorch"})

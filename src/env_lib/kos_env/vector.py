@@ -52,6 +52,9 @@ _PUBLIC_ATTRIBUTES = (
     "topology_seed",
     "sync_threshold",
     "sync_bonus",
+    "reward_mode",
+    "terminate_on_sync",
+    "control_cost",
     "n_couplings",
     "coupling_indices",
     "topology_matrix",
@@ -69,9 +72,11 @@ class KuramotoOscillatorVectorEnv(BatchedVectorEnv):
 
     * observations ``(B, obs_dim)`` float32, actions ``(B, action_dim)``
       (converted to float32 by the base class, then clipped to the bounds);
-    * rewards ``(B,)`` (including the synchronisation bonus of each copy);
+    * rewards ``(B,)`` (following ``reward_mode``, including the
+      synchronisation bonus of each copy);
     * infos (each with the Gymnasium ``"_key"`` mask): ``order_parameter``,
-      ``phase_coherence`` ``(B,)``; ``phases``, ``natural_frequencies``,
+      ``phase_coherence`` ``(B,)``; ``synchronized`` ``(B,)`` bool (step
+      infos); ``phases``, ``natural_frequencies``,
       ``dphases_dt`` ``(B, N)``; ``coupling_matrix`` ``(B, N, N)`` (a
       read-only broadcast view in constant mode); ``agent_rewards``
       ``(B, n_agents)``; ``step_count``, ``n_agents`` and ``device`` ``(B,)``.
@@ -135,6 +140,9 @@ class KuramotoOscillatorVectorEnv(BatchedVectorEnv):
         topology_seed: int = 42,
         sync_threshold: float = 0.99,
         sync_bonus: float = 10.0,
+        reward_mode: str = "dense",
+        terminate_on_sync: bool = True,
+        control_cost: float = 0.0,
     ):
         # A single environment validates the arguments, builds the topology
         # and the spaces, and draws copy 0 in render().
@@ -161,6 +169,9 @@ class KuramotoOscillatorVectorEnv(BatchedVectorEnv):
             topology_seed=topology_seed,
             sync_threshold=sync_threshold,
             sync_bonus=sync_bonus,
+            reward_mode=reward_mode,
+            terminate_on_sync=terminate_on_sync,
+            control_cost=control_cost,
         )
         single = self._single
         for name in _PUBLIC_ATTRIBUTES:
@@ -182,6 +193,7 @@ class KuramotoOscillatorVectorEnv(BatchedVectorEnv):
         self._matrix_shape = (batch, n, n)
         self._step = np.zeros(batch, dtype=np.int64)
         self._last_reward = np.full(batch, np.nan)
+        self._previous_signal = np.zeros(batch)  # reward_mode="progress"
         self._device_info = np.full(batch, self.device, dtype=object)
         self._n_agents_info = np.full(batch, self.n_agents, dtype=np.int64)
 
@@ -270,7 +282,9 @@ class KuramotoOscillatorVectorEnv(BatchedVectorEnv):
 
     def close_extras(self, **kwargs: Any) -> None:
         """Release the rendering resources."""
-        self._single.close()
+        single = getattr(self, "_single", None)  # absent if __init__ failed early
+        if single is not None:
+            single.close()
 
     # ------------------------------------------------------------------
     # BatchedVectorEnv hooks
@@ -311,6 +325,13 @@ class KuramotoOscillatorVectorEnv(BatchedVectorEnv):
             self._strengths[index] = strengths
         self._step[index] = 0
         self._last_reward[index] = np.nan
+        if self.reward_mode == "progress":
+            # Signal of the initial state, row by row as in the single environment.
+            coupling = (
+                kernel.coupling_from_strengths(strengths) if self._dynamic else kernel.constant
+            )
+            dphases_dt = kernel.dynamics(phases, freqs, coupling, np.zeros_like(phases))
+            self._previous_signal[index] = kernel.signal(phases, dphases_dt)[0]
         if mask[0] and self.render_mode is not None:
             self._single.phase_history = [self._phases[0].copy()]
             self._single._reset_renderer()
@@ -332,14 +353,23 @@ class KuramotoOscillatorVectorEnv(BatchedVectorEnv):
         self._control = control
         self._step += 1
 
-        rewards, r, coherence, terminated = kernel.rewards(self._phases, dphases_dt)
         truncated = self._step >= self.max_steps
+        rewards, signal, r, coherence, synchronized, terminated = kernel.rewards(
+            self._phases,
+            dphases_dt,
+            control=control,
+            previous=self._previous_signal,
+            truncated=truncated,
+        )
+        if self.reward_mode == "progress":
+            self._previous_signal = signal
         self._last_reward = rewards.copy()
         if self.render_mode is not None:
             self._single._append_history(self._phases[0].copy())
         if coupling.ndim == 2:  # constant mode: read-only view, no copy
             coupling = np.broadcast_to(coupling, self._matrix_shape)
         infos = self._infos(r, coherence, coupling)
+        infos["synchronized"] = synchronized
         infos["dphases_dt"] = dphases_dt
         infos["agent_rewards"] = np.repeat(rewards[:, None], self.n_agents, axis=1)
         return rewards, terminated, truncated, infos

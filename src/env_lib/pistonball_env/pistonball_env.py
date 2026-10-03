@@ -26,10 +26,10 @@ from typing import Any
 import numpy as np
 from gymnasium import Env
 from gymnasium.spaces import Box, MultiDiscrete
-from gymnasium.utils import EzPickle, seeding
+from gymnasium.utils import seeding
 
 from env_lib.errors import ResetNeededError
-from env_lib.utils.rendering import validate_render_mode
+from env_lib.utils.render_modes import state_without_renderer, validate_render_mode
 
 try:
     import pymunk
@@ -117,7 +117,7 @@ def _as_float(name: str, value: Any, minimum: float | None = None, strict: bool 
     return value
 
 
-class PistonballEnv(Env, EzPickle):
+class PistonballEnv(Env):
     """Cooperative Pistonball with ``n_pistons`` piston agents.
 
     Parameters
@@ -199,6 +199,10 @@ class PistonballEnv(Env, EzPickle):
         "render_fps": FPS,
     }
 
+    def __getstate__(self) -> dict[str, Any]:
+        # Pickle and deep-copy without the renderer (rebuilt on the next render()).
+        return state_without_renderer(self)
+
     def __init__(
         self,
         n_pistons: int = 20,
@@ -218,25 +222,6 @@ class PistonballEnv(Env, EzPickle):
         leftmost_piston_reward: float = 0.0,
         termination_reward: float = 0.5,
     ):
-        EzPickle.__init__(
-            self,
-            n_pistons=n_pistons,
-            time_penalty=time_penalty,
-            continuous=continuous,
-            random_drop=random_drop,
-            random_rotate=random_rotate,
-            ball_mass=ball_mass,
-            ball_friction=ball_friction,
-            ball_elasticity=ball_elasticity,
-            max_cycles=max_cycles,
-            render_mode=render_mode,
-            movement_penalty=movement_penalty,
-            movement_penalty_threshold=movement_penalty_threshold,
-            kappa=kappa,
-            terminated_condition=terminated_condition,
-            leftmost_piston_reward=leftmost_piston_reward,
-            termination_reward=termination_reward,
-        )
         validate_render_mode(render_mode, self.metadata["render_modes"])
 
         # Configuration.

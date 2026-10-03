@@ -15,9 +15,12 @@ The environment follows the Gymnasium API with joint multi-agent spaces:
 * ``observation``: array ``(num_robots, obs_dim)``; see
   :meth:`AJLATTEnv.observation_layout`.
 * ``reward``: array ``(num_robots,)`` of per-robot rewards (the team reward is
-  their sum; ``info["team_reward"]``).
+  their sum; ``info["team_reward"]``), built as set by ``reward_mode``,
+  ``collision_termination_penalty`` and ``team_reward_weight`` (see
+  :class:`~env_lib.ajlatt_env.config.AJLATTConfig`).
 * ``terminated``: array ``(num_robots,)`` of per-robot collision flags
-  (``any(terminated)`` if a single flag is needed).
+  (``any(terminated)`` if a single flag is needed); always ``False`` with
+  ``terminate_on_collision=False``.
 * ``truncated``: ``bool``, set after ``max_episode_steps`` steps.
 
 Use :class:`env_lib.ajlatt_env.TeamRewardWrapper` for a scalar-reward,
@@ -45,7 +48,7 @@ from env_lib.ajlatt_env.estimation import (
 )
 from env_lib.ajlatt_env.maps import DynamicMap, GridMap, load_grid_map
 from env_lib.errors import ResetNeededError
-from env_lib.utils.rendering import validate_render_mode
+from env_lib.utils.render_modes import state_without_renderer, validate_render_mode
 
 __all__ = ["AJLATTEnv", "make"]
 
@@ -73,6 +76,10 @@ class AJLATTEnv(gym.Env):
     """
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 8}
+
+    def __getstate__(self) -> dict[str, Any]:
+        # Pickle and deep-copy without the renderer (rebuilt on the next render()).
+        return state_without_renderer(self)
 
     def __init__(
         self,
@@ -260,7 +267,7 @@ class AJLATTEnv(gym.Env):
         self.com_plot = com_obs
         self.RT_obs = rt_obs
 
-        reward, collided = self.get_reward(rt_obs)
+        reward, cost, penalty, collided = self._reward_terms(rt_obs)
         numerical_error = not all(np.isfinite(est.cov).all() for est in self.robot_est)
         if numerical_error:
             warnings.warn(
@@ -276,9 +283,11 @@ class AJLATTEnv(gym.Env):
 
         self.step_count += 1
         truncated = self.step_count >= cfg.max_episode_steps
+        reward = self._shape_reward(reward, cost, penalty, collided & terminated)
         self._record_history(reward)
         observation = self._observation(com_obs)
         info = self._info(reward, collided)
+        info["tracking_cost"] = cost
         info["numerical_error"] = numerical_error
         if self.render_mode == "human":
             self.render()
@@ -607,11 +616,48 @@ class AJLATTEnv(gym.Env):
         return weighted @ h_target, weighted @ z_bar
 
     def get_reward(self, rt_obs) -> tuple[np.ndarray, np.ndarray]:
-        """Per-robot rewards and obstacle-collision flags."""
+        """Per-robot rewards of the ``"cost"`` mode and obstacle-collision flags.
+
+        Counts the collisions of the step in ``info["episode_collisions"]``.
+        """
+        reward, _, _, collided = self._reward_terms(rt_obs)
+        return reward, collided
+
+    def _shape_reward(
+        self, reward: np.ndarray, cost: np.ndarray, penalty: np.ndarray, ending: np.ndarray
+    ) -> np.ndarray:
+        """Apply ``reward_mode``, the termination penalty and ``team_reward_weight``.
+
+        ``reward`` is the ``"cost"`` reward ``-cost - penalty``; ``ending`` marks the
+        robots whose episode a collision ends in this step.
+        """
+        cfg = self.config
+        if cfg.reward_mode == "bounded":
+            reward = np.exp(-cost / cfg.cost_scale) - penalty / cfg.cost_scale
+        if cfg.collision_termination_penalty and ending.any():
+            reward = reward.copy()
+            reward[ending] -= cfg.collision_termination_penalty
+        if cfg.team_reward_weight:
+            weight = cfg.team_reward_weight
+            reward = (1.0 - weight) * reward + weight * reward.mean()
+        return reward
+
+    def _reward_terms(self, rt_obs) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """``(cost_reward, cost, penalty, collided)`` per robot.
+
+        ``cost`` is the weighted covariance trace, ``penalty`` the sum of the
+        boundary, obstacle and mutual-collision penalties and ``cost_reward``
+        the original reward ``-cost - penalty`` (accumulated in the original
+        order).
+        """
         cfg = self.config
         nR = self.nR
         robot_traces, target_traces = self._cov_traces()
-        reward = -cfg.target_cov_weight * target_traces - cfg.robot_cov_weight * robot_traces
+        target_cost = cfg.target_cov_weight * target_traces
+        robot_cost = cfg.robot_cov_weight * robot_traces
+        cost = target_cost + robot_cost
+        reward = -target_cost - robot_cost
+        penalty = np.zeros(nR)
         collided = np.zeros(nR, dtype=bool)
         poses = np.array([est.state for est in self.robot_est])
         lo, hi = self.MAP.mapmin + 0.1, self.MAP.mapmax - 0.1
@@ -620,11 +666,13 @@ class AJLATTEnv(gym.Env):
         for i in range(nR):
             if outside[i]:
                 reward[i] -= cfg.boundary_penalty
+                penalty[i] += cfg.boundary_penalty
                 self._episode_collisions[i] += 1
                 continue
             nearest = closest[i]
             if nearest is not None and nearest[0] < cfg.obstacle_collision_distance:
                 reward[i] -= cfg.obstacle_penalty
+                penalty[i] += cfg.obstacle_penalty
                 self._episode_collisions[i] += 1
                 collided[i] = True
 
@@ -632,8 +680,9 @@ class AJLATTEnv(gym.Env):
         np.fill_diagonal(distance, np.inf)
         close = np.any(distance < cfg.mutual_collision_distance, axis=1)
         reward[close] -= cfg.mutual_collision_penalty
+        penalty[close] += cfg.mutual_collision_penalty
         self._episode_collisions[close] += 1
-        return reward, collided
+        return reward, cost, penalty, collided
 
 
 def make(*args: Any, **kwargs: Any) -> AJLATTEnv:

@@ -767,6 +767,12 @@ def test_parameter_counting():
     assert nt.NetworkUtils.count_parameters(model) == 16 + 18
     nt.NetworkUtils.unfreeze_layers(model, ["0."])
     assert nt.NetworkUtils.count_parameters(model) == 74
+    nt.NetworkUtils.freeze_layers(model, "0.")  # one name, not its characters
+    assert nt.NetworkUtils.count_parameters(model) == 16 + 18
+    nt.NetworkUtils.unfreeze_layers(model, "0.")
+    with pytest.raises(ValueError, match="encoder"):
+        nt.NetworkUtils.freeze_layers(model, ["0.", "encoder"])
+    assert nt.NetworkUtils.count_parameters(model) == 74  # unchanged after the error
 
 
 def test_weight_decay_groups_and_optimizers():
@@ -788,6 +794,10 @@ def test_weight_decay_groups_and_optimizers():
     assert isinstance(sched, torch.optim.lr_scheduler.CosineAnnealingLR)
     with pytest.raises(ValueError, match="valid options"):
         nt.NetworkUtils.create_scheduler(opt, "warmup")
+    with pytest.raises(TypeError, match="requires step_size"):
+        nt.NetworkUtils.create_scheduler(opt)  # the default "step" needs step_size
+    step = nt.NetworkUtils.create_scheduler(opt, step_size=5)
+    assert isinstance(step, torch.optim.lr_scheduler.StepLR)
 
 
 def test_grad_norm_helpers():

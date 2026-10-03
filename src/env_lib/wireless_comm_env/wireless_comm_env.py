@@ -37,11 +37,11 @@ from typing import Any
 import numpy as np
 from gymnasium import Env
 from gymnasium.spaces import Box, MultiDiscrete
-from gymnasium.utils import EzPickle, seeding
+from gymnasium.utils import seeding
 from numpy.lib.stride_tricks import sliding_window_view
 
 from env_lib.errors import ResetNeededError
-from env_lib.utils.rendering import validate_render_mode
+from env_lib.utils.render_modes import state_without_renderer, validate_render_mode
 
 __all__ = [
     "OUTCOME_COLLISION",
@@ -81,7 +81,7 @@ def _check_probability(name: str, value: Any) -> float:
     return float(value)
 
 
-class WirelessCommEnv(Env, EzPickle):
+class WirelessCommEnv(Env):
     """Cooperative random access to shared wireless access points.
 
     Parameters
@@ -146,6 +146,10 @@ class WirelessCommEnv(Env, EzPickle):
         "render_fps": 10,
     }
 
+    def __getstate__(self) -> dict[str, Any]:
+        # Pickle and deep-copy without the renderer (rebuilt on the next render()).
+        return state_without_renderer(self)
+
     def __init__(
         self,
         grid_x: int = 6,
@@ -157,17 +161,6 @@ class WirelessCommEnv(Env, EzPickle):
         max_iter: int = 50,
         render_mode: str | None = None,
     ):
-        EzPickle.__init__(
-            self,
-            grid_x=grid_x,
-            grid_y=grid_y,
-            ddl=ddl,
-            packet_arrival_probability=packet_arrival_probability,
-            success_transmission_probability=success_transmission_probability,
-            n_obs_neighbors=n_obs_neighbors,
-            max_iter=max_iter,
-            render_mode=render_mode,
-        )
         self.grid_x = _check_int("grid_x", grid_x, 2)
         self.grid_y = _check_int("grid_y", grid_y, 2)
         self.ddl = _check_int("ddl", ddl, 1)

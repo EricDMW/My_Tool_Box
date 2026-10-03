@@ -14,10 +14,13 @@ observations, learn from a vector environment, save and load, and evaluate with
 from __future__ import annotations
 
 import abc
+import contextlib
 import csv
 import dataclasses
+import pickle
 import time
-from collections.abc import Callable
+import warnings
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -31,9 +34,62 @@ from marl_algorithms.core.networks import agent_one_hot
 from marl_algorithms.core.runner import Transition, VectorRunner
 from marl_algorithms.core.spec import MultiAgentSpec
 
-__all__ = ["Algorithm", "OffPolicyAlgorithm", "OnPolicyAlgorithm", "TrainingLog"]
+__all__ = ["Algorithm", "OffPolicyAlgorithm", "OnPolicyAlgorithm", "TrainingLog", "torch_threads"]
 
 Callback = Callable[["Algorithm", "TrainingLog"], Any]
+
+_CHECKPOINT_KEYS = ("algorithm", "spec", "config", "state")
+
+
+@contextlib.contextmanager
+def torch_threads(threads: int | None) -> Iterator[None]:
+    """Run a block with ``threads`` PyTorch threads and restore the setting afterwards.
+
+    The networks of these methods are small, and PyTorch's default of one
+    thread per core makes them train many times slower on a CPU; ``train``,
+    ``train_preset`` and ``compare`` therefore use one thread by default.
+    ``None`` leaves the current setting unchanged.
+
+    Examples
+    --------
+    >>> with torch_threads(1):
+    ...     log = algo.learn(envs, 50_000)
+    """
+    if threads is None:
+        yield
+        return
+    if isinstance(threads, bool) or int(threads) != threads or threads < 1:
+        raise ValueError(f"threads must be a positive integer or None, got {threads!r}")
+    previous = torch.get_num_threads()
+    torch.set_num_threads(int(threads))
+    try:
+        yield
+    finally:
+        torch.set_num_threads(previous)
+
+
+def _check_device(device: str | torch.device) -> torch.device:
+    """``torch.device(device)``, with a clear error for an unavailable accelerator."""
+    device = torch.device(device)
+    if device.type == "cuda" and not torch.cuda.is_available():
+        raise ValueError(
+            f"device {str(device)!r} was requested, but PyTorch finds no usable CUDA device "
+            "(torch.cuda.is_available() is False); use device='cpu'"
+        )
+    if device.type == "mps":
+        mps = getattr(torch.backends, "mps", None)
+        if mps is None or not mps.is_available():
+            raise ValueError(
+                "device 'mps' was requested, but torch.backends.mps.is_available() is False; "
+                "use device='cpu'"
+            )
+    return device
+
+
+def _check_total_steps(total_steps: Any) -> int:
+    if isinstance(total_steps, bool) or int(total_steps) != total_steps or total_steps < 1:
+        raise ValueError(f"total_steps must be a positive integer, got {total_steps!r}")
+    return int(total_steps)
 
 
 class TrainingLog:
@@ -183,7 +239,10 @@ class Algorithm(abc.ABC):
             config = dataclasses.replace(config, **overrides)
         self.spec = spec
         self.config = config
-        self.device = torch.device(device)
+        self.device = _check_device(device)
+        #: Free-form information saved with the checkpoint; ``train`` records
+        #: the environment id and arguments under ``"env_id"`` and ``"env_kwargs"``.
+        self.metadata: dict[str, Any] = {}
         self.seed = seed
         seed_sequence = np.random.SeedSequence(seed)
         self.np_rng = np.random.default_rng(seed_sequence)
@@ -302,10 +361,44 @@ class Algorithm(abc.ABC):
     def evaluate(
         self, env: Any, n_episodes: int = 10, *, seed: int | None = None, deterministic: bool = True
     ):
-        """Evaluate with ``env_lib.evaluate`` (single or vector environment)."""
+        """Evaluate with ``env_lib.evaluate`` (single or vector environment).
+
+        Raises ``ValueError`` when the environment's agents, observations or
+        actions differ from those the algorithm was built for, and warns when
+        only the action bounds differ (actions are clipped to the algorithm's).
+        """
         from env_lib.utils.evaluation import evaluate
 
+        self.check_env(env)
         return evaluate(env, self.policy(deterministic), n_episodes=n_episodes, seed=seed)
+
+    def check_env(self, env: Any) -> None:
+        """Check that ``env`` has the agent structure this algorithm was built for.
+
+        Raises
+        ------
+        ValueError
+            If the number of agents, the observation size or the kind and size
+            of the actions differ. Different action bounds only warn: the
+            policy clips its actions to the bounds it was trained with.
+        """
+        other = MultiAgentSpec.from_env(env)
+        fields = ("n_agents", "obs_dim", "action_kind", "action_dim", "n_actions")
+        if any(getattr(self.spec, f) != getattr(other, f) for f in fields):
+            raise ValueError(
+                f"{self.name} was built for {self.spec.describe()}; this environment has "
+                f"{other.describe()}"
+            )
+        if self.spec.continuous and not (
+            np.allclose(self.spec.action_low, other.action_low)
+            and np.allclose(self.spec.action_high, other.action_high)
+        ):
+            warnings.warn(
+                f"the action bounds of this environment differ from those {self.name} was "
+                "trained with; its actions are clipped to the trained bounds",
+                UserWarning,
+                stacklevel=3,
+            )
 
     def state_dict(self) -> dict[str, Any]:
         """Networks, optimisers, counters and extra state."""
@@ -336,6 +429,7 @@ class Algorithm(abc.ABC):
                 "config": self.config.to_dict(),
                 "seed": self.seed,
                 "state": self.state_dict(),
+                "metadata": dict(self.metadata),
             },
             path,
         )
@@ -343,8 +437,28 @@ class Algorithm(abc.ABC):
 
     @classmethod
     def load(cls, path: str | Path, device: str | torch.device = "cpu") -> Algorithm:
-        """Load an algorithm saved with :meth:`save`."""
-        payload = torch.load(Path(path), map_location=device, weights_only=False)
+        """Load an algorithm saved with :meth:`save`.
+
+        Raises
+        ------
+        FileNotFoundError
+            If ``path`` does not exist.
+        ValueError
+            If the file is not a checkpoint written by :meth:`save`, or the
+            device is unavailable.
+        """
+        device = _check_device(device)
+        path = Path(path)
+        if not path.is_file():
+            raise FileNotFoundError(f"no checkpoint at {str(path)!r}")
+        try:
+            payload = torch.load(path, map_location=device, weights_only=False)
+        except (pickle.UnpicklingError, EOFError, RuntimeError, AttributeError, ValueError) as exc:
+            raise ValueError(f"{str(path)!r} is not a marl_algorithms checkpoint ({exc})") from exc
+        if not isinstance(payload, dict) or any(key not in payload for key in _CHECKPOINT_KEYS):
+            raise ValueError(
+                f"{str(path)!r} is not a marl_algorithms checkpoint (written by Algorithm.save)"
+            )
         spec_fields = dict(payload["spec"])
         for key in ("obs_shape", "action_shape"):
             spec_fields[key] = tuple(spec_fields[key])
@@ -357,6 +471,7 @@ class Algorithm(abc.ABC):
         config = algorithm_cls.config_class(**payload["config"])
         algorithm = algorithm_cls(spec, config, device=device, seed=payload.get("seed"))
         algorithm.load_state_dict(payload["state"])
+        algorithm.metadata = dict(payload.get("metadata", {}))
         return algorithm
 
     def __repr__(self) -> str:
@@ -418,6 +533,7 @@ class OnPolicyAlgorithm(Algorithm):
             Called as ``callback(algorithm, log)`` after every update; a return
             value of ``False`` stops training.
         """
+        total_steps = _check_total_steps(total_steps)
         runner = VectorRunner(envs, self.spec)
         log = log if log is not None else TrainingLog(self.name, _env_id(envs))
         obs = runner.reset(seed=seed)
@@ -496,6 +612,15 @@ class OffPolicyAlgorithm(Algorithm):
         called after every round of gradient steps.
         """
         cfg: OffPolicyConfig = self.config  # type: ignore[assignment]
+        total_steps = _check_total_steps(total_steps)
+        if total_steps <= cfg.warmup_steps and self.env_steps < total_steps:
+            warnings.warn(
+                f"{self.name}: total_steps={total_steps} does not exceed warmup_steps="
+                f"{cfg.warmup_steps}, so no gradient update will be made; increase "
+                "total_steps or lower warmup_steps",
+                UserWarning,
+                stacklevel=2,
+            )
         runner = VectorRunner(envs, self.spec)
         log = log if log is not None else TrainingLog(self.name, _env_id(envs))
         if not hasattr(self, "replay"):

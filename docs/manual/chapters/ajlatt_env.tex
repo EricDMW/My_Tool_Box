@@ -186,12 +186,18 @@ Table~\ref{tab:ajlatt-obs}.
 \section{Reward and episode end}\label{sec:ajlatt-reward}
 
 \code{step()} returns the per-robot rewards as an array of shape
-\code{(num\_robots,)}:
+\code{(num\_robots,)}. They are built from the tracking cost $c_i$ and the
+penalty $p_i$ of robot $i$ in the step,
 \begin{equation}
-  r_i = -w_T \operatorname{tr} P^T_{i,0} - w_R \operatorname{tr} P_i
-        - \beta_B\, \mathbf{1}_{\mathrm{border}}(i)
-        - \beta_O\, \mathbf{1}_{\mathrm{obstacle}}(i)
-        - \beta_M\, \mathbf{1}_{\mathrm{mutual}}(i),
+  c_i = w_T \operatorname{tr} P^T_{i,0} + w_R \operatorname{tr} P_i, \qquad
+  p_i = \beta_B\, \mathbf{1}_{\mathrm{border}}(i)
+        + \beta_O\, \mathbf{1}_{\mathrm{obstacle}}(i)
+        + \beta_M\, \mathbf{1}_{\mathrm{mutual}}(i),
+  \label{eq:ajlatt-cost}
+\end{equation}
+and, in the default \code{reward\_mode="cost"} (the original reward),
+\begin{equation}
+  r_i = -c_i - p_i,
   \label{eq:ajlatt-reward}
 \end{equation}
 with $w_T$ = \code{target\_cov\_weight} (10), $w_R$ = \code{robot\_cov\_weight}
@@ -208,7 +214,58 @@ with $w_T$ = \code{target\_cov\_weight} (10), $w_R$ = \code{robot\_cov\_weight}
         robot's estimated position is closer than
         \code{mutual\_collision\_distance} (0.4\,m).
 \end{itemize}
-The team reward is $\sum_i r_i$ (\code{info["team\_reward"]}).
+The team reward is $\sum_i r_i$ (\code{info["team\_reward"]}), and
+\code{info["tracking\_cost"]} holds $c_i$ for evaluations that do not depend
+on the reward settings.
+
+\paragraph{Reward settings.} Four configuration fields change the reward
+(Table~\ref{tab:ajlatt-reward-settings}); they are applied in the order of the
+table.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Reward settings of AJLATT (defaults first; the defaults give the
+    original reward \eqref{eq:ajlatt-reward}).}
+  \label{tab:ajlatt-reward-settings}
+  \begin{tabularx}{\textwidth}{@{}p{4.2cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Setting & Effect \\
+    \midrule
+    \code{reward\_mode="cost"} & $r_i = -c_i - p_i$: every reward is negative. \\
+    \code{reward\_mode="bounded"} & $r_i = e^{-c_i/\sigma} - p_i/\sigma$ with
+      $\sigma$ = \code{cost\_scale} (20): at most 1, positive while the robot
+      tracks well, so a collision that ends the episode forfeits the rewards of
+      the remaining steps. \\
+    \code{terminate\_on\_collision} (\code{True}) & An obstacle collision ends
+      the robot's episode (\code{terminated[i]}); with \code{False} the
+      collision is only penalised and the episode continues. \\
+    \code{collision\_}\allowbreak\code{termination\_penalty} (0) & Subtracted from $r_i$ on the
+      step a collision ends robot $i$'s episode. \\
+    \code{team\_reward\_weight} $w$ (0) & $r_i \leftarrow (1-w)\, r_i + w\,
+      \frac{1}{n_R}\sum_j r_j$: 0 keeps individual rewards, 1 gives every robot
+      the team mean; the team sum is unchanged. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\paragraph{Choosing the settings.} With the defaults every reward is negative
+and the first collision ends the episode (in the team view of
+\code{TeamRewardWrapper} and \code{env\_lib.make\_vec}), so a team can raise its
+return by colliding early: on 64 seeded episodes random actions reach $-627$
+in 16 steps, the classical controller $-7{,}090$ in 115. The registered id
+keeps this reward for compatibility, and \code{env-lib describe} prints a
+caution. For learning, use \code{reward\_mode="bounded"} (random 39.9,
+controller 223.6) or \code{terminate\_on\_collision=False} (random
+$-34{,}273$, controller $-7{,}415$), or a
+\code{collision\_termination\_penalty} larger than the cost of an episode.
+
+\begin{pycode}
+import env_lib
+
+# collisions penalised, the episode continues
+env = env_lib.make("AJLATT-v0", terminate_on_collision=False)
+env = env_lib.make("AJLATT-v0", reward_mode="bounded", team_reward_weight=0.5)
+\end{pycode}
 
 \paragraph{Episode end.} \code{terminated} is a boolean array of shape
 \code{(num\_robots,)} holding the obstacle collision flags (all \code{False}
@@ -308,7 +365,11 @@ fields are listed in Table~\ref{tab:ajlatt-params}.
   \code{obstacle\_collision\_distance} & \code{0.2} & Obstacle collision distance (m). \\
   \code{mutual\_collision\_penalty} & \code{0.5} & Penalty $\beta_M$ for robots closer than \code{mutual\_collision\_distance}. \\
   \code{mutual\_collision\_distance} & \code{0.4} & Robot-robot distance threshold (m). \\
-  \code{terminate\_on\_collision} & \code{True} & Report obstacle collisions in \code{terminated}. \\
+  \code{terminate\_on\_collision} & \code{True} & End a robot's episode (\code{terminated}) at an obstacle collision; \code{False} only penalises it. \\
+  \code{reward\_mode} & \code{"cost"} & \code{"cost"} or \code{"bounded"} (Table~\ref{tab:ajlatt-reward-settings}). \\
+  \code{cost\_scale} & \code{20.0} & Scale $\sigma$ of the \code{"bounded"} reward. \\
+  \code{collision\_}\allowbreak\code{termination\_}\allowbreak\code{penalty} & \code{0.0} & Extra penalty when a collision ends a robot's episode. \\
+  \code{team\_reward\_weight} & \code{0.0} & Weight $w \in [0, 1]$ of the team mean in each robot's reward. \\
   \code{obstacle\_sensing\_margin} & \code{1.0} & Robots closer than this to the map border report a zero obstacle reading (original behaviour). \\
   \multicolumn{3}{@{}l}{\textit{Miscellaneous}} \\
   \code{seed} & \code{None} & Seed of the first \code{reset()} when none is passed. \\
@@ -408,6 +469,7 @@ every \code{reset()}.
     \code{communication} & boolean matrix $(n_R, n_R)$: communication links, including self-loops \\
     \code{robot\_cov\_trace} & array $(n_R,)$: $\operatorname{tr} P_i$ \\
     \code{target\_cov\_trace} & array $(n_R,)$: $\operatorname{tr} P^T_{i,0}$ \\
+    \code{tracking\_cost} & array $(n_R,)$: tracking cost $c_i$ of \eqref{eq:ajlatt-cost} (\code{step()} only) \\
     \code{step} & number of steps taken \\
     \code{numerical\_error} & \code{True} if an estimator diverged (\code{step()} only) \\
     \bottomrule

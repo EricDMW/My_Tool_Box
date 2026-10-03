@@ -454,12 +454,15 @@ public. Table~\ref{tab:workflow-baselines} lists the controllers.
 Table~\ref{tab:workflow-baseline-results} compares the baselines with uniformly
 random actions. Two environments need care when reading returns. The Kuramoto
 environments with an order-parameter reward terminate on synchronisation while
-paying a positive reward per step, so a faster controller collects \emph{less}
-return; their task metric is the time to synchronise, and with termination
-disabled (\code{sync\_threshold=1.5}) the baseline also has the higher return.
-AJLATT pays a negative reward per step and terminates on collisions, so random
-robots that collide early collect a \emph{higher} return; with
-\code{terminate\_on\_collision=False} the comparison is fair.
+paying a positive reward per step in their default \code{reward\_mode="dense"},
+so a faster controller collects \emph{less} return; their task metric is the
+time to synchronise. With \code{reward\_mode="penalty"}, which pays the signal
+minus its maximum, or with termination disabled, the baseline has the higher
+return (Section~\ref{sec:kuramoto-reward}). AJLATT pays a negative reward per
+step and terminates on collisions, so random robots that collide early collect
+a \emph{higher} return; with \code{reward\_mode="bounded"} or
+\code{terminate\_on\_collision=False} the comparison is fair
+(Section~\ref{sec:ajlatt-reward}).
 
 \begin{table}[htbp]
   \centering\small
@@ -476,8 +479,10 @@ robots that collide early collect a \emph{higher} return; with
     \envid{Consensus-v0}   & $-16923 \pm 3372$ & 200 & $-1456 \pm 421$ & 85 \\
     \envid{Formation-v0}   & $-17673 \pm 3470$ & 200 & $-1676 \pm 503$ & 96 \\
     \envid{KuramotoOscillator-v0} & $24.4 \pm 1.1$ & 22 & $17.7 \pm 0.8$ & 12 \\
+    \quad \code{reward\_mode="penalty"} & $2.3 \pm 2.4$ & 22 & $6.2 \pm 1.2$ & 12 \\
     \quad \code{sync\_threshold=1.5, max\_steps=200} & $191.7 \pm 3.0$ & 200 & $196.2 \pm 1.2$ & 200 \\
     \envid{KuramotoOscillator-Constant-v0} & $65.7 \pm 9.5$ & 92 & $47.8 \pm 3.8$ & 58 \\
+    \quad \code{reward\_mode="penalty"} & $-26.6 \pm 17.2$ & 92 & $-10.6 \pm 7.1$ & 58 \\
     \quad \code{sync\_threshold=1.5, max\_steps=200} & $165.1 \pm 14.4$ & 200 & $179.4 \pm 7.1$ & 200 \\
     \envid{KuramotoOscillator-FreqSync-Constant-v0} & $-149.1 \pm 25.7$ & 92 & $-124.7 \pm 14.2$ & 61 \\
     \envid{LineMsg-v0}      & $39.8 \pm 3.3$ & 50 & $95.0 \pm 0.0$ & 50 \\
@@ -486,6 +491,7 @@ robots that collide early collect a \emph{higher} return; with
     \envid{Pistonball-v0}   & $-323 \pm 88$ & 125 & $919 \pm 34$ & 83 \\
     \envid{AJLATT-v0}       & $-414 \pm 317$ & 13 & $-7025 \pm 281$ & 120 \\
     \quad \code{terminate\_on\_collision=False} & $-35347 \pm 9948$ & 120 & $-7025 \pm 281$ & 120 \\
+    \quad \code{reward\_mode="bounded"} & $33.5 \pm 19.8$ & 13 & $235.8 \pm 4.4$ & 120 \\
     \envid{PowerGrid-v0}    & $-750.5 \pm 469.3$ & 195 & $-0.7 \pm 0.3$ & 200 \\
     \envid{Platoon-v0}      & $-4957 \pm 1673$ & 69 & $-58.1 \pm 7.5$ & 600 \\
     \bottomrule

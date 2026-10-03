@@ -26,7 +26,9 @@ __author__ = "Dongming Wang"
 
 _SUBPACKAGES = ("neural_toolkit", "parakit", "plotkit")
 
-__all__: list[str] = ["__version__", *_SUBPACKAGES]
+# neural_toolkit needs torch; it is left out of ``__all__`` so that
+# ``from toolkit import *`` works on a base installation.
+__all__: list[str] = ["__version__", "parakit", "plotkit"]
 
 
 def __getattr__(name: str) -> Any:
@@ -36,4 +38,4 @@ def __getattr__(name: str) -> Any:
 
 
 def __dir__() -> list[str]:
-    return sorted(set(globals()) | set(__all__))
+    return sorted(set(globals()) | set(__all__) | set(_SUBPACKAGES))

@@ -4,6 +4,111 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 uses [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] - 2026-09-27
+
+Maintenance release from a pre-submission review of installation and use. No
+public name was removed and results are unchanged.
+
+### Installation and packaging
+
+- Requires `gymnasium>=1.1`: Gymnasium 1.0 lacks the same-step autoreset mode
+  the training loops use and rejects `make_vec(..., vectorization_mode="async")`
+  arguments. The 1.0 fallbacks were removed.
+- Video export requires `imageio-ffmpeg>=0.5.1` (0.4 fails with setuptools 82)
+  and checks that it is installed; `env-lib run --gif out.mp4` reports a
+  missing `video` extra or an unsupported format before the rollout, without
+  a traceback.
+- `pillow` and `cycler`, imported directly, are declared dependencies.
+- `from env_lib import *`, `from env_lib.kos_env import *` and
+  `from toolkit import *` work on a base installation: names that need an
+  extra (`KuramotoOscillatorEnvTorch`, `PistonballEnv`, `pistonball_env`,
+  `neural_toolkit`) remain attributes but left `__all__`.
+- `KuramotoOscillatorTorch-*` ids name the `torch` extra when PyTorch is
+  missing.
+- Creating an environment no longer imports matplotlib (about 0.5 s); the
+  render-mode helpers moved to `env_lib.utils.render_modes` and
+  `env_lib.utils` imports its members on first use.
+- SPDX license metadata (`license = "MIT"`, `setuptools>=77`), Python 3.13
+  classifier, `MANIFEST.in` (the sdist ships the changelog and the full test
+  suite), `ruff>=0.13` for development.
+- Continuous integration tests Python 3.13 and builds, checks and installs the
+  wheel.
+
+### env_lib
+
+- Environments can be pickled and deep-copied after rendering (the renderer
+  is rebuilt on the next `render()`); LineMsg, WirelessComm and Pistonball no
+  longer use `EzPickle`, which recreated them from their constructor
+  arguments and lost the simulation state.
+- Closing an environment whose constructor failed no longer prints
+  `Exception ignored in __del__` messages.
+- `make` and `make_vec` report an unknown keyword argument with the id and a
+  pointer to `env-lib describe`; `make_vec` rejects a non-positive `num_envs`.
+- Native vector environments accept a list of `num_envs` seeds in `reset`.
+- `to_parallel` uses the team reward for every agent when `agent_rewards` does
+  not hold one value per agent (Kuramoto with several systems).
+- `env-lib run`, `evaluate` and `bench` turn invalid environment arguments
+  into an `env-lib: error:` message with exit status 2.
+- Reward modes. The defaults keep the original rewards of every registered id.
+  - Kuramoto (NumPy, native vector and PyTorch backends, identical results):
+    `reward_mode` selects how the signal of `reward_type` is paid: `"dense"`
+    (default, every step), `"penalty"` (signal minus its maximum, so
+    synchronising sooner earns more), `"progress"` (change of the signal),
+    `"terminal"` (final signal only) or `"sparse"` (synchronisation bonus
+    only); `terminate_on_sync=False` holds synchronisation to the step limit
+    (the bonus is paid on every synchronised step); `control_cost` penalises
+    the control effort. `info["synchronized"]` reports synchronisation.
+  - AJLATT: `reward_mode="bounded"` pays `exp(-cost / cost_scale)` (positive
+    while tracking well) instead of the negative cost of `"cost"`;
+    `terminate_on_collision=False` penalises collisions without ending the
+    episode; `collision_termination_penalty` adds a penalty when a collision
+    ends it; `team_reward_weight` mixes individual and team rewards.
+    `info["tracking_cost"]` reports the weighted covariance traces.
+- `env-lib describe` prints a caution for the default reward design of the
+  Kuramoto order-parameter ids and AJLATT, where a learner can raise its
+  return by ending episodes early, and names the settings that avoid it.
+  `benchmarks/benchmark_baselines.py` also runs `reward_mode="penalty"`
+  (Kuramoto) and `reward_mode="bounded"` (AJLATT): the classical controllers
+  lead random actions under both.
+
+### marl_algorithms
+
+- `train`, `train_preset` and `compare` take `threads=1` and restore the
+  previous PyTorch thread count afterwards; `torch_threads(n)` is the same as
+  a context manager. Version 1.2 left the setting to the caller, which made
+  training from Python several times slower than from `marl-train`.
+- `Algorithm.check_env(env)`, called by `evaluate`, reports a mismatch in the
+  number of agents, observation size or action space.
+- Checkpoints store `algo.metadata` (environment id and keyword arguments of
+  `train`); `marl-train evaluate` notes a different environment.
+  `Algorithm.load` raises `FileNotFoundError` or a `ValueError` naming the
+  file for anything that is not a checkpoint of this package.
+- Unavailable `cuda`/`mps` devices and non-positive `total_steps` raise
+  `ValueError` up front; an off-policy budget that ends before
+  `warmup_steps` warns that no gradient step will be taken.
+- `compare(algorithms=None)` on an environment without presets raises a
+  `ValueError` instead of returning only the references.
+- `marl-train` checks that output paths are writable before training.
+
+### toolkit
+
+- `parakit.save_parameters` and `load_parameters` read and write YAML for
+  `.yaml`/`.yml` paths; `save_parameters` rejects a non-mapping with a
+  `TypeError`, and `apply_parameters` accepts key-value pairs.
+- `NetworkUtils.create_scheduler` names missing required arguments (for
+  example `step_size` for the default `"step"`); `freeze_layers` and
+  `unfreeze_layers` accept a single name and raise `ValueError` for a name
+  that matches no parameter (a string used to be split into characters).
+- `plotkit-gallery --help` shows its own name.
+
+### Documentation
+
+- `docs/paper/`: a paper in the ICML two-column format that introduces the
+  environments, their use and the integrated baselines.
+- `benchmarks/benchmark_baselines.py` measures random actions and the
+  classical controller on every id; the README, handbook and slides use its
+  numbers.
+
 ## [1.2.0] - 2026-09-27
 
 Release 1.2 replaces the former `classsical_algorithm_project` folder, which

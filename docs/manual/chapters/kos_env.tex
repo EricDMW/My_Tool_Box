@@ -169,20 +169,77 @@ an action of size 55 and an observation of size 75.
 % ---------------------------------------------------------------------------
 \section{Reward and episode end}\label{sec:kuramoto-reward}
 
-The reward is computed after the step from the new phases. The reward type is
-selected with \code{reward\_type}:
+The reward is computed after the step from the new phases. It has three
+ingredients: a \emph{signal} $S$ that measures synchronisation, a
+synchronisation bonus, and a \emph{reward mode} that decides how the two are
+paid over the episode.
+
+\paragraph{Signal.} The signal is selected with \code{reward\_type}:
 \begin{align*}
-  \text{\code{"order\_parameter"}:}\quad & R = r, \\
-  \text{\code{"phase\_coherence"}:}\quad & R = C, \\
-  \text{\code{"combined"}:}\quad & R = r + C, \\
-  \text{\code{"frequency\_synchronization"}:}\quad & R = -E_f,
+  \text{\code{"order\_parameter"}:}\quad & S = r \in [0, 1], \\
+  \text{\code{"phase\_coherence"}:}\quad & S = C \in (0, 1], \\
+  \text{\code{"combined"}:}\quad & S = r + C \in (0, 2], \\
+  \text{\code{"frequency\_synchronization"}:}\quad & S = -E_f \le 0,
 \end{align*}
 with $r$, $C$ and $E_f$ from \eqref{eq:order-parameter}--\eqref{eq:freq-error}.
-When $r$ exceeds \code{sync\_threshold} (default 0.99) the episode terminates
-(\code{terminated=True}) and, for all reward types except
-\code{"frequency\_synchronization"}, \code{sync\_bonus} (default 10) is added
-to the reward. A threshold above 1 disables termination on synchronisation.
+$S_{\max}$ denotes the largest value of the signal (1, 1, 2 and 0).
+
+\paragraph{Synchronisation and episode end.} The state is \emph{synchronised}
+when $r$ exceeds \code{sync\_threshold} (default 0.99; a threshold above 1
+disables it), reported as \code{info["synchronized"]}. A synchronised step
+earns the bonus $b =$ \code{sync\_bonus} (default 10) for every reward type
+except \code{"frequency\_synchronization"}, and with
+\code{terminate\_on\_sync=True} (default) it ends the episode
+(\code{terminated=True}). With \code{terminate\_on\_sync=False} the episode
+always runs to \code{max\_steps}, and the bonus is paid on every synchronised
+step, which turns the task into holding synchronisation.
 \code{truncated} becomes \code{True} after \code{max\_steps} steps.
+
+\paragraph{Reward modes.} \code{reward\_mode} decides how the signal and the
+bonus $b_t$ of step $t$ (zero when the step is not synchronised) are paid
+(Table~\ref{tab:kuramoto-reward-modes}). \code{control\_cost} $\ge 0$
+subtracts $c \cdot \frac{1}{N}\sum_i a_i^2$ from every reward in every mode.
+
+\begin{table}[htbp]
+  \centering\small
+  \caption{Reward modes of the Kuramoto environments ($S_t$ is the signal
+    after step $t$, $S_0$ that of the initial state).}
+  \label{tab:kuramoto-reward-modes}
+  \begin{tabularx}{\textwidth}{@{}lp{3.6cm}>{\raggedright\arraybackslash}X@{}}
+    \toprule
+    Mode & Reward of step $t$ & Use \\
+    \midrule
+    \code{"dense"} (default) & $S_t + b_t$ & The original reward of every registered id. \\
+    \code{"penalty"} & $S_t - S_{\max} + b_t$ & Never positive before the bonus: every step before synchronisation costs, so synchronising sooner earns more. Recommended for training. \\
+    \code{"progress"} & $S_t - S_{t-1} + b_t$ & Potential-based shaping: the undiscounted return is $S_T - S_0$ plus the bonuses, so it rewards reaching synchronisation, and speed only through discounting. \\
+    \code{"terminal"} & $S_T + b_T$ on the last step $T$ of the episode, $0$ before & A terminal reward only: the quality of the final state. \\
+    \code{"sparse"} & $b_t$ & Success only (not with \code{"frequency\_synchronization"}). \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\paragraph{Choosing a mode.} With the default \code{"dense"} mode and
+\code{terminate\_on\_sync=True}, the signal is paid at every step and
+synchronisation ends the episode, so a policy that keeps $r$ just below the
+threshold for the whole episode (up to 1000 steps of about 0.98) earns far
+more than one that synchronises (a few steps and the bonus of 10). The
+registered ids keep this reward for compatibility, and \code{env-lib describe}
+prints a caution. For learning, use \code{"penalty"}, \code{"progress"} or
+\code{"terminal"}, or \code{terminate\_on\_sync=False}. On
+\envid{KuramotoOscillator-v0} (64 seeded episodes), random actions earn more
+than the classical controller in \code{"dense"} mode (24.0 against 17.2),
+because they synchronise in 21 steps instead of 10, and less in
+\code{"penalty"} mode (3.2 against 6.9).
+
+\begin{pycode}
+import env_lib
+
+env_id = "KuramotoOscillator-v0"
+env = env_lib.make(env_id, reward_mode="penalty")
+env = env_lib.make(env_id, reward_mode="terminal")        # final reward only
+env = env_lib.make(env_id, terminate_on_sync=False,       # hold synchronisation
+                   sync_bonus=0.0, control_cost=0.1)
+\end{pycode}
 
 % ---------------------------------------------------------------------------
 \section{Parameters}\label{sec:kuramoto-params}
@@ -223,8 +280,11 @@ have defaults. Invalid values raise \code{ValueError} or \code{TypeError}.
   \code{coupling\_strength} & \code{1.0} & Uniform strength of constant mode without an explicit matrix ($K = $ \code{coupling\_strength}$\,\cdot A$). \\
   \code{normalize\_coupling} & \code{False} & Divide the coupling sum by $N$. \\
   \code{topology\_seed} & \code{42} & Seed of the local generator that builds the \code{"random"} topology. \\
-  \code{sync\_threshold} & \code{0.99} & Order parameter above which the episode terminates. \\
-  \code{sync\_bonus} & \code{10.0} & Reward bonus on synchronisation. \\
+  \code{sync\_threshold} & \code{0.99} & Order parameter above which the state is synchronised. \\
+  \code{sync\_bonus} & \code{10.0} & Reward bonus of a synchronised step. \\
+  \code{reward\_mode} & \code{"dense"} & \code{"dense"}, \code{"penalty"}, \code{"progress"}, \code{"terminal"} or \code{"sparse"} (Table~\ref{tab:kuramoto-reward-modes}). \\
+  \code{terminate\_on\_sync} & \code{True} & End the episode when the state synchronises. \\
+  \code{control\_cost} & \code{0.0} & Weight of the control-effort penalty $\frac{1}{N}\sum_i a_i^2$. \\
   \code{render\_agent} & \code{0} & PyTorch only: index of the system shown by \code{render()}. \\
 \end{longtable}
 \endgroup
@@ -253,6 +313,7 @@ shape \code{(n\_agents, size)} with one row per system.
     \midrule
     \code{order\_parameter}* & order parameter $r$ after the step \\
     \code{phase\_coherence}* & phase coherence $C$ after the step \\
+    \code{synchronized}* & whether $r >$ \code{sync\_threshold} after the step (not in the reset info) \\
     \code{phases}* & wrapped phases, shape $(N,)$ \\
     \code{natural\_frequencies}* & natural frequencies $\omega_i$ \\
     \code{coupling\_matrix}* & coupling matrix $K$ used in the step, shape $(N, N)$ \\
@@ -283,11 +344,15 @@ a leading batch dimension.
         systems as a tensor of shape \code{(n\_agents, obs\_dim)} on
         \code{env.device}.
   \item \code{get\_batch\_rewards(dphases\_dt=None, include\_bonus=False)}
-        returns the per-system rewards of the current state as a tensor of shape
-        \code{(n\_agents,)}; the synchronisation bonus is only included with
-        \code{include\_bonus=True} (as in \code{info["agent\_rewards"]}).
+        returns the per-system signal $S$ of the current state as a tensor of
+        shape \code{(n\_agents,)}; \code{include\_bonus=True} adds the bonus,
+        which equals \code{info["agent\_rewards"]} in the \code{"dense"} mode
+        without control cost.
   \item Systems are not reset individually: a system that synchronises keeps
-        evolving (and keeps earning its bonus) until the whole batch is reset.
+        evolving until the whole batch is reset, and its rewards follow the
+        per-step rule of the reward mode (with \code{terminate\_on\_sync}, it
+        earns its bonus, and in \code{"terminal"} mode its final reward, on
+        every step it is synchronised).
 \end{itemize}
 
 Computations run in \code{float32}. For large batches or networks select a GPU

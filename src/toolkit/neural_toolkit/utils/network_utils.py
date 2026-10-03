@@ -13,6 +13,7 @@ Examples
 
 from __future__ import annotations
 
+import inspect
 import os
 import secrets
 from collections.abc import Iterable, Sequence
@@ -186,20 +187,39 @@ class NetworkUtils:
         return counts
 
     @staticmethod
-    def freeze_layers(model: nn.Module, layer_names: Iterable[str]) -> None:
-        """Disable gradients of parameters whose name contains any of ``layer_names``."""
-        names = list(layer_names)
-        for name, param in model.named_parameters():
-            if any(layer_name in name for layer_name in names):
-                param.requires_grad = False
+    def freeze_layers(model: nn.Module, layer_names: str | Iterable[str]) -> None:
+        """Disable gradients of parameters whose name contains any of ``layer_names``.
+
+        ``layer_names`` is one name or an iterable of names. Raises ``ValueError``
+        (and changes nothing) if a name matches no parameter of ``model``.
+        """
+        NetworkUtils._set_requires_grad(model, layer_names, False)
 
     @staticmethod
-    def unfreeze_layers(model: nn.Module, layer_names: Iterable[str]) -> None:
-        """Enable gradients of parameters whose name contains any of ``layer_names``."""
-        names = list(layer_names)
-        for name, param in model.named_parameters():
+    def unfreeze_layers(model: nn.Module, layer_names: str | Iterable[str]) -> None:
+        """Enable gradients of parameters whose name contains any of ``layer_names``.
+
+        ``layer_names`` is one name or an iterable of names. Raises ``ValueError``
+        (and changes nothing) if a name matches no parameter of ``model``.
+        """
+        NetworkUtils._set_requires_grad(model, layer_names, True)
+
+    @staticmethod
+    def _set_requires_grad(
+        model: nn.Module, layer_names: str | Iterable[str], requires_grad: bool
+    ) -> None:
+        names = [layer_names] if isinstance(layer_names, str) else list(layer_names)
+        parameters = list(model.named_parameters())
+        unmatched = [n for n in names if not any(n in name for name, _ in parameters)]
+        if unmatched:
+            available = sorted({name.rsplit(".", 1)[0] for name, _ in parameters})
+            raise ValueError(
+                f"no parameter name contains {', '.join(map(repr, unmatched))}; "
+                f"modules with parameters: {', '.join(available) or 'none'}"
+            )
+        for name, param in parameters:
             if any(layer_name in name for layer_name in names):
-                param.requires_grad = True
+                param.requires_grad = requires_grad
 
     @staticmethod
     def get_grad_norm(model: nn.Module, norm_type: float = 2.0) -> float:
@@ -449,8 +469,25 @@ class NetworkUtils:
         ------
         ValueError
             If ``scheduler_type`` is unknown.
+        TypeError
+            If a required argument of the scheduler (for example ``step_size``
+            for ``'step'``) is missing; the message names the missing arguments.
         """
         scheduler_class = _lookup("scheduler type", _SCHEDULERS, scheduler_type)
+        required = [
+            name
+            for name, parameter in list(inspect.signature(scheduler_class).parameters.items())[1:]
+            if parameter.default is inspect.Parameter.empty
+            and parameter.kind in (parameter.POSITIONAL_OR_KEYWORD, parameter.KEYWORD_ONLY)
+        ]
+        missing = [name for name in required if name not in kwargs]
+        if missing:
+            raise TypeError(
+                f"scheduler {scheduler_type!r} ({scheduler_class.__name__}) requires "
+                f"{', '.join(missing)}, for example "
+                f"create_scheduler(optimizer, {scheduler_type!r}, "
+                f"{', '.join(f'{name}=...' for name in missing)})"
+            )
         return scheduler_class(optimizer, **kwargs)
 
     # ------------------------------------------------------------ checkpoints

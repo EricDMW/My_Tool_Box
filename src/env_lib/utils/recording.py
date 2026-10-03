@@ -78,6 +78,7 @@ def save_animation(
     if suffix in {".mp4", ".webm", ".avi", ".mov", ".mkv"}:
         try:
             import imageio.v2 as imageio
+            import imageio_ffmpeg  # noqa: F401  (the MP4 backend of imageio)
         except ImportError as exc:  # pragma: no cover - optional dependency
             raise ImportError(
                 'Video export requires imageio and imageio-ffmpeg: pip install "my-tool-box[video]"'

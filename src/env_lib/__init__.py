@@ -66,6 +66,11 @@ _SUBPACKAGES = (
     "wrappers",
 )
 
+# Names that need an optional extra (torch, or pygame/pymunk). They stay
+# reachable as attributes but are left out of ``__all__``, so that
+# ``from env_lib import *`` works on a base installation.
+_NEEDS_EXTRA = frozenset({"KuramotoOscillatorEnvTorch", "PistonballEnv", "pistonball_env"})
+
 __all__: list[str] = [
     "ResetNeededError",
     "__version__",
@@ -74,8 +79,8 @@ __all__: list[str] = [
     "make",
     "make_vec",
     "register_envs",
-    *sorted(_LAZY_ATTRIBUTES),
-    *_SUBPACKAGES,
+    *(name for name in sorted(_LAZY_ATTRIBUTES) if name not in _NEEDS_EXTRA),
+    *(name for name in _SUBPACKAGES if name not in _NEEDS_EXTRA),
 ]
 
 
@@ -91,4 +96,4 @@ def __getattr__(name: str) -> Any:
 
 
 def __dir__() -> list[str]:
-    return sorted(set(globals()) | set(__all__))
+    return sorted(set(globals()) | set(__all__) | _NEEDS_EXTRA)
